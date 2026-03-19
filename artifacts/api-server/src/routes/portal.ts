@@ -138,7 +138,8 @@ router.get("/portal/agreements/:id", requirePortalAuth, async (req, res) => {
 
 router.get("/portal/users", async (req, res) => {
   if (!req.isAuthenticated?.()) { res.status(401).json({ error: "Unauthorized" }); return; }
-  const users = await db
+  const retailerIdFilter = req.query.retailerId ? parseInt(req.query.retailerId as string) : null;
+  let query = db
     .select({
       id: portalUsersTable.id,
       name: portalUsersTable.name,
@@ -155,7 +156,11 @@ router.get("/portal/users", async (req, res) => {
     .from(portalUsersTable)
     .leftJoin(retailersTable, eq(portalUsersTable.retailerId, retailersTable.id))
     .leftJoin(branchesTable, eq(portalUsersTable.branchId, branchesTable.id))
-    .orderBy(desc(portalUsersTable.createdAt));
+    .$dynamic();
+  if (retailerIdFilter) {
+    query = query.where(eq(portalUsersTable.retailerId, retailerIdFilter));
+  }
+  const users = await query.orderBy(desc(portalUsersTable.createdAt));
   res.json(users);
 });
 
