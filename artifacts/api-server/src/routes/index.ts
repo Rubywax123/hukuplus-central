@@ -5,6 +5,7 @@ import retailersRouter from "./retailers";
 import agreementsRouter from "./agreements";
 import dashboardRouter from "./dashboard";
 import usersRouter from "./users";
+import integrationsRouter from "./integrations";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(retailersRouter);
 router.use(agreementsRouter);
 router.use(dashboardRouter);
 router.use(usersRouter);
+router.use(integrationsRouter);
 
 export default router;

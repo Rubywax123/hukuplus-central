@@ -27,10 +27,14 @@ Central command platform connecting three loan apps (HukuPlus - Broiler Feed Loa
 1. **Internal Zone** (requires login): Dashboard, Retailers, Agreements, Team management
 2. **Public Zone** (`/sign/:token`): Secure loan agreement signing gateway — no login required, three-factor identity verification (Retailer + Branch + Customer Name)
 
-### Loan Products
-- **HukuPlus** — Broiler feed loans
-- **Revolver** — Revolving feed wallet for layers
-- **Salary** — Salary payroll deduction loans
+### Loan Products & App URLs
+| Product | Description | App URL | Env Var |
+|---|---|---|---|
+| **HukuPlus** | Broiler feed loans (42-day) | https://loan-manager-automate.replit.app | `HUKUPLUS_URL` |
+| **Revolver** | Revolving feed wallet for layers | https://credit-facility-manager.replit.app | `REVOLVER_URL` |
+| **ChikweretiOne** | Payroll deduction loans (3–12 months) | https://loan-mastermind--cz86dbq6qp.replit.app | `CHIKWERETION_URL` |
+
+All three apps have protected APIs (return 401/Authentication Required). To enable live data sync, each app must be updated to accept a Bearer API token. Set `HUKUPLUS_API_KEY`, `REVOLVER_API_KEY`, `CHIKWERETION_API_KEY` in this project's secrets once each app's API key support is enabled.
 
 ## Structure
 
@@ -95,19 +99,29 @@ All routes mounted at `/api`:
 - `GET /api/users`
 - `PATCH /api/users/:id/role`
 
+### Integrations
+- `GET /api/integrations/apps` — list all three loan apps + API key status
+- `GET /api/integrations/apps/:id/ping` — health check a specific loan app (hukuplus | revolver | chikweretion)
+
 ## Frontend Routes
 
 - `/` — Login screen (if unauthenticated) or redirect to dashboard
-- `/dashboard` — Stats + activity feed
 - `/retailers` — Retailer and branch management
 - `/agreements` — Loan agreement list + create
+- `/loan-apps` — Loan Apps hub (quick launch + API connectivity status for all 3 apps)
 - `/team` — Team member role management
 - `/sign/:token` — **PUBLIC** loan agreement signing gateway
 
+## WhatsApp Flyers (attached_assets)
+- `HukuPlusWhatsapp_1773897032482.jpg` — Orange, broiler chicken branding
+- `RevolverWhatsapp_1773897032483.PNG` — Blue, layers/eggs branding
+- `ChikweretiOneWhatsapp_1773897032481.jpg` — Dark/gold, salary loans branding
+- All three share contact: +263775900563 (Tefco Finance)
+
 ## Future Roadmap
 
+- Enable API key support in each loan app → live data sync in HukuPlusCentral
 - Gmail integration for email-based communications
-- WhatsApp Business API (Twilio) for mass messaging to customers/stores
+- WhatsApp Business API (Twilio) for mass messaging to customers/stores using flyer assets
 - AI credit decision layer (ML-based approvals)
 - Formitize webhook integration for automatic agreement generation
-- Connection to HukuPlus, Revolver, Salary app APIs

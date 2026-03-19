@@ -24,3 +24,10 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+HUKUPLUS_URL = "https://loan-manager-automate.replit.app"
+REVOLVER_URL = "https://credit-facility-manager.replit.app"
+CHIKWERETION_URL = "https://loan-mastermind--cz86dbq6qp.replit.app"

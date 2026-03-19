@@ -8,6 +8,7 @@ import { AuthGuard } from "@/components/layout";
 import DashboardPage from "@/pages/dashboard";
 import RetailersPage from "@/pages/retailers";
 import AgreementsPage from "@/pages/agreements";
+import LoanAppsPage from "@/pages/loan-apps";
 import TeamPage from "@/pages/team";
 import PublicSigningPage from "@/pages/public-signing";
 import NotFound from "@/pages/not-found";
@@ -36,6 +37,7 @@ function Router() {
             <Route path="/" component={DashboardPage} />
             <Route path="/retailers" component={RetailersPage} />
             <Route path="/agreements" component={AgreementsPage} />
+            <Route path="/loan-apps" component={LoanAppsPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />
           </Switch>

@@ -1,13 +1,14 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@workspace/replit-auth-web";
-import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap } from "lucide-react";
+import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow } from "lucide-react";
 import { motion } from "framer-motion";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Agreements", icon: FileSignature },
+  { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
   { path: "/team", label: "Team", icon: Users },
 ];
 
@@ -146,7 +147,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             onClick={login}
             className="w-full bg-white text-black font-semibold py-3.5 px-4 rounded-xl hover:bg-white/90 transition-colors shadow-xl shadow-white/10"
           >
-            Sign in with Replit
+            Sign In
           </button>
         </motion.div>
       </div>
