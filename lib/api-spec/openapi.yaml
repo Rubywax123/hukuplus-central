@@ -1,15 +1,24 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: HukuPlusCentral API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: Auth
+    description: Browser authentication endpoints
+  - name: retailers
+    description: Retailer and branch management
+  - name: agreements
+    description: Loan agreement management and signing gateway
+  - name: dashboard
+    description: Dashboard statistics
+  - name: users
+    description: Team user management
 paths:
   /healthz:
     get:
@@ -24,7 +33,576 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: iss
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirect after login.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '302':
+          description: Redirect to the OIDC provider logout URL.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileTokenExchangeRequest'
+      responses:
+        '200':
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Token did not contain usable claims.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Token exchange failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccess'
+
+  /retailers:
+    get:
+      operationId: listRetailers
+      tags: [retailers]
+      summary: List all retailers
+      responses:
+        "200":
+          description: List of retailers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Retailer"
+    post:
+      operationId: createRetailer
+      tags: [retailers]
+      summary: Create a new retailer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRetailerBody"
+      responses:
+        "201":
+          description: Retailer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Retailer"
+
+  /retailers/{retailerId}:
+    get:
+      operationId: getRetailer
+      tags: [retailers]
+      summary: Get a retailer by ID
+      parameters:
+        - name: retailerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Retailer found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Retailer"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateRetailer
+      tags: [retailers]
+      summary: Update a retailer
+      parameters:
+        - name: retailerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRetailerBody"
+      responses:
+        "200":
+          description: Retailer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Retailer"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /retailers/{retailerId}/branches:
+    get:
+      operationId: listBranches
+      tags: [retailers]
+      summary: List branches for a retailer
+      parameters:
+        - name: retailerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of branches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Branch"
+    post:
+      operationId: createBranch
+      tags: [retailers]
+      summary: Create a branch for a retailer
+      parameters:
+        - name: retailerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBranchBody"
+      responses:
+        "201":
+          description: Branch created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+
+  /retailers/{retailerId}/branches/{branchId}:
+    patch:
+      operationId: updateBranch
+      tags: [retailers]
+      summary: Update a branch
+      parameters:
+        - name: retailerId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: branchId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBranchBody"
+      responses:
+        "200":
+          description: Branch updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteBranch
+      tags: [retailers]
+      summary: Delete a branch
+      parameters:
+        - name: retailerId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: branchId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /agreements:
+    get:
+      operationId: listAgreements
+      tags: [agreements]
+      summary: List all loan agreements
+      parameters:
+        - name: retailerId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: branchId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, signed, expired]
+        - name: loanProduct
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of agreements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agreement"
+    post:
+      operationId: createAgreement
+      tags: [agreements]
+      summary: Create a loan agreement and generate a signing link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgreementBody"
+      responses:
+        "201":
+          description: Agreement created with signing token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agreement"
+
+  /agreements/{agreementId}:
+    get:
+      operationId: getAgreement
+      tags: [agreements]
+      summary: Get a specific agreement
+      parameters:
+        - name: agreementId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Agreement found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agreement"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /sign/{token}:
+    get:
+      operationId: getSigningSession
+      tags: [agreements]
+      summary: Public — look up an agreement by signing token (no auth required)
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Signing session data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigningSession"
+        "404":
+          description: Token not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /sign/{token}/verify:
+    post:
+      operationId: verifySigningIdentity
+      tags: [agreements]
+      summary: Public — verify retailer/branch/customer before showing agreement
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifySigningIdentityBody"
+      responses:
+        "200":
+          description: Identity verified, agreement details returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgreementDetails"
+        "400":
+          description: Identity mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Token not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /sign/{token}/submit:
+    post:
+      operationId: submitSignature
+      tags: [agreements]
+      summary: Public — submit digital signature for agreement
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitSignatureBody"
+      responses:
+        "200":
+          description: Signature recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignatureConfirmation"
+        "400":
+          description: Invalid or already signed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Token not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get high-level dashboard statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent activity feed
+      responses:
+        "200":
+          description: Recent activity items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List team users
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamUser"
+
+  /users/{userId}/role:
+    patch:
+      operationId: updateUserRole
+      tags: [users]
+      summary: Update a team member's role
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRoleBody"
+      responses:
+        "200":
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamUser"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
 components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +612,375 @@ components:
       required:
         - status
 
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, 'null']
+          format: email
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+          format: uri
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+
+    Retailer:
+      type: object
+      required: [id, name, contactEmail, contactPhone, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactEmail:
+          type: [string, 'null']
+        contactPhone:
+          type: [string, 'null']
+        address:
+          type: [string, 'null']
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        branchCount:
+          type: ["integer", "null"]
+
+    CreateRetailerBody:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        contactEmail:
+          type: [string, 'null']
+        contactPhone:
+          type: [string, 'null']
+        address:
+          type: [string, 'null']
+
+    UpdateRetailerBody:
+      type: object
+      properties:
+        name:
+          type: string
+        contactEmail:
+          type: [string, 'null']
+        contactPhone:
+          type: [string, 'null']
+        address:
+          type: [string, 'null']
+        isActive:
+          type: boolean
+
+    Branch:
+      type: object
+      required: [id, retailerId, name, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        retailerId:
+          type: integer
+        name:
+          type: string
+        location:
+          type: [string, 'null']
+        contactPhone:
+          type: [string, 'null']
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateBranchBody:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        location:
+          type: [string, 'null']
+        contactPhone:
+          type: [string, 'null']
+
+    UpdateBranchBody:
+      type: object
+      properties:
+        name:
+          type: string
+        location:
+          type: [string, 'null']
+        contactPhone:
+          type: [string, 'null']
+        isActive:
+          type: boolean
+
+    Agreement:
+      type: object
+      required: [id, retailerId, branchId, customerName, loanProduct, loanAmount, signingToken, status, createdAt, expiresAt]
+      properties:
+        id:
+          type: integer
+        retailerId:
+          type: integer
+        retailerName:
+          type: [string, 'null']
+        branchId:
+          type: integer
+        branchName:
+          type: [string, 'null']
+        customerName:
+          type: string
+        customerPhone:
+          type: [string, 'null']
+        loanProduct:
+          type: string
+          description: "HukuPlus | Revolver | Salary"
+        loanAmount:
+          type: number
+        formitizeJobId:
+          type: [string, 'null']
+        formitizeFormUrl:
+          type: [string, 'null']
+        signingToken:
+          type: string
+        signingUrl:
+          type: string
+        status:
+          type: string
+          enum: [pending, signed, expired]
+        signedAt:
+          type: ["string", "null"]
+          format: date-time
+        signatureData:
+          type: ["string", "null"]
+        createdBy:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    CreateAgreementBody:
+      type: object
+      required: [retailerId, branchId, customerName, loanProduct, loanAmount]
+      properties:
+        retailerId:
+          type: integer
+        branchId:
+          type: integer
+        customerName:
+          type: string
+        customerPhone:
+          type: [string, 'null']
+        loanProduct:
+          type: string
+          description: "HukuPlus | Revolver | Salary"
+        loanAmount:
+          type: number
+        formitizeJobId:
+          type: [string, 'null']
+        formitizeFormUrl:
+          type: [string, 'null']
+        expiryHours:
+          type: integer
+          description: "How many hours the signing link is valid. Defaults to 72."
+
+    SigningSession:
+      type: object
+      required: [retailerName, branchName, loanProduct, status]
+      properties:
+        retailerName:
+          type: string
+        branchName:
+          type: string
+        loanProduct:
+          type: string
+        status:
+          type: string
+          enum: [pending, signed, expired]
+
+    VerifySigningIdentityBody:
+      type: object
+      required: [retailerName, branchName, customerName]
+      properties:
+        retailerName:
+          type: string
+        branchName:
+          type: string
+        customerName:
+          type: string
+
+    AgreementDetails:
+      type: object
+      required: [customerName, loanProduct, loanAmount, formitizeFormUrl, agreementId]
+      properties:
+        agreementId:
+          type: integer
+        customerName:
+          type: string
+        loanProduct:
+          type: string
+        loanAmount:
+          type: number
+        formitizeFormUrl:
+          type: [string, 'null']
+        expiresAt:
+          type: string
+          format: date-time
+
+    SubmitSignatureBody:
+      type: object
+      required: [signatureData]
+      properties:
+        signatureData:
+          type: string
+          description: "Base64-encoded signature image or SVG path data"
+
+    SignatureConfirmation:
+      type: object
+      required: [success, signedAt]
+      properties:
+        success:
+          type: boolean
+        signedAt:
+          type: string
+          format: date-time
+
+    DashboardStats:
+      type: object
+      required: [totalRetailers, totalBranches, totalAgreements, pendingSignatures, signedToday, loanProducts]
+      properties:
+        totalRetailers:
+          type: integer
+        totalBranches:
+          type: integer
+        totalAgreements:
+          type: integer
+        pendingSignatures:
+          type: integer
+        signedToday:
+          type: integer
+        loanProducts:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoanProductStat"
+
+    LoanProductStat:
+      type: object
+      required: [product, total, pending, signed]
+      properties:
+        product:
+          type: string
+        total:
+          type: integer
+        pending:
+          type: integer
+        signed:
+          type: integer
+
+    ActivityItem:
+      type: object
+      required: [id, type, description, timestamp]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [agreement_created, agreement_signed, retailer_added, branch_added]
+        description:
+          type: string
+        retailerName:
+          type: [string, 'null']
+        branchName:
+          type: [string, 'null']
+        loanProduct:
+          type: [string, 'null']
+        timestamp:
+          type: string
+          format: date-time
+
+    TeamUser:
+      type: object
+      required: [id, email, firstName, lastName, role, createdAt]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, 'null']
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+        role:
+          type: string
+          enum: [admin, manager, staff]
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateUserRoleBody:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [admin, manager, staff]

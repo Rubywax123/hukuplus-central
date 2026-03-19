@@ -1,0 +1,18 @@
+packages:
+  "framer-motion": "For page transitions and premium micro-interactions"
+  "recharts": "For dashboard analytics and data visualization"
+  "react-signature-canvas": "Signature pad for public loan agreements gateway"
+  "@types/react-signature-canvas": "TypeScript definitions for signature pad"
+  "date-fns": "For human-readable date formatting"
+  "lucide-react": "Premium iconography across the application"
+images:
+  - path: "artifacts/hukupluscentral/public/images/auth-bg.png"
+    description: "Deep dark blue and indigo abstract glowing mesh background with soft volumetric lighting, enterprise professional, luxury tech aesthetic"
+    aspect_ratio: "16:9"
+  - path: "artifacts/hukupluscentral/public/images/logo.png"
+    description: "Minimalist glowing neon blue and white hexagon logo mark on completely transparent background"
+    aspect_ratio: "1:1"
+notes:
+  - Uses @workspace/api-client-react for all data fetching and mutations
+  - Requires @workspace/replit-auth-web for authentication
+  - Public signing gateway runs without authentication requirements

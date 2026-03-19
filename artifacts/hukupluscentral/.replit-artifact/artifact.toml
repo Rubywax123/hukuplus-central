@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "HukuPlusCentral"
+version = "1.0.0"
+id = "artifacts/hukupluscentral"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26227
+
+[services.development]
+run = "pnpm --filter @workspace/hukupluscentral run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/hukupluscentral", "run", "build" ]
+publicDir = "artifacts/hukupluscentral/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26227"
+BASE_PATH = "/"
