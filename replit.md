@@ -118,10 +118,39 @@ All routes mounted at `/api`:
 - `ChikweretiOneWhatsapp_1773897032481.jpg` — Dark/gold, salary loans branding
 - All three share contact: +263775900563 (Tefco Finance)
 
+## Retailer Portal
+
+A separate login system at `/portal/login` for retail partners (not Tefco staff).
+
+### Roles
+- `retailer_admin` — sees all branches for their retailer
+- `store_staff` — sees only their own branch
+
+### Portal API Routes (no Replit Auth)
+- `POST /api/portal/login` — email + password login
+- `POST /api/portal/logout`
+- `GET /api/portal/me`
+- `POST /api/portal/change-password`
+- `GET /api/portal/agreements` — filtered by role/branchId
+- `GET /api/portal/agreements/:id`
+
+### Portal User Management (Tefco staff only, Replit Auth required)
+- `GET /api/portal/users`
+- `POST /api/portal/users` — create retailer/store account
+- `PATCH /api/portal/users/:id`
+- `DELETE /api/portal/users/:id` (soft deactivate)
+
+### Formitize Webhook
+- `POST /api/formitize/webhook` — auto-creates agreement from Formitize form submission
+- Secured by `FORMITIZE_WEBHOOK_SECRET` env var (optional)
+- Maps: retailer_name, branch_name, customer_name, customer_phone, loan_product, loan_amount, job_id, form_url
+
+### DB Schema
+- `portal_users` — id, name, email, passwordHash, retailerId, branchId, role, isActive, mustChangePassword
+
 ## Future Roadmap
 
 - Enable API key support in each loan app → live data sync in HukuPlusCentral
 - Gmail integration for email-based communications
 - WhatsApp Business API (Twilio) for mass messaging to customers/stores using flyer assets
 - AI credit decision layer (ML-based approvals)
-- Formitize webhook integration for automatic agreement generation

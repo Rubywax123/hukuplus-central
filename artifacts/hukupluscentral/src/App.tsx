@@ -11,6 +11,8 @@ import AgreementsPage from "@/pages/agreements";
 import LoanAppsPage from "@/pages/loan-apps";
 import TeamPage from "@/pages/team";
 import PublicSigningPage from "@/pages/public-signing";
+import PortalLoginPage from "@/pages/portal-login";
+import PortalDashboardPage from "@/pages/portal-dashboard";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -28,6 +30,13 @@ function Router() {
       {/* Public Unauthenticated Zone */}
       <Route path="/sign/:token">
         {params => <PublicSigningPage token={params.token} />}
+      </Route>
+
+      {/* Retailer Portal Zone (own auth) */}
+      <Route path="/portal/login" component={PortalLoginPage} />
+      <Route path="/portal/dashboard" component={PortalDashboardPage} />
+      <Route path="/portal">
+        {() => { window.location.replace("/portal/login"); return null; }}
       </Route>
       
       {/* Internal Authenticated Zone */}

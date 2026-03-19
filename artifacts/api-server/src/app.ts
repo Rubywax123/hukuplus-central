@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { authMiddleware } from "./middlewares/authMiddleware";
+import { portalAuthMiddleware } from "./middlewares/portalAuthMiddleware";
 import router from "./routes";
 
 const app: Express = express();
@@ -11,6 +12,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(authMiddleware);
+app.use(portalAuthMiddleware);
 
 app.use("/api", router);
 

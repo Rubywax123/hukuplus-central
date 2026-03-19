@@ -6,6 +6,8 @@ import agreementsRouter from "./agreements";
 import dashboardRouter from "./dashboard";
 import usersRouter from "./users";
 import integrationsRouter from "./integrations";
+import portalRouter from "./portal";
+import formitizeRouter from "./formitize";
 
 const router: IRouter = Router();
 
@@ -16,5 +18,7 @@ router.use(agreementsRouter);
 router.use(dashboardRouter);
 router.use(usersRouter);
 router.use(integrationsRouter);
+router.use(portalRouter);
+router.use(formitizeRouter);
 
 export default router;
