@@ -28,11 +28,27 @@ router.post("/formitize/webhook", async (req, res) => {
   }
 
   const body = req.body;
+
+  // Only process HukuPlus Loan Agreement forms — ignore everything else from Formitize
+  const formName: string = (
+    body.form_name || body.FormName || body.formName ||
+    body.form_type || body.FormType || body.formType ||
+    body.template_name || body.TemplateName || ""
+  ).toLowerCase();
+
+  const isHukuPlusAgreement = formName.includes("hukuplus") || formName.includes("huku plus");
+
+  if (!isHukuPlusAgreement) {
+    console.log(`[formitize] Ignored form: "${formName || "(unnamed)"}"`);
+    res.status(200).json({ ok: true, skipped: true, reason: "Not a HukuPlus Loan Agreement — ignored" });
+    return;
+  }
+
   const retailerName = body.retailer_name || body.RetailerName || body.retailerName;
   const branchName   = body.branch_name   || body.BranchName   || body.branchName;
   const customerName = body.customer_name || body.CustomerName || body.customerName;
   const customerPhone = body.customer_phone || body.CustomerPhone || body.customerPhone || null;
-  const loanProduct  = body.loan_product  || body.LoanProduct  || body.loanProduct || "HukuPlus";
+  const loanProduct  = "HukuPlus";
   const loanAmount   = parseFloat(body.loan_amount || body.LoanAmount || body.loanAmount || "0");
   const jobId        = body.job_id || body.JobId || body.formitize_job_id || null;
   const formUrl      = body.form_url || body.FormUrl || body.formUrl || null;
