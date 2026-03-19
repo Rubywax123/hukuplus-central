@@ -4,6 +4,7 @@ import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -104,17 +105,73 @@ function ChangePasswordModal({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+// ─── App Switcher ─────────────────────────────────────────────────────────────
+
+function AppSwitcher() {
+  const { activeApp, activeAppConfig, setActiveApp } = useLoanApp();
+
+  return (
+    <div className="px-4 mb-2">
+      <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold px-1 mb-2">Active Business</p>
+      <div className="space-y-1">
+        {LOAN_APPS.map(app => {
+          const isActive = activeApp === app.id;
+          return (
+            <button
+              key={app.id}
+              onClick={() => setActiveApp(app.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 text-left ${
+                isActive
+                  ? `${app.bg} ${app.border} ${app.text}`
+                  : "border-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground"
+              }`}
+            >
+              <div className={`w-2 h-2 rounded-full shrink-0 ${isActive ? app.dot : "bg-white/20"}`} />
+              <div className="overflow-hidden">
+                <p className={`text-sm font-semibold truncate ${isActive ? app.text : ""}`}>{app.label}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{app.subtitle}</p>
+              </div>
+              {isActive && (
+                <motion.div
+                  layoutId="app-switcher-indicator"
+                  className={`ml-auto w-1.5 h-1.5 rounded-full ${app.dot}`}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Active App Banner ─────────────────────────────────────────────────────────
+
+function ActiveAppBanner() {
+  const { activeAppConfig } = useLoanApp();
+  return (
+    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${activeAppConfig.bg} ${activeAppConfig.border} mb-4`}>
+      <div className={`w-2 h-2 rounded-full ${activeAppConfig.dot} shrink-0`} />
+      <span className={`text-xs font-semibold ${activeAppConfig.text}`}>{activeAppConfig.label}</span>
+      <span className="text-xs text-muted-foreground">— {activeAppConfig.subtitle}</span>
+    </div>
+  );
+}
+
+export { ActiveAppBanner };
+
 // ─── Internal Layout ──────────────────────────────────────────────────────────
 
 export function InternalLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user, logout } = useStaffAuth();
+  const { activeAppConfig } = useLoanApp();
 
   return (
     <div className="min-h-screen bg-background flex">
       <aside className="w-72 hidden lg:flex flex-col border-r border-white/5 bg-card/30 backdrop-blur-2xl">
-        <div className="p-8 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20">
+        <div className="p-6 pb-4 flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${activeAppConfig.gradient} flex items-center justify-center shadow-lg transition-all duration-300`}>
             <Zap className="w-6 h-6 text-white" />
           </div>
           <div>
@@ -123,22 +180,35 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2 mt-4">
+        <div className="px-4 pb-3">
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${activeAppConfig.bg} ${activeAppConfig.border}`}>
+            <div className={`w-2 h-2 rounded-full ${activeAppConfig.dot} shrink-0 animate-pulse`} />
+            <div>
+              <p className={`text-xs font-bold ${activeAppConfig.text}`}>{activeAppConfig.label}</p>
+              <p className="text-[10px] text-muted-foreground">{activeAppConfig.subtitle}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="h-px bg-white/5 mx-4 mb-3" />
+
+        <AppSwitcher />
+
+        <div className="h-px bg-white/5 mx-4 my-3" />
+
+        <nav className="flex-1 px-4 space-y-1">
           {navItems.map((item) => {
             const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
             return (
               <Link key={item.path} href={item.path} className="block">
                 <div className={`
-                  flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
+                  flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200
                   ${isActive
-                    ? "bg-primary/10 text-primary border border-primary/20 shadow-inner"
+                    ? `${activeAppConfig.bg} ${activeAppConfig.text} border ${activeAppConfig.border}`
                     : "text-muted-foreground hover:bg-white/5 hover:text-foreground border border-transparent"}
                 `}>
-                  <item.icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
+                  <item.icon className={`w-4 h-4 ${isActive ? activeAppConfig.text : ""}`} />
                   <span className="font-medium text-sm">{item.label}</span>
-                  {isActive && (
-                    <motion.div layoutId="sidebar-indicator" className="absolute left-0 w-1 h-8 bg-primary rounded-r-full" />
-                  )}
                 </div>
               </Link>
             );
@@ -146,23 +216,23 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="p-6 border-t border-white/5">
-          <div className="flex items-center gap-3 px-2 mb-6">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-accent/20 border border-white/10 flex items-center justify-center">
-              <span className="text-primary font-bold text-sm">
+          <div className="flex items-center gap-3 px-2 mb-4">
+            <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${activeAppConfig.gradient} flex items-center justify-center shrink-0 transition-all duration-300`}>
+              <span className="text-white font-bold text-sm">
                 {user?.name?.[0]?.toUpperCase() ?? "?"}
               </span>
             </div>
             <div className="flex-1 overflow-hidden">
               <p className="text-sm font-semibold truncate text-white">{user?.name}</p>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <ShieldCheck className="w-3 h-3 text-primary shrink-0" />
-                <p className="text-xs text-primary font-medium truncate">{ROLE_LABELS[user?.role ?? ""] ?? user?.role}</p>
+                <ShieldCheck className={`w-3 h-3 ${activeAppConfig.text} shrink-0`} />
+                <p className={`text-xs ${activeAppConfig.text} font-medium truncate`}>{ROLE_LABELS[user?.role ?? ""] ?? user?.role}</p>
               </div>
             </div>
           </div>
           <button
             onClick={logout}
-            className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-destructive transition-colors"
+            className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-destructive transition-colors"
           >
             <LogOut className="w-4 h-4" />
             Sign Out
@@ -171,20 +241,24 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Mobile header */}
         <header className="lg:hidden p-4 border-b border-white/5 bg-card/50 backdrop-blur-xl flex items-center justify-between z-10">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center">
+            <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${activeAppConfig.gradient} flex items-center justify-center transition-all duration-300`}>
               <Zap className="w-5 h-5 text-white" />
             </div>
-            <h1 className="font-display font-bold text-lg text-gradient">HukuPlus</h1>
+            <div>
+              <h1 className="font-display font-bold text-base text-gradient">HukuPlus Central</h1>
+            </div>
           </div>
-          <button onClick={logout} className="p-2 text-muted-foreground hover:text-destructive rounded-lg hover:bg-white/5">
-            <LogOut className="w-5 h-5" />
-          </button>
+          <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${activeAppConfig.bg} ${activeAppConfig.border}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${activeAppConfig.dot}`} />
+            <span className={`text-xs font-semibold ${activeAppConfig.text}`}>{activeAppConfig.label}</span>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-10 relative">
-          <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/20 blur-[120px] rounded-full pointer-events-none" />
+          <div className={`absolute top-0 left-1/4 w-96 h-96 blur-[120px] rounded-full pointer-events-none opacity-20 ${activeAppConfig.dot} transition-all duration-700`} />
           <div className="absolute bottom-1/4 right-0 w-96 h-96 bg-accent/10 blur-[120px] rounded-full pointer-events-none" />
           <div className="relative z-10 max-w-7xl mx-auto">
             {children}

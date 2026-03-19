@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useListRetailers, useCreateRetailer, useListBranches, useCreateBranch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label } from "@/components/ui-extras";
-import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
+import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle } from "lucide-react";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { customFetch } from "@workspace/api-client-react";
@@ -377,6 +377,134 @@ function UserRow({ user, isResetting, newPassword, showPw, onTogglePwVis, onTogg
   );
 }
 
+// ─── Bulk Import Modal ────────────────────────────────────────────────────────
+
+function parseBulkText(raw: string) {
+  return raw
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const parts = line.split("|").map(p => p.trim());
+      return {
+        retailerName: parts[0] ?? "",
+        branchName: parts[1] ?? "",
+        contactEmail: parts[2] ?? "",
+        contactPhone: parts[3] ?? "",
+      };
+    })
+    .filter(r => r.retailerName && r.branchName);
+}
+
+function BulkImportModal({ isOpen, onClose, onDone }: { isOpen: boolean; onClose: () => void; onDone: () => void }) {
+  const [raw, setRaw] = useState("");
+  const [result, setResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const preview = parseBulkText(raw);
+
+  const handleImport = async () => {
+    setError("");
+    setIsLoading(true);
+    try {
+      const res = await customFetch("/api/retailers/bulk-import", {
+        method: "POST",
+        body: JSON.stringify({ rows: preview }),
+      });
+      setResult(res);
+      onDone();
+    } catch (err: any) {
+      setError(err.message ?? "Import failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setRaw(""); setResult(null); setError("");
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Bulk Import Retailers & Branches">
+      {result ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+            <CheckCircle className="w-6 h-6 text-emerald-400 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-white">Import complete</p>
+              <p className="text-xs text-muted-foreground">{result.created} new retailers created, {result.skipped} entries already existed</p>
+            </div>
+          </div>
+          {result.errors.length > 0 && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 space-y-1">
+              <p className="text-xs font-semibold text-red-400">Errors ({result.errors.length})</p>
+              {result.errors.map((e, i) => <p key={i} className="text-xs text-red-300">{e}</p>)}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <GradientButton onClick={handleClose}>Done</GradientButton>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-muted-foreground space-y-1">
+            <p className="font-semibold text-white text-sm mb-2">Format — one entry per line:</p>
+            <code className="block text-primary/90">Retailer Name | Branch Name | Email (optional) | Phone (optional)</code>
+            <p className="mt-2">Example:</p>
+            <code className="block">Profeeds | Harare Main | harare@profeeds.co.zw | +263771234567</code>
+            <code className="block">Profeeds | Bulawayo Branch | | </code>
+            <code className="block">Gain | Main Store | gain@example.com | </code>
+            <p className="mt-2 text-amber-400/80">Existing retailers are matched by name — only new branches will be added. Nothing is deleted.</p>
+          </div>
+
+          <div>
+            <Label>Paste store data</Label>
+            <textarea
+              value={raw}
+              onChange={e => setRaw(e.target.value)}
+              rows={10}
+              placeholder={"Profeeds | Harare Main\nProfeeds | Bulawayo Branch\nGain | Main Store | gain@example.com"}
+              className="w-full rounded-xl border border-white/10 bg-white/5 text-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/40 font-mono resize-y"
+            />
+          </div>
+
+          {preview.length > 0 && (
+            <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+              <p className="text-xs font-semibold text-white mb-2">{preview.length} entries ready to import:</p>
+              <div className="max-h-36 overflow-y-auto space-y-1">
+                {preview.map((r, i) => (
+                  <div key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="text-white font-medium">{r.retailerName}</span>
+                    <span>→</span>
+                    <span>{r.branchName}</span>
+                    {r.contactEmail && <span className="text-primary/70">{r.contactEmail}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <p className="text-sm text-red-400">{error}</p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={handleClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-white transition-colors">Cancel</button>
+            <GradientButton onClick={handleImport} isLoading={isLoading} disabled={preview.length === 0}>
+              <Upload className="w-4 h-4" /> Import {preview.length > 0 ? `${preview.length} entries` : ""}
+            </GradientButton>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function RetailersPage() {
@@ -385,6 +513,7 @@ export default function RetailersPage() {
   const createMutation = useCreateRetailer();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<Record<number, "branches" | "portal">>({}); 
 
@@ -409,7 +538,17 @@ export default function RetailersPage() {
       <PageHeader
         title="Retailers Directory"
         description="Manage partner stores, branch networks, and portal access accounts."
-        action={<GradientButton onClick={() => setIsModalOpen(true)}><Plus className="w-4 h-4" /> New Retailer</GradientButton>}
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsBulkModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-white transition-colors"
+            >
+              <Upload className="w-4 h-4" /> Bulk Import
+            </button>
+            <GradientButton onClick={() => setIsModalOpen(true)}><Plus className="w-4 h-4" /> New Retailer</GradientButton>
+          </div>
+        }
       />
 
       <GlassCard className="overflow-hidden">
@@ -503,6 +642,13 @@ export default function RetailersPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Bulk Import Modal */}
+      <BulkImportModal
+        isOpen={isBulkModalOpen}
+        onClose={() => setIsBulkModalOpen(false)}
+        onDone={() => queryClient.invalidateQueries({ queryKey: ["/api/retailers"] })}
+      />
     </div>
   );
 }

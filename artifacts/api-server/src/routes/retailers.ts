@@ -44,6 +44,77 @@ router.post("/retailers", async (req, res): Promise<void> => {
   res.status(201).json({ ...retailer, branchCount: 0 });
 });
 
+router.post("/retailers/bulk-import", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { rows } = req.body as {
+    rows: Array<{ retailerName: string; branchName: string; contactEmail?: string; contactPhone?: string; address?: string }>;
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    res.status(400).json({ error: "rows array is required" });
+    return;
+  }
+
+  const results = { created: 0, skipped: 0, errors: [] as string[] };
+
+  for (const row of rows) {
+    const rName = (row.retailerName ?? "").trim();
+    const bName = (row.branchName ?? "").trim();
+    if (!rName || !bName) {
+      results.errors.push(`Skipped blank row: "${rName}" / "${bName}"`);
+      continue;
+    }
+
+    try {
+      let [existing] = await db
+        .select()
+        .from(retailersTable)
+        .where(eq(retailersTable.name, rName));
+
+      if (!existing) {
+        [existing] = await db
+          .insert(retailersTable)
+          .values({
+            name: rName,
+            contactEmail: row.contactEmail || null,
+            contactPhone: row.contactPhone || null,
+            address: row.address || null,
+            isActive: true,
+          })
+          .returning();
+        results.created++;
+      }
+
+      const existingBranches = await db
+        .select()
+        .from(branchesTable)
+        .where(eq(branchesTable.retailerId, existing.id));
+
+      const branchExists = existingBranches.some(
+        b => b.name.toLowerCase() === bName.toLowerCase()
+      );
+
+      if (!branchExists) {
+        await db.insert(branchesTable).values({
+          retailerId: existing.id,
+          name: bName,
+          isActive: true,
+        });
+      } else {
+        results.skipped++;
+      }
+    } catch (err: any) {
+      results.errors.push(`"${rName}" / "${bName}": ${err.message}`);
+    }
+  }
+
+  res.status(200).json(results);
+});
+
 router.get("/retailers/:retailerId", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
