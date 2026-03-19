@@ -75,9 +75,16 @@ function PingButton({ appId }: { appId: string }) {
         Ping
       </button>
       {result && (
-        <span className={cn("text-xs font-medium", result.status === "ok" ? "text-emerald-400" : result.status === "unauthorized" ? "text-amber-400" : "text-red-400")}>
-          {result.status === "ok" ? "Reachable ✓" : result.status === "unauthorized" ? "Needs API Key" : "Unreachable"}
-          {result.httpStatus ? ` (${result.httpStatus})` : ""}
+        <span className={cn("text-xs font-medium",
+          result.status === "central_connected" ? "text-emerald-400" :
+          result.status === "reachable_no_central_auth" ? "text-amber-400" :
+          result.status === "unauthorized" ? "text-amber-400" :
+          "text-red-400"
+        )}>
+          {result.status === "central_connected" ? "✓ Central Connected" :
+           result.status === "reachable_no_central_auth" ? "⚡ Needs Middleware" :
+           result.status === "unauthorized" ? "⚠ Needs Middleware" :
+           "✗ Unreachable"}
         </span>
       )}
     </div>
@@ -132,8 +139,8 @@ export default function LoanAppsPage() {
                   {/* Status badge */}
                   <div className="absolute top-3 right-3">
                     <span className={cn("flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border backdrop-blur-sm", colors.badge)}>
-                      <span className={cn("w-1.5 h-1.5 rounded-full", app.hasApiKey ? "bg-emerald-400" : colors.dot)} />
-                      {app.hasApiKey ? "API Connected" : "No API Key"}
+                      <span className={cn("w-1.5 h-1.5 rounded-full", app.hasApiKey ? "bg-emerald-400 animate-pulse" : colors.dot)} />
+                      {app.hasApiKey ? "Key Ready" : "Setup Required"}
                     </span>
                   </div>
                 </div>

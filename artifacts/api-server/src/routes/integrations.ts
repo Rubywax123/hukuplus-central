@@ -2,6 +2,8 @@ import { Router } from "express";
 
 const router = Router();
 
+const CENTRAL_API_KEY = process.env.CENTRAL_API_KEY;
+
 const LOAN_APPS = [
   {
     id: "hukuplus",
@@ -10,7 +12,6 @@ const LOAN_APPS = [
     url: process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app",
     product: "HukuPlus",
     color: "orange",
-    apiKeyEnv: "HUKUPLUS_API_KEY",
   },
   {
     id: "revolver",
@@ -19,7 +20,6 @@ const LOAN_APPS = [
     url: process.env.REVOLVER_URL || "https://credit-facility-manager.replit.app",
     product: "Revolver",
     color: "blue",
-    apiKeyEnv: "REVOLVER_API_KEY",
   },
   {
     id: "chikweretion",
@@ -28,15 +28,14 @@ const LOAN_APPS = [
     url: process.env.CHIKWERETION_URL || "https://loan-mastermind--cz86dbq6qp.replit.app",
     product: "ChikweretiOne",
     color: "gold",
-    apiKeyEnv: "CHIKWERETION_API_KEY",
   },
 ];
 
 router.get("/integrations/apps", (req, res) => {
   const apps = LOAN_APPS.map((app) => ({
     ...app,
-    hasApiKey: !!process.env[app.apiKeyEnv],
-    status: process.env[app.apiKeyEnv] ? "connected" : "api_key_required",
+    hasApiKey: !!CENTRAL_API_KEY,
+    status: CENTRAL_API_KEY ? "key_ready" : "no_key",
   }));
   res.json(apps);
 });
@@ -45,9 +44,11 @@ router.get("/integrations/apps/:id/ping", async (req, res) => {
   const app = LOAN_APPS.find((a) => a.id === req.params.id);
   if (!app) return res.status(404).json({ error: "App not found" });
 
-  const apiKey = process.env[app.apiKeyEnv];
   const headers: Record<string, string> = {};
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  if (CENTRAL_API_KEY) {
+    headers["Authorization"] = `Bearer ${CENTRAL_API_KEY}`;
+    headers["X-Central-System"] = "HukuPlusCentral";
+  }
 
   try {
     const controller = new AbortController();
@@ -57,13 +58,20 @@ router.get("/integrations/apps/:id/ping", async (req, res) => {
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    const reachable = response.status !== 404;
+
+    let body: any = {};
+    try { body = await response.json(); } catch { /* non-JSON response is fine */ }
+
+    const reachable = response.status < 500;
     const authorized = response.status !== 401 && response.status !== 403;
+    const centralRecognised = body?.source === "HukuPlusCentral" || body?.centralAuth === true;
+
     res.json({
       id: app.id,
       reachable,
       authorized,
-      status: reachable && authorized ? "ok" : reachable ? "unauthorized" : "unreachable",
+      centralRecognised,
+      status: centralRecognised ? "central_connected" : reachable && authorized ? "reachable_no_central_auth" : reachable ? "unauthorized" : "unreachable",
       httpStatus: response.status,
     });
   } catch (err: any) {
@@ -71,6 +79,7 @@ router.get("/integrations/apps/:id/ping", async (req, res) => {
       id: app.id,
       reachable: false,
       authorized: false,
+      centralRecognised: false,
       status: "unreachable",
       error: err.message,
     });
