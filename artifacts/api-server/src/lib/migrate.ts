@@ -121,6 +121,25 @@ export async function runMigrations() {
       console.log("[migrate] Principal admin created.");
     }
 
+    // Seed retailers (from HukuPlus) if none exist
+    const retailerCount = await client.query("SELECT COUNT(*) FROM retailers");
+    if (parseInt(retailerCount.rows[0].count) === 0) {
+      console.log("[migrate] Seeding retailers from HukuPlus...");
+      const retailerNames = ["Profeeds", "Gain", "Novafeeds", "Feedmix"];
+      for (const name of retailerNames) {
+        const result = await client.query(
+          `INSERT INTO retailers (name, is_active) VALUES ($1, true) RETURNING id`,
+          [name]
+        );
+        const retailerId = result.rows[0].id;
+        await client.query(
+          `INSERT INTO branches (retailer_id, name, is_active) VALUES ($1, 'Main Branch', true)`,
+          [retailerId]
+        );
+      }
+      console.log("[migrate] Retailers seeded.");
+    }
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

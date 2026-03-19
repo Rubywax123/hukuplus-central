@@ -10,7 +10,7 @@ const navItems = [
   { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Agreements", icon: FileSignature },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
-  { path: "/team", label: "Team", icon: Users },
+  { path: "/team", label: "Tefco Staff", icon: Users },
 ];
 
 const ROLE_LABELS: Record<string, string> = {
