@@ -36,7 +36,8 @@ router.post("/formitize/webhook", async (req, res) => {
     body.template_name || body.TemplateName || ""
   ).toLowerCase();
 
-  const isHukuPlusAgreement = formName.includes("hukuplus") || formName.includes("huku plus");
+  const ACCEPTED_FORM_NAME = "hukuplus loan agreement";
+  const isHukuPlusAgreement = formName === ACCEPTED_FORM_NAME;
 
   if (!isHukuPlusAgreement) {
     console.log(`[formitize] Ignored form: "${formName || "(unnamed)"}"`);
