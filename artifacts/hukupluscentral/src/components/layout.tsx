@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound } from "lucide-react";
+import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 
 const navItems = [
@@ -237,10 +238,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           className="relative z-10 w-full max-w-md p-8 glass-panel border border-white/10 rounded-3xl shadow-2xl"
         >
           <div className="text-center mb-8">
-            <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-primary to-accent p-0.5 shadow-2xl shadow-primary/30">
-              <div className="w-full h-full bg-card rounded-[14px] flex items-center justify-center">
-                <Zap className="w-10 h-10 text-primary" />
-              </div>
+            <div className="w-36 h-36 mx-auto mb-3">
+              <img
+                src={hukuplusLogo}
+                alt="HukuPlus"
+                className="w-full h-full object-contain"
+                style={{ mixBlendMode: "screen" }}
+              />
             </div>
             <h1 className="text-3xl font-display font-bold text-white mb-1">HukuPlus Central</h1>
             <p className="text-muted-foreground text-sm">Tefco Finance — Command Dashboard</p>
