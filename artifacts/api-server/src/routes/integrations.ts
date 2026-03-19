@@ -66,12 +66,15 @@ router.get("/integrations/apps/:id/ping", async (req, res) => {
     const authorized = response.status !== 401 && response.status !== 403;
     const centralRecognised = body?.source === "HukuPlusCentral" || body?.centralAuth === true;
 
+    // Connected = reachable + not blocked by auth (key accepted)
+    const connected = reachable && authorized;
+
     res.json({
       id: app.id,
       reachable,
       authorized,
       centralRecognised,
-      status: centralRecognised ? "central_connected" : reachable && authorized ? "reachable_no_central_auth" : reachable ? "unauthorized" : "unreachable",
+      status: connected ? "central_connected" : reachable ? "unauthorized" : "unreachable",
       httpStatus: response.status,
     });
   } catch (err: any) {
