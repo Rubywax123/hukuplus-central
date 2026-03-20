@@ -6,6 +6,7 @@ interface KioskAgreement {
   loanAmount: number;
   loanProduct: string;
   signingUrl: string;
+  formitizeFormUrl: string | null;
   createdAt: string;
 }
 
@@ -142,6 +143,17 @@ export default function KioskPage({ branchId }: { branchId: string }) {
                 <div className="w-full py-6 rounded-2xl bg-white/5 text-white/20 text-xl text-center">
                   Signing link unavailable
                 </div>
+              )}
+
+              {agreement.formitizeFormUrl && (
+                <a
+                  href={agreement.formitizeFormUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-full mt-3 py-3 rounded-xl text-white/40 text-sm text-center border border-white/10 hover:border-white/20 hover:text-white/60 transition-all"
+                >
+                  View Agreement Document ↗
+                </a>
               )}
             </div>
 

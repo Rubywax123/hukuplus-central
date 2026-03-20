@@ -65,7 +65,8 @@ router.get("/kiosk/:branchId", async (req, res): Promise<void> => {
           customerName: agreement.customerName,
           loanAmount: agreement.loanAmount,
           loanProduct: agreement.loanProduct,
-          signingUrl: agreement.formitizeFormUrl || `${appUrl}/sign/${agreement.signingToken}`,
+          signingUrl: `${appUrl}/sign/${agreement.signingToken}`,
+          formitizeFormUrl: agreement.formitizeFormUrl,
           createdAt: agreement.createdAt,
         }
       : null,
