@@ -85,6 +85,24 @@ export default function ExecutionCertificatePage({ agreementId }: { agreementId:
 
   return (
     <div className="min-h-screen bg-background print:bg-white">
+      <style>{`
+        @media print {
+          * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
+          body, html { background: white !important; color: black !important; }
+          .print-cert { background: white !important; color: black !important; }
+          .print-cert * { color: inherit !important; }
+          .print-cert h1, .print-cert h2, .print-cert p, .print-cert span, .print-cert a {
+            color: black !important;
+          }
+          .print-cert .text-gray-400, .print-cert .text-gray-500 { color: #6b7280 !important; }
+          .print-cert .text-gray-900 { color: #111827 !important; }
+          .print-cert .text-emerald-600 { color: #059669 !important; }
+          .print-cert .text-amber-600 { color: #d97706 !important; }
+          .print-cert .border-gray-200, .print-cert .border-gray-300 { border-color: #e5e7eb !important; }
+          .print-cert .bg-gray-50 { background: #f9fafb !important; }
+          .print-cert .bg-white { background: white !important; }
+        }
+      `}</style>
 
       {/* Screen-only toolbar */}
       <div className="print:hidden bg-card/50 border-b border-white/10 px-6 py-3 flex items-center justify-between sticky top-0 z-10 backdrop-blur-sm">
@@ -112,7 +130,7 @@ export default function ExecutionCertificatePage({ agreementId }: { agreementId:
       </div>
 
       {/* Certificate — white page, works for screen & print */}
-      <div className="max-w-3xl mx-auto p-8 print:p-6 print:max-w-none">
+      <div className="print-cert max-w-3xl mx-auto p-8 print:p-6 print:max-w-none bg-white">
 
         {/* Header */}
         <div className="flex items-start justify-between mb-8 pb-6 border-b border-gray-200 print:border-gray-300">
