@@ -411,13 +411,17 @@ router.post("/formitize/webhook", async (req, res) => {
   // Build a label → value map so we can look up fields by their label text
   const fieldMap: Record<string, string> = {};
   const content = body.content || {};
+  console.log("[formitize] Raw content keys:", Object.keys(content));
   for (const key of Object.keys(content)) {
     const field = content[key];
-    if (field && field.label) {
-      const label = String(field.label).toLowerCase().trim();
-      const value = field.value !== undefined ? String(field.value).trim() : "";
+    console.log(`[formitize] content["${key}"] =`, JSON.stringify(field));
+    if (!field) continue;
+    // Support multiple structures: {label, value}, {question, answer}, {name, data}, plain string
+    const label = (field.label || field.question || field.name || field.field || field.title || key).toString().toLowerCase().trim();
+    const value = (field.value !== undefined ? field.value : field.answer !== undefined ? field.answer : field.data !== undefined ? field.data : typeof field === "string" ? field : "").toString().trim();
+    if (label && value) {
       fieldMap[label] = value;
-      console.log(`[formitize] Field "${field.label}" = "${value}"`);
+      console.log(`[formitize] Mapped "${label}" = "${value}"`);
     }
   }
 
