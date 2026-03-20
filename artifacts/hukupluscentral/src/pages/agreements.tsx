@@ -1,12 +1,14 @@
 import React, { useState, useRef } from "react";
 import { useListAgreements, useCreateAgreement, useListRetailers, useListBranches } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label, Select } from "@/components/ui-extras";
-import { Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload, FileText, Copy, Monitor } from "lucide-react";
+import { Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload, FileText, Copy, Monitor, ScrollText } from "lucide-react";
+import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function AgreementsPage() {
+  const [, navigate] = useLocation();
   const { data: agreements, isLoading } = useListAgreements();
   const { data: retailers } = useListRetailers();
   const queryClient = useQueryClient();
@@ -165,24 +167,35 @@ export default function AgreementsPage() {
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <a
-                        href={`/kiosk/${a.branchId}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20"
-                      >
-                        <Monitor className="w-3.5 h-3.5" /> Open Kiosk
-                      </a>
-                      <button
-                        onClick={() => a.signingUrl && copyLink(a.signingUrl, a.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-colors border border-white/10 text-muted-foreground hover:text-white"
-                        title="Copy signing link"
-                      >
-                        {copiedId === a.id
-                          ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
-                          : <><Copy className="w-3.5 h-3.5" /> Copy Link</>
-                        }
-                      </button>
+                      {a.status === "signed" ? (
+                        <button
+                          onClick={() => navigate(`/agreements/${a.id}/execution`)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20"
+                        >
+                          <ScrollText className="w-3.5 h-3.5" /> View Certificate
+                        </button>
+                      ) : (
+                        <>
+                          <a
+                            href={`/kiosk/${a.branchId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20"
+                          >
+                            <Monitor className="w-3.5 h-3.5" /> Open Kiosk
+                          </a>
+                          <button
+                            onClick={() => a.signingUrl && copyLink(a.signingUrl, a.id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-colors border border-white/10 text-muted-foreground hover:text-white"
+                            title="Copy signing link"
+                          >
+                            {copiedId === a.id
+                              ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
+                              : <><Copy className="w-3.5 h-3.5" /> Copy Link</>
+                            }
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
