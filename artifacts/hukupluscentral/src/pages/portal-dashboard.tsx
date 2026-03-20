@@ -240,8 +240,17 @@ export default function PortalDashboardPage() {
         ) : (
           <div className="space-y-3">
             {filtered.map((agreement, i) => (
-              <motion.div key={agreement.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-                className="bg-card/40 backdrop-blur-sm border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all">
+              <motion.div
+                key={agreement.id}
+                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                onClick={() => {
+                  if (agreement.status === "signed") {
+                    window.open(`/agreements/${agreement.id}/execution`, "_blank");
+                  } else if (agreement.status === "pending" && agreement.signingToken) {
+                    window.open(`/sign/${agreement.signingToken}`, "_blank");
+                  }
+                }}
+                className="bg-card/40 backdrop-blur-sm border border-white/10 rounded-2xl p-5 hover:border-white/20 hover:bg-card/60 transition-all cursor-pointer select-none">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -267,7 +276,7 @@ export default function PortalDashboardPage() {
                       </p>
                     </div>
                     {agreement.status === "pending" && (
-                      <div className="flex flex-col gap-1.5">
+                      <div className="flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
                         {agreement.signingToken && (
                           <a
                             href={`/sign/${agreement.signingToken}`}
@@ -292,14 +301,9 @@ export default function PortalDashboardPage() {
                       </div>
                     )}
                     {agreement.status === "signed" && (
-                      <a
-                        href={`/agreements/${agreement.id}/execution`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20 whitespace-nowrap"
-                      >
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20 whitespace-nowrap pointer-events-none">
                         <ScrollText className="w-3.5 h-3.5" /> View Certificate
-                      </a>
+                      </div>
                     )}
                   </div>
                 </div>
