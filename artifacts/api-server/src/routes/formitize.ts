@@ -36,12 +36,12 @@ router.post("/formitize/webhook", async (req, res) => {
     body.template_name || body.TemplateName || ""
   ).toLowerCase();
 
-  const ACCEPTED_FORM_NAME = "hukuplus loan agreement";
-  const isHukuPlusAgreement = formName === ACCEPTED_FORM_NAME;
+  const ACCEPTED_FORM_NAME = "novafeed agreement";
+  const isAccepted = formName === ACCEPTED_FORM_NAME;
 
-  if (!isHukuPlusAgreement) {
+  if (!isAccepted) {
     console.log(`[formitize] Ignored form: "${formName || "(unnamed)"}"`);
-    res.status(200).json({ ok: true, skipped: true, reason: "Not a HukuPlus Loan Agreement — ignored" });
+    res.status(200).json({ ok: true, skipped: true, reason: "Not a Novafeed Agreement — ignored" });
     return;
   }
 
@@ -49,7 +49,7 @@ router.post("/formitize/webhook", async (req, res) => {
   const branchName   = body.branch_name   || body.BranchName   || body.branchName;
   const customerName = body.customer_name || body.CustomerName || body.customerName;
   const customerPhone = body.customer_phone || body.CustomerPhone || body.customerPhone || null;
-  const loanProduct  = "HukuPlus";
+  const loanProduct  = "Novafeeds";
   const loanAmount   = parseFloat(body.loan_amount || body.LoanAmount || body.loanAmount || "0");
   const jobId        = body.job_id || body.JobId || body.formitize_job_id || null;
   const formUrl      = body.form_url || body.FormUrl || body.formUrl || null;
