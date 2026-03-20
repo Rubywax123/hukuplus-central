@@ -15,6 +15,7 @@ import PublicSigningPage from "@/pages/public-signing";
 import KioskPage from "@/pages/kiosk";
 import PortalLoginPage from "@/pages/portal-login";
 import PortalDashboardPage from "@/pages/portal-dashboard";
+import ExecutionCertificatePage from "@/pages/execution-certificate";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -53,6 +54,9 @@ function Router() {
             <Route path="/" component={DashboardPage} />
             <Route path="/retailers" component={RetailersPage} />
             <Route path="/agreements" component={AgreementsPage} />
+            <Route path="/agreements/:id/execution">
+              {params => <ExecutionCertificatePage agreementId={params.id!} />}
+            </Route>
             <Route path="/loan-apps" component={LoanAppsPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />

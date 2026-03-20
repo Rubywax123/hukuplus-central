@@ -120,6 +120,42 @@ router.get("/agreements/:agreementId", async (req, res): Promise<void> => {
   });
 });
 
+// ADMIN: Get full executed agreement with all signatures
+router.get("/agreements/:id/execution", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const [agreement] = await db.select().from(agreementsTable).where(eq(agreementsTable.id, id));
+  if (!agreement) { res.status(404).json({ error: "Agreement not found" }); return; }
+
+  const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, agreement.retailerId));
+  const [branch] = await db.select().from(branchesTable).where(eq(branchesTable.id, agreement.branchId));
+
+  res.json({
+    id: agreement.id,
+    customerName: agreement.customerName,
+    loanProduct: agreement.loanProduct,
+    loanAmount: agreement.loanAmount,
+    status: agreement.status,
+    signedAt: agreement.signedAt?.toISOString() ?? null,
+    createdAt: agreement.createdAt.toISOString(),
+    formitizeJobId: agreement.formitizeJobId,
+    formitizeFormUrl: (agreement as any).formitizeFormUrl ?? null,
+    retailerName: retailer?.name ?? "",
+    branchName: branch?.name ?? "",
+    signatures: {
+      customer1: agreement.signatureData ?? null,
+      customer2: (agreement as any).customerSignature2 ?? null,
+      customer3: (agreement as any).customerSignature3 ?? null,
+      manager:   (agreement as any).managerSignature ?? null,
+    },
+  });
+});
+
 // PUBLIC: Get signing session info (no auth required)
 router.get("/sign/:token", async (req, res): Promise<void> => {
   const params = GetSigningSessionParams.safeParse(req.params);
