@@ -154,7 +154,7 @@ export default function AgreementsPage() {
                   </td>
                   <td className="p-4">
                     <Badge status="neutral">{a.loanProduct}</Badge>
-                    <p className="text-sm font-medium mt-1">KES {a.loanAmount.toLocaleString()}</p>
+                    <p className="text-sm font-medium mt-1">USD {a.loanAmount.toLocaleString()}</p>
                   </td>
                   <td className="p-4">
                     <p className="text-sm text-foreground">{a.retailerName}</p>
