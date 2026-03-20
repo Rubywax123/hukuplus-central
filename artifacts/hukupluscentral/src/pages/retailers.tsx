@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useListRetailers, useCreateRetailer, useListBranches, useCreateBranch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label } from "@/components/ui-extras";
-import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle } from "lucide-react";
+import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle, RefreshCcw } from "lucide-react";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { customFetch } from "@workspace/api-client-react";
@@ -514,6 +514,8 @@ export default function RetailersPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ retailersCreated: number; branchesCreated: number; branchesSkipped: number; totalFromHukuPlus: number } | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<Record<number, "branches" | "portal">>({}); 
 
@@ -530,6 +532,20 @@ export default function RetailersPage() {
     });
   };
 
+  const handleHukuPlusSync = async () => {
+    setIsSyncing(true);
+    setSyncResult(null);
+    try {
+      const result = await customFetch("/api/sync/hukuplus", { method: "POST" });
+      setSyncResult(result);
+      queryClient.invalidateQueries({ queryKey: ["/api/retailers"] });
+    } catch (err) {
+      console.error("Sync failed", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const getTab = (id: number) => activeTab[id] ?? "branches";
   const setTab = (id: number, tab: "branches" | "portal") => setActiveTab(prev => ({ ...prev, [id]: tab }));
 
@@ -539,7 +555,15 @@ export default function RetailersPage() {
         title="Retailers Directory"
         description="Manage partner stores, branch networks, and portal access accounts."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleHukuPlusSync}
+              disabled={isSyncing}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+            >
+              <RefreshCcw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
+              {isSyncing ? "Syncing..." : "Sync from HukuPlus"}
+            </button>
             <button
               onClick={() => setIsBulkModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-white transition-colors"
@@ -550,6 +574,25 @@ export default function RetailersPage() {
           </div>
         }
       />
+
+      {/* Sync result banner */}
+      <AnimatePresence>
+        {syncResult && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="mb-6 flex items-center gap-4 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20"
+          >
+            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-white">Sync complete — {syncResult.totalFromHukuPlus} stores pulled from HukuPlus</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {syncResult.retailersCreated} new retailers · {syncResult.branchesCreated} new branches added · {syncResult.branchesSkipped} already existed
+              </p>
+            </div>
+            <button onClick={() => setSyncResult(null)} className="text-muted-foreground hover:text-white text-xs px-2">Dismiss</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <GlassCard className="overflow-hidden">
         {isLoading ? (
