@@ -430,7 +430,6 @@ router.post("/formitize/webhook", async (req, res) => {
       const nodeKeys = Object.keys(node);
       if (nodeKeys.length === 1 && nodeKeys[0] === "0" && typeof node["0"] === "string" && node["0"].trim()) {
         fieldMap[fieldKey] = node["0"].trim();
-        console.log(`[formitize] Field (simplified) "${fieldKey}" = "${node["0"].trim()}"`);
         continue;
       }
 
@@ -438,7 +437,6 @@ router.post("/formitize/webhook", async (req, res) => {
       if (node.value !== undefined && node.value !== null && typeof node.value !== "object" && String(node.value).trim()) {
         const resolvedKey = (node.name || node.label || key).toString().toLowerCase();
         fieldMap[resolvedKey] = String(node.value).trim();
-        console.log(`[formitize] Field (full) "${resolvedKey}" = "${String(node.value).trim()}"`);
       }
 
       // Recurse into children or nested objects
@@ -446,7 +444,6 @@ router.post("/formitize/webhook", async (req, res) => {
       else if (typeof node === "object") extractFields(node, key);
     }
   }
-  console.log("[formitize] Raw content keys:", Object.keys(body.content || {}));
   extractFields(body.content || {});
 
   // Helper: find first matching value from a list of possible label substrings
@@ -459,29 +456,18 @@ router.post("/formitize/webhook", async (req, res) => {
     return undefined;
   };
 
-  console.log("[formitize] All extracted fields:", JSON.stringify(fieldMap));
+  console.log("[formitize] Extracted fields:", JSON.stringify(fieldMap));
 
-  // Extract key fields using actual Formitize field names from the NOVAFEED AGREEMENT form
-  // Phone and amount have confirmed field names; customer name and branch are TBD
-  // "Select Client" in Formitize is a CRM lookup field → formcrm_1
+  // "Select Client" CRM field → formcrm_1; fallback to borrowerID (national ID)
   const customerName  = findField(
     "formcrm_1", "borrowername", "clientname", "customername",
     "formtext_1", "formtext_2", "formtext_3", "borrowerid"
   );
   // This form is always Novafeeds — hardcoded
   const retailerName  = "Novafeeds";
-  // "Store Branch" is a manually typed text field — likely one of the formtext_X fields
-  // Log all formtext values so we can identify which one it is
-  console.log("[formitize] formtext values:", {
-    formtext_1: fieldMap["formtext_1"],
-    formtext_2: fieldMap["formtext_2"],
-    formtext_3: fieldMap["formtext_3"],
-    formtext_4: fieldMap["formtext_4"],
-    formtext_5: fieldMap["formtext_5"],
-    formcrm_1:  fieldMap["formcrm_1"],
-  });
+  // "Store Branch" is a text field — try known Formitize names then formtext fields
   const branchName    = findField(
-    "storebranch", "store branch", "branchname", "branch",
+    "storebranch", "store branch", "branchname", "appliedsettlement", "applieddisbursement",
     "formtext_1", "formtext_2", "formtext_3", "formtext_4", "formtext_5"
   );
   const customerPhone = findField("borrowermobile", "phone", "mobile", "cell", "contact number", "contactnumber") || null;
