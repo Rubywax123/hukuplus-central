@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { generateNovafeedAgreementPdf } from "../lib/novafeed-pdf";
 import { db, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
 import {
   CreateAgreementBody,
@@ -165,7 +165,7 @@ router.get("/agreements/:id/execution", async (req, res): Promise<void> => {
   });
 });
 
-// ADMIN + PORTAL: Download signed agreement as PDF
+// ADMIN + PORTAL: Download complete signed Novafeed Agreement as PDF
 router.get("/agreements/:id/download-pdf", async (req, res): Promise<void> => {
   const isAdmin    = req.isAuthenticated();
   const portalUser = (req.session as any)?.portalUser ?? null;
@@ -183,134 +183,26 @@ router.get("/agreements/:id/download-pdf", async (req, res): Promise<void> => {
   const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, agreement.retailerId));
   const [branch]   = await db.select().from(branchesTable).where(eq(branchesTable.id, agreement.branchId));
 
-  const pdfDoc = await PDFDocument.create();
+  const pdfBytes = await generateNovafeedAgreementPdf({
+    id: agreement.id,
+    customerName: agreement.customerName,
+    customerPhone: agreement.customerPhone ?? null,
+    loanAmount: agreement.loanAmount ?? null,
+    loanProduct: agreement.loanProduct ?? null,
+    status: agreement.status,
+    createdAt: agreement.createdAt ?? null,
+    signedAt: agreement.signedAt ?? null,
+    formitizeJobId: agreement.formitizeJobId ?? null,
+    signatureData: agreement.signatureData ?? null,
+    customerSignature2: (agreement as any).customerSignature2 ?? null,
+    customerSignature3: (agreement as any).customerSignature3 ?? null,
+    managerSignature:   (agreement as any).managerSignature   ?? null,
+    formData: (agreement as any).formData ?? null,
+    retailerName: retailer?.name ?? "",
+    branchName: branch?.name ?? "",
+  });
 
-  // ── Try to fetch and prepend the original Formitize form PDF ─────────────
-  const jobId      = agreement.formitizeJobId;
-  const storedUrl  = (agreement as any).formitizeFormUrl as string | null;
-  const apiKey     = process.env.FORMITIZE_API_KEY || "";
-
-  const formPdfUrls = [
-    storedUrl,
-    jobId ? `https://api.formitize.com/v1/jobs/${jobId}/report` : null,
-    jobId ? `https://service.formitize.com/report/${jobId}` : null,
-  ].filter(Boolean) as string[];
-
-  let formPdfFetched = false;
-  for (const url of formPdfUrls) {
-    try {
-      const resp = await fetch(url, {
-        headers: { "X-API-Key": apiKey, "Authorization": `Bearer ${apiKey}` },
-      });
-      if (resp.ok) {
-        const contentType = resp.headers.get("content-type") || "";
-        if (contentType.includes("pdf")) {
-          const bytes = await resp.arrayBuffer();
-          const existing = await PDFDocument.load(bytes);
-          const copied = await pdfDoc.copyPagesFrom(existing, existing.getPageIndices());
-          copied.forEach(p => pdfDoc.addPage(p));
-          formPdfFetched = true;
-          break;
-        }
-      }
-    } catch { /* try next URL */ }
-  }
-
-  // ── Generate execution certificate page ──────────────────────────────────
-  const helvetica     = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const PAGE_W = 595, PAGE_H = 841, MARGIN = 50;
-
-  const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
-  let y = PAGE_H - MARGIN;
-
-  const drawText = (text: string, x: number, yPos: number, size: number, bold = false, color = rgb(0,0,0)) => {
-    page.drawText(text, { x, y: yPos, size, font: bold ? helveticaBold : helvetica, color });
-  };
-
-  // Header
-  drawText("LOAN AGREEMENT EXECUTION CERTIFICATE", MARGIN, y, 14, true, rgb(0.07, 0.07, 0.07));
-  y -= 18;
-  drawText("Tefco Finance (Pvt) Ltd — HukuPlus Central", MARGIN, y, 9, false, rgb(0.4, 0.4, 0.4));
-  y -= 6;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
-  y -= 18;
-
-  // Details grid (2 columns)
-  const col1 = MARGIN, col2 = PAGE_W / 2 + 10, rowH = 28;
-  const drawField = (label: string, value: string, x: number, yPos: number) => {
-    drawText(label.toUpperCase(), x, yPos + 10, 7, false, rgb(0.5, 0.5, 0.5));
-    drawText(value || "—", x, yPos, 10, true);
-  };
-
-  drawField("Customer", agreement.customerName, col1, y);
-  drawField("Loan Product", agreement.loanProduct || "Novafeeds", col2, y);
-  y -= rowH;
-  drawField("Retailer", retailer?.name ?? "", col1, y);
-  drawField("Branch", branch?.name ?? "", col2, y);
-  y -= rowH;
-  drawField("Loan Amount", `USD ${Number(agreement.loanAmount ?? 0).toFixed(2)}`, col1, y);
-  drawField("Status", (agreement.status || "").toUpperCase(), col2, y);
-  y -= rowH;
-  drawField("Agreement Issued", agreement.createdAt ? new Date(agreement.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—", col1, y);
-  drawField("Executed On", agreement.signedAt ? new Date(agreement.signedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—", col2, y);
-  y -= rowH + 8;
-
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
-  y -= 18;
-  drawText("SIGNATURES", MARGIN, y, 9, true, rgb(0.4, 0.4, 0.4));
-  y -= 14;
-
-  // Draw a signature box
-  const SIG_W = (PAGE_W - MARGIN * 2 - 16) / 2;
-  const SIG_H = 100;
-  const drawSigBox = async (label: string, sublabel: string, sigData: string | null, x: number, yPos: number) => {
-    // Box border
-    page.drawRectangle({ x, y: yPos, width: SIG_W, height: SIG_H, borderColor: rgb(0.8, 0.8, 0.8), borderWidth: 1, color: rgb(1,1,1) });
-    // Label bar
-    page.drawRectangle({ x, y: yPos + SIG_H - 22, width: SIG_W, height: 22, color: rgb(0.97, 0.97, 0.97) });
-    drawText(label, x + 6, yPos + SIG_H - 13, 7, true, rgb(0.3, 0.3, 0.3));
-    drawText(sublabel, x + 6, yPos + SIG_H - 21, 6, false, rgb(0.6, 0.6, 0.6));
-    // Signature image
-    if (sigData) {
-      try {
-        const base64 = sigData.replace(/^data:image\/\w+;base64,/, "");
-        const imgBytes = Buffer.from(base64, "base64");
-        const img = await pdfDoc.embedPng(imgBytes).catch(() => pdfDoc.embedJpg(imgBytes));
-        const { width: iw, height: ih } = img.scale(1);
-        const scale = Math.min((SIG_W - 12) / iw, (SIG_H - 28) / ih, 1);
-        page.drawImage(img, { x: x + 6, y: yPos + 6, width: iw * scale, height: ih * scale });
-      } catch { /* skip if corrupt */ }
-    } else {
-      drawText("Not yet signed", x + SIG_W / 2 - 28, yPos + SIG_H / 2 - 14, 8, false, rgb(0.7, 0.7, 0.7));
-    }
-  };
-
-  const sigs = {
-    c1: agreement.signatureData ?? null,
-    c2: (agreement as any).customerSignature2 ?? null,
-    c3: (agreement as any).customerSignature3 ?? null,
-    mgr: (agreement as any).managerSignature ?? null,
-  };
-
-  await drawSigBox("Customer Signature 1 of 3", "Acknowledgement of loan terms", sigs.c1, col1, y - SIG_H);
-  await drawSigBox("Customer Signature 2 of 3", "Repayment schedule confirmation", sigs.c2, col2, y - SIG_H);
-  y -= SIG_H + 12;
-  await drawSigBox("Customer Signature 3 of 3", "Final authorisation", sigs.c1 ? sigs.c3 : null, col1, y - SIG_H);
-  await drawSigBox("Store Manager / Supervisor", "Authorised store representative", sigs.mgr, col2, y - SIG_H);
-  y -= SIG_H + 20;
-
-  // Footer
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
-  y -= 12;
-  drawText(`This certificate was generated by HukuPlus Central · Tefco Finance (Pvt) Ltd`, MARGIN, y, 7, false, rgb(0.6, 0.6, 0.6));
-  y -= 10;
-  if (!formPdfFetched) {
-    drawText("Note: Original Formitize form PDF was not available — this document serves as the execution record.", MARGIN, y, 7, false, rgb(0.6, 0.4, 0.1));
-  }
-
-  const pdfBytes = await pdfDoc.save();
-  const filename = `${agreement.customerName.replace(/[^a-z0-9 ]/gi, "")} - Signed Agreement.pdf`;
+  const filename = `${agreement.customerName.replace(/[^a-z0-9 ]/gi, "")} - Novafeed Agreement.pdf`;
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(Buffer.from(pdfBytes));

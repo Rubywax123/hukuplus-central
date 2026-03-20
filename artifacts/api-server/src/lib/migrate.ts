@@ -111,7 +111,8 @@ export async function runMigrations() {
         ADD COLUMN IF NOT EXISTS manager_signature TEXT,
         ADD COLUMN IF NOT EXISTS formitize_form_url TEXT,
         ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS created_by TEXT;
+        ADD COLUMN IF NOT EXISTS created_by TEXT,
+        ADD COLUMN IF NOT EXISTS form_data JSONB;
     `);
 
     // Add missing columns to activity table (idempotent)

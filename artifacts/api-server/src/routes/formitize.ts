@@ -526,6 +526,7 @@ router.post("/formitize/webhook", async (req, res) => {
     status: "pending",
     expiresAt,
     createdBy: "formitize-webhook",
+    formData: fieldMap as any,
   }).returning();
 
   console.log(`[formitize:webhook] Imported: ${customerName} @ ${retailer.name}/${branch.name}`);
