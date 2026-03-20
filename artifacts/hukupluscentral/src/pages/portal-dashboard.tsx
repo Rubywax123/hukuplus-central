@@ -268,9 +268,9 @@ export default function PortalDashboardPage() {
                     </div>
                     {agreement.status === "pending" && (
                       <div className="flex flex-col gap-1.5">
-                        {agreement.branchId && (
+                        {agreement.signingToken && (
                           <a
-                            href={`/kiosk/${agreement.branchId}`}
+                            href={`/sign/${agreement.signingToken}`}
                             target="_blank"
                             rel="noreferrer"
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20 whitespace-nowrap"
