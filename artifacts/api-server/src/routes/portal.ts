@@ -196,9 +196,10 @@ router.post("/portal/users", async (req, res) => {
 router.patch("/portal/users/:id", async (req, res) => {
   if (!req.isAuthenticated?.()) { res.status(401).json({ error: "Unauthorized" }); return; }
   const id = parseInt(req.params.id);
-  const { isActive, password, name } = req.body;
+  const { isActive, password, name, email } = req.body;
   const updates: any = {};
   if (name !== undefined) updates.name = name;
+  if (email !== undefined) updates.email = email.toLowerCase().trim();
   if (isActive !== undefined) updates.isActive = isActive;
   if (password) { updates.passwordHash = await hashPassword(password); updates.mustChangePassword = true; }
   await db.update(portalUsersTable).set(updates).where(eq(portalUsersTable.id, id));
@@ -207,7 +208,7 @@ router.patch("/portal/users/:id", async (req, res) => {
 
 router.delete("/portal/users/:id", async (req, res) => {
   if (!req.isAuthenticated?.()) { res.status(401).json({ error: "Unauthorized" }); return; }
-  await db.update(portalUsersTable).set({ isActive: false }).where(eq(portalUsersTable.id, parseInt(req.params.id)));
+  await db.delete(portalUsersTable).where(eq(portalUsersTable.id, parseInt(req.params.id)));
   res.json({ ok: true });
 });
 

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useListRetailers, useCreateRetailer, useListBranches, useCreateBranch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label } from "@/components/ui-extras";
-import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle, RefreshCcw } from "lucide-react";
+import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle, RefreshCcw, Pencil, Trash2 } from "lucide-react";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { customFetch } from "@workspace/api-client-react";
@@ -39,8 +39,15 @@ function useCreatePortalUser() {
 
 function useUpdatePortalUser() {
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; isActive?: boolean; password?: string; name?: string }) =>
+    mutationFn: ({ id, ...data }: { id: number; isActive?: boolean; password?: string; name?: string; email?: string }) =>
       customFetch(`/api/portal/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  });
+}
+
+function useDeletePortalUser() {
+  return useMutation({
+    mutationFn: (id: number) =>
+      customFetch(`/api/portal/users/${id}`, { method: "DELETE" }),
   });
 }
 
@@ -117,8 +124,12 @@ function PortalAccessPanel({ retailerId, retailerName }: { retailerId: number; r
   const { data: users, isLoading, refetch } = usePortalUsers(retailerId);
   const createMutation = useCreatePortalUser();
   const updateMutation = useUpdatePortalUser();
+  const deleteMutation = useDeletePortalUser();
   const [showModal, setShowModal] = useState(false);
   const [resetingId, setResetingId] = useState<number | null>(null);
+  const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "" });
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
 
@@ -157,6 +168,18 @@ function PortalAccessPanel({ retailerId, retailerName }: { retailerId: number; r
     });
   };
 
+  const handleEditSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    updateMutation.mutate({ id: editingUser.id, name: editForm.name, email: editForm.email }, {
+      onSuccess: () => { setEditingUser(null); refetch(); }
+    });
+  };
+
+  const handleDelete = (id: number) => {
+    deleteMutation.mutate(id, { onSuccess: () => { setConfirmDeleteId(null); refetch(); } });
+  };
+
   if (isLoading) return <div className="p-6 text-center text-sm text-muted-foreground animate-pulse">Loading portal users...</div>;
 
   return (
@@ -193,6 +216,8 @@ function PortalAccessPanel({ retailerId, retailerName }: { retailerId: number; r
                 onNewPasswordChange={setNewPassword}
                 onSavePassword={() => handleResetPassword(u.id)}
                 isSaving={updateMutation.isPending}
+                onEdit={() => { setEditingUser(u); setEditForm({ name: u.name, email: u.email }); }}
+                onDelete={() => setConfirmDeleteId(u.id)}
               />
             ))}
           </div>
@@ -224,11 +249,48 @@ function PortalAccessPanel({ retailerId, retailerName }: { retailerId: number; r
                 onNewPasswordChange={setNewPassword}
                 onSavePassword={() => handleResetPassword(u.id)}
                 isSaving={updateMutation.isPending}
+                onEdit={() => { setEditingUser(u); setEditForm({ name: u.name, email: u.email }); }}
+                onDelete={() => setConfirmDeleteId(u.id)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Edit User Modal */}
+      <Modal isOpen={!!editingUser} onClose={() => setEditingUser(null)} title="Edit Portal User">
+        <form onSubmit={handleEditSave} className="space-y-4">
+          <div>
+            <Label>Full Name</Label>
+            <Input required value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
+          </div>
+          <div>
+            <Label>Email Address</Label>
+            <Input required type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} placeholder="email@example.com" />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => setEditingUser(null)} className="px-4 py-2 text-sm text-muted-foreground hover:text-white transition-colors">Cancel</button>
+            <GradientButton type="submit" isLoading={updateMutation.isPending}>Save Changes</GradientButton>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal isOpen={!!confirmDeleteId} onClose={() => setConfirmDeleteId(null)} title="Delete Portal User">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">This will permanently delete the user and revoke their portal access. This cannot be undone.</p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={() => setConfirmDeleteId(null)} className="px-4 py-2 text-sm text-muted-foreground hover:text-white transition-colors">Cancel</button>
+            <button
+              onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+              disabled={deleteMutation.isPending}
+              className="px-4 py-2 text-sm font-semibold bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete User"}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Create User Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={`Add Portal User — ${retailerName}`}>
@@ -309,9 +371,11 @@ type UserRowProps = {
   onNewPasswordChange: (v: string) => void;
   onSavePassword: () => void;
   isSaving: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
 };
 
-function UserRow({ user, isResetting, newPassword, showPw, onTogglePwVis, onToggleActive, onStartReset, onCancelReset, onNewPasswordChange, onSavePassword, isSaving }: UserRowProps) {
+function UserRow({ user, isResetting, newPassword, showPw, onTogglePwVis, onToggleActive, onStartReset, onCancelReset, onNewPasswordChange, onSavePassword, isSaving, onEdit, onDelete }: UserRowProps) {
   return (
     <div className={`rounded-lg border px-4 py-3 transition-colors ${user.isActive ? "bg-white/5 border-white/10" : "bg-white/[0.02] border-white/5 opacity-60"}`}>
       <div className="flex items-center justify-between gap-4">
@@ -328,7 +392,14 @@ function UserRow({ user, isResetting, newPassword, showPw, onTogglePwVis, onTogg
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">{user.email}</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={onEdit}
+            title="Edit name & email"
+            className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-white/5 transition-colors"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
           <button
             onClick={onStartReset}
             title="Reset password"
@@ -339,9 +410,16 @@ function UserRow({ user, isResetting, newPassword, showPw, onTogglePwVis, onTogg
           <button
             onClick={onToggleActive}
             title={user.isActive ? "Deactivate" : "Reactivate"}
-            className={`p-1.5 rounded-md hover:bg-white/5 transition-colors ${user.isActive ? "text-muted-foreground hover:text-red-400" : "text-muted-foreground hover:text-green-400"}`}
+            className={`p-1.5 rounded-md hover:bg-white/5 transition-colors ${user.isActive ? "text-muted-foreground hover:text-orange-400" : "text-muted-foreground hover:text-green-400"}`}
           >
             <UserX className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onDelete}
+            title="Delete user"
+            className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-white/5 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
