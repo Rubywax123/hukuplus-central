@@ -1,6 +1,6 @@
 import app from "./app";
 import { runMigrations } from "./lib/migrate";
-import { syncHukuPlusStores } from "./routes/sync";
+import { syncHukuPlusStores, syncRevolverStores } from "./routes/sync";
 
 const rawPort = process.env["PORT"];
 
@@ -20,17 +20,32 @@ const SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 function startSyncScheduler() {
   const run = async () => {
+    // Step 1: pull from HukuPlus into Central
     console.log("[sync] Starting scheduled HukuPlus sync...");
     try {
       const result = await syncHukuPlusStores();
       console.log(
-        `[sync] Done — ${result.totalFromHukuPlus} stores checked, ` +
+        `[sync:hukuplus] Done — ${result.totalFromHukuPlus} stores checked, ` +
         `${result.retailersCreated} retailers created, ` +
         `${result.branchesCreated} branches added, ` +
         `${result.branchesSkipped} skipped.`
       );
     } catch (err: any) {
-      console.error("[sync] Scheduled sync failed:", err.message);
+      console.error("[sync:hukuplus] Failed:", err.message);
+    }
+
+    // Step 2: push from Central into Revolver
+    console.log("[sync] Starting scheduled Revolver sync...");
+    try {
+      const result = await syncRevolverStores();
+      console.log(
+        `[sync:revolver] Done — ` +
+        `${result.retailersCreated} retailers created, ` +
+        `${result.branchesCreated} branches pushed, ` +
+        `${result.branchesSkipped} skipped.`
+      );
+    } catch (err: any) {
+      console.error("[sync:revolver] Failed:", err.message);
     }
   };
 
