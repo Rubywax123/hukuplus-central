@@ -336,7 +336,7 @@ export async function generateNovafeedAgreementPdf(data: AgreementData): Promise
   if (isSigned) {
     ctx2.y -= 6;
     ctx2.page.drawRectangle({ x: ML, y: ctx2.y - 28, width: CW, height: 28, color: rgb(0.93,1,0.95), borderColor: rgb(0.3,0.7,0.4), borderWidth: 0.8 });
-    text({ ...ctx2, y: ctx2.y - 10 }, "✓  AGREEMENT FULLY EXECUTED", ML + 8, 9, rgb(0.1,0.5,0.2), false, bold);
+    text({ ...ctx2, y: ctx2.y - 10 }, "AGREEMENT FULLY EXECUTED", ML + 8, 9, rgb(0.1,0.5,0.2), false, bold);
     text({ ...ctx2, y: ctx2.y - 21 }, `All four signatures captured on ${sigDate} via HukuPlus Central · Tefco Finance (Pvt) Ltd`, ML + 8, 7, rgb(0.2,0.5,0.3));
     ctx2.y -= 34;
   }
