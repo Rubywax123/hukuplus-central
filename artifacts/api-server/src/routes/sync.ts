@@ -17,54 +17,35 @@ type HukuStore = {
   enabled: boolean;
 };
 
-/**
- * POST /api/sync/hukuplus
- * Pulls all stores from the HukuPlus loan app and upserts them
- * into Central's retailers + branches tables.
- * Existing retailers matched by name — only new branches added.
- * Nothing is deleted.
- */
-router.post("/sync/hukuplus", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
+// ─── Core sync logic (used by both the route and the scheduler) ───────────────
+
+export async function syncHukuPlusStores() {
+  if (!HUKUPLUS_API_KEY) throw new Error("HUKUPLUS_API_KEY not configured");
+
+  const response = await fetch(`${HUKUPLUS_API_URL}/api/central/stores`, {
+    headers: { Authorization: `Bearer ${HUKUPLUS_API_KEY}` },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HukuPlus API returned ${response.status}: ${text.slice(0, 200)}`);
   }
 
-  if (!HUKUPLUS_API_KEY) {
-    res.status(500).json({ error: "HUKUPLUS_API_KEY not configured" });
-    return;
-  }
-
-  let stores: HukuStore[];
-  try {
-    const response = await fetch(`${HUKUPLUS_API_URL}/api/central/stores`, {
-      headers: { Authorization: `Bearer ${HUKUPLUS_API_KEY}` },
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      res.status(502).json({ error: `HukuPlus API returned ${response.status}`, detail: text.slice(0, 200) });
-      return;
-    }
-    stores = await response.json();
-  } catch (err: any) {
-    res.status(502).json({ error: `Failed to reach HukuPlus API: ${err.message}` });
-    return;
-  }
+  const stores: HukuStore[] = await response.json();
 
   const results = {
     retailersCreated: 0,
     branchesCreated: 0,
     branchesSkipped: 0,
     errors: [] as string[],
+    totalFromHukuPlus: stores.length,
   };
 
-  // Cache retailers we've already looked up or created this run
   const retailerCache: Record<string, number> = {};
 
   for (const store of stores) {
     const rName = (store.retailer_name ?? "").trim();
     const bName = (store.branch ?? "").trim();
-    const email = (store.email ?? "").trim().toLowerCase();
 
     if (!rName || !bName) {
       results.errors.push(`Skipped: missing retailer or branch name on store id ${store.id}`);
@@ -72,7 +53,6 @@ router.post("/sync/hukuplus", async (req, res): Promise<void> => {
     }
 
     try {
-      // Get or create retailer
       if (!(rName in retailerCache)) {
         const [existing] = await db
           .select()
@@ -93,7 +73,6 @@ router.post("/sync/hukuplus", async (req, res): Promise<void> => {
 
       const retailerId = retailerCache[rName];
 
-      // Check if branch already exists
       const existingBranches = await db
         .select()
         .from(branchesTable)
@@ -104,11 +83,7 @@ router.post("/sync/hukuplus", async (req, res): Promise<void> => {
       );
 
       if (!branchExists) {
-        await db.insert(branchesTable).values({
-          retailerId,
-          name: bName,
-          isActive: true,
-        });
+        await db.insert(branchesTable).values({ retailerId, name: bName, isActive: true });
         results.branchesCreated++;
       } else {
         results.branchesSkipped++;
@@ -118,11 +93,23 @@ router.post("/sync/hukuplus", async (req, res): Promise<void> => {
     }
   }
 
-  res.json({
-    ok: true,
-    totalFromHukuPlus: stores.length,
-    ...results,
-  });
+  return results;
+}
+
+// ─── Manual trigger route ─────────────────────────────────────────────────────
+
+router.post("/sync/hukuplus", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const results = await syncHukuPlusStores();
+    res.json({ ok: true, ...results });
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 export default router;
