@@ -29,6 +29,9 @@ router.post("/formitize/webhook", async (req, res) => {
 
   const body = req.body;
 
+  // Log full payload for debugging — helps verify Formitize field names
+  console.log("[formitize] Received webhook payload:", JSON.stringify(body, null, 2));
+
   // Only process HukuPlus Loan Agreement forms — ignore everything else from Formitize
   const formName: string = (
     body.form_name || body.FormName || body.formName ||
