@@ -10,6 +10,7 @@ import integrationsRouter from "./integrations";
 import portalRouter from "./portal";
 import formitizeRouter from "./formitize";
 import syncRouter from "./sync";
+import externalRouter from "./external";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(integrationsRouter);
 router.use(portalRouter);
 router.use(formitizeRouter);
 router.use(syncRouter);
+router.use(externalRouter);
 
 export default router;
