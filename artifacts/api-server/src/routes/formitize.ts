@@ -407,23 +407,37 @@ router.post("/formitize/webhook", async (req, res) => {
     return;
   }
 
-  // Formitize puts form field data inside body.content as { "0": {label, value}, "1": {...}, ... }
-  // Build a label → value map so we can look up fields by their label text
+  // Recursively walk the content object and collect all field key→value pairs
   const fieldMap: Record<string, string> = {};
-  const content = body.content || {};
-  console.log("[formitize] Raw content keys:", Object.keys(content));
-  for (const key of Object.keys(content)) {
-    const field = content[key];
-    console.log(`[formitize] content["${key}"] =`, JSON.stringify(field));
-    if (!field) continue;
-    // Support multiple structures: {label, value}, {question, answer}, {name, data}, plain string
-    const label = (field.label || field.question || field.name || field.field || field.title || key).toString().toLowerCase().trim();
-    const value = (field.value !== undefined ? field.value : field.answer !== undefined ? field.answer : field.data !== undefined ? field.data : typeof field === "string" ? field : "").toString().trim();
-    if (label && value) {
-      fieldMap[label] = value;
-      console.log(`[formitize] Mapped "${label}" = "${value}"`);
+  function extractFields(obj: any, path = "") {
+    if (!obj || typeof obj !== "object") return;
+    for (const key of Object.keys(obj)) {
+      const node = obj[key];
+      if (!node || typeof node !== "object") {
+        // Leaf primitive — store by key
+        if (node !== undefined && node !== null && String(node).trim()) {
+          fieldMap[key.toLowerCase()] = String(node).trim();
+        }
+        continue;
+      }
+      // Node with a value property → this is a form field
+      if (node.value !== undefined && node.value !== null && node.value !== "" && typeof node.value !== "object") {
+        const fieldKey = (node.name || node.label || key).toString().toLowerCase();
+        const fieldVal = String(node.value).trim();
+        if (fieldVal) {
+          fieldMap[fieldKey] = fieldVal;
+          console.log(`[formitize] Field "${fieldKey}" = "${fieldVal}"`);
+        }
+      }
+      // Also recurse into children
+      if (node.children) extractFields(node.children, key);
+      // Recurse into the node itself for nested structures
+      if (node.value && typeof node.value === "object") extractFields(node.value, key);
     }
   }
+  const content = body.content || body;
+  console.log("[formitize] Raw content keys:", Object.keys(body.content || {}));
+  extractFields(content);
 
   // Helper: find first matching value from a list of possible label substrings
   const findField = (...needles: string[]): string | undefined => {
@@ -435,12 +449,14 @@ router.post("/formitize/webhook", async (req, res) => {
     return undefined;
   };
 
-  // Extract key fields — try multiple label variations to be resilient
-  const customerName  = findField("client name", "customer name", "client", "customer", "name");
-  const retailerName  = findField("store name", "retailer name", "store", "retailer", "novafeed");
-  const branchName    = findField("branch name", "branch");
-  const customerPhone = findField("phone", "mobile", "cell", "contact number") || null;
-  const loanAmountRaw = findField("loan amount", "amount", "loan");
+  console.log("[formitize] All extracted fields:", JSON.stringify(fieldMap));
+
+  // Extract key fields — try label text AND Formitize internal field names
+  const customerName  = findField("client name", "customer name", "clientname", "customername", "client", "customer", "fullname", "name");
+  const retailerName  = findField("store name", "retailer name", "storename", "retailername", "store", "retailer", "novafeed", "outlet");
+  const branchName    = findField("branch name", "branchname", "branch");
+  const customerPhone = findField("phone", "mobile", "cell", "contact number", "contactnumber", "phonenumber", "mobilenumber") || null;
+  const loanAmountRaw = findField("loan amount", "loanamount", "amount", "loan value", "loanvalue");
   const loanAmount    = parseFloat(loanAmountRaw || "0");
 
   // Job ID: prefer the real jobID, fall back to submittedFormID
