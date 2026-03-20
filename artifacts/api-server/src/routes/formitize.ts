@@ -468,11 +468,9 @@ router.post("/formitize/webhook", async (req, res) => {
   );
   // This form is always Novafeeds — hardcoded
   const retailerName  = "Novafeeds";
-  // "Store Branch" is a text field — try known Formitize names then formtext fields
-  const branchName    = findField(
-    "storebranch", "store branch", "branchname", "appliedsettlement", "applieddisbursement",
-    "formtext_1", "formtext_2", "formtext_3", "formtext_4", "formtext_5"
-  );
+  // "Store Branch" lives in formtext_5 on the Novafeed Agreement form.
+  // appliedDisbursement and appliedSettlement are dates — do not use them for branch.
+  const branchName    = findField("formtext_5", "storebranch", "store branch", "branchname");
   const customerPhone = findField("borrowermobile", "phone", "mobile", "cell", "contact number", "contactnumber") || null;
   const loanAmountRaw = findField("loanamount", "loan amount", "amount");
   const loanAmount    = parseFloat(loanAmountRaw || "0");
