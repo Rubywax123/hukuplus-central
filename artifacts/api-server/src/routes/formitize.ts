@@ -287,6 +287,101 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
   });
 });
 
+// ─── GET /api/formitize/one-click ─────────────────────────────────────────────
+// Field agent clicks this URL from the Formitize notification email.
+// No login needed — protected by FORMITIZE_IMPORT_KEY env var.
+// Usage: configure Formitize notification message to include:
+//   https://huku-plus-central.replit.app/api/formitize/one-click
+//     ?key=IMPORT_KEY
+//     &customer={{CustomerName}}
+//     &branch={{StoreBranch}}
+//     &retailer={{StoreChain}}
+//     &amount={{LoanAmount}}
+//     &jobId={{JobID}}
+router.get("/formitize/one-click", async (req, res): Promise<void> => {
+  const importKey = process.env.FORMITIZE_IMPORT_KEY;
+  if (importKey && req.query.key !== importKey) {
+    res.status(401).send("Unauthorized — invalid import key.");
+    return;
+  }
+
+  const customerName  = (req.query.customer as string || "").trim();
+  const branchRaw     = (req.query.branch   as string || "").trim();
+  const retailerRaw   = (req.query.retailer as string || "").trim();
+  const amountRaw     = (req.query.amount   as string || "0");
+  const jobId         = (req.query.jobId    as string || "").trim() || null;
+  const formUrl       = (req.query.formUrl  as string || "").trim() || null;
+
+  if (!customerName || !branchRaw) {
+    res.status(400).send("Missing required fields: customer, branch");
+    return;
+  }
+
+  const loanAmount = parseFloat(amountRaw.replace(/[^0-9.]/g, "")) || 0;
+  const allRetailers = await db.select().from(retailersTable);
+  const allBranches  = await db.select().from(branchesTable);
+
+  // Dedup by jobId
+  if (jobId) {
+    const existing = await db.select({ id: agreementsTable.id })
+      .from(agreementsTable).where(eq(agreementsTable.formitizeJobId, jobId));
+    if (existing.length > 0) {
+      const branch = allBranches.find(b => b.name.toLowerCase().includes(branchRaw.toLowerCase()));
+      const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
+      const kioskUrl = branch ? `${appUrl}/kiosk/${branch.id}` : appUrl;
+      res.redirect(kioskUrl);
+      return;
+    }
+  }
+
+  // Match retailer
+  let retailer = allRetailers.find(r => r.name.toLowerCase() === retailerRaw.toLowerCase())
+    ?? allRetailers.find(r => r.name.toLowerCase().includes(retailerRaw.toLowerCase()) || retailerRaw.toLowerCase().includes(r.name.toLowerCase()))
+    ?? allRetailers.find(r => {
+        const b = allBranches.find(b2 => b2.name.toLowerCase().includes(branchRaw.toLowerCase()) || branchRaw.toLowerCase().includes(b2.name.toLowerCase()));
+        return b && r.id === b.retailerId;
+      });
+
+  if (!retailer) {
+    res.status(422).send(`Retailer not found: "${retailerRaw}". Please add it in HukuPlus Central.`);
+    return;
+  }
+
+  // Match branch
+  const branchesForRetailer = allBranches.filter(b => b.retailerId === retailer!.id);
+  const branch = branchesForRetailer.find(b => b.name.toLowerCase() === branchRaw.toLowerCase())
+    ?? branchesForRetailer.find(b => b.name.toLowerCase().includes(branchRaw.toLowerCase()) || branchRaw.toLowerCase().includes(b.name.toLowerCase()));
+
+  if (!branch) {
+    const available = branchesForRetailer.map(b => b.name).join(", ");
+    res.status(422).send(`Branch not found: "${branchRaw}" under ${retailer.name}. Available: ${available}`);
+    return;
+  }
+
+  const signingToken = crypto.randomBytes(32).toString("hex");
+  const expiresAt    = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const appUrl       = process.env.APP_URL || "https://huku-plus-central.replit.app";
+
+  const [agreement] = await db.insert(agreementsTable).values({
+    retailerId: retailer.id, branchId: branch.id,
+    customerName, loanProduct: "Novafeeds", loanAmount,
+    formitizeJobId: jobId, formitizeFormUrl: formUrl,
+    signingToken, status: "pending", expiresAt, createdBy: "formitize-one-click",
+  }).returning();
+
+  await db.insert(activityTable).values({
+    type: "agreement_created",
+    description: `Agreement auto-imported via one-click link for ${customerName}`,
+    retailerName: retailer.name, branchName: branch.name, loanProduct: "Novafeeds",
+    referenceId: agreement.id,
+  });
+
+  console.log(`[formitize:one-click] Imported: ${customerName} @ ${retailer.name}/${branch.name}`);
+
+  // Redirect to the kiosk screen for that branch — it will now show the agreement
+  res.redirect(`${appUrl}/kiosk/${branch.id}`);
+});
+
 // ─── POST /api/formitize/webhook ──────────────────────────────────────────────
 router.post("/formitize/webhook", async (req, res) => {
   const webhookSecret = process.env.FORMITIZE_WEBHOOK_SECRET;

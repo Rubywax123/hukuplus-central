@@ -1,192 +1,292 @@
-import React, { useState, useRef } from "react";
-import { useGetSigningSession, useVerifySigningIdentity, useSubmitSignature } from "@workspace/api-client-react";
-import { GlassCard, GradientButton, Input, Label, Badge } from "@/components/ui-extras";
-import { Zap, ShieldCheck, PenTool, CheckCircle, FileX } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { useGetSigningSession, useSubmitSignature } from "@workspace/api-client-react";
+import { GradientButton } from "@/components/ui-extras";
+import { CheckCircle, FileX, PenTool, RotateCcw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import SignatureCanvas from "react-signature-canvas";
 
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+function formatAmount(n: number) {
+  return `USD ${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export default function PublicSigningPage({ token }: { token: string }) {
   const { data: session, isLoading, error } = useGetSigningSession(token);
-  const verifyMutation = useVerifySigningIdentity();
   const submitMutation = useSubmitSignature();
-  
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [details, setDetails] = useState<any>(null);
+
+  const [step, setStep] = useState<"confirm" | "sign" | "done">("confirm");
+  const [isEmpty, setIsEmpty] = useState(true);
   const sigCanvas = useRef<any>(null);
 
-  // Form Step 1
-  const [rName, setRName] = useState("");
-  const [bName, setBName] = useState("");
-  const [cName, setCName] = useState("");
+  // Read optional ?return= query param so we can send the customer back
+  // to the kiosk screen after signing.
+  const returnPath = new URLSearchParams(window.location.search).get("return");
+  const returnUrl = returnPath
+    ? `${window.location.origin}${BASE}${returnPath}`
+    : null;
 
+  // Resize canvas to fill its container on mount and window resize
+  useEffect(() => {
+    const resizeCanvas = () => {
+      const canvas = sigCanvas.current?.getCanvas();
+      if (!canvas) return;
+      const ratio = window.devicePixelRatio || 1;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      canvas.width = w * ratio;
+      canvas.height = h * ratio;
+      ctx?.scale(ratio, ratio);
+      sigCanvas.current?.clear();
+      setIsEmpty(true);
+    };
+    window.addEventListener("resize", resizeCanvas);
+    // Slight delay to let layout settle
+    setTimeout(resizeCanvas, 100);
+    return () => window.removeEventListener("resize", resizeCanvas);
+  }, [step]);
+
+  const handleSubmit = () => {
+    if (!sigCanvas.current || sigCanvas.current.isEmpty()) return;
+    const signatureData = sigCanvas.current.toDataURL("image/png");
+    submitMutation.mutate({ token, data: { signatureData } }, {
+      onSuccess: () => setStep("done"),
+    });
+  };
+
+  /* ── Loading ─────────────────────────────────────────────────────────────── */
   if (isLoading) return (
-    <div className="min-h-screen bg-background flex items-center justify-center text-primary animate-pulse">
-      Verifying secure link...
+    <div className="min-h-screen bg-[#04080f] flex items-center justify-center">
+      <p className="text-white/30 text-lg tracking-widest animate-pulse">LOADING…</p>
     </div>
   );
 
+  /* ── Invalid / expired ───────────────────────────────────────────────────── */
   if (error || !session) return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <GlassCard className="p-8 max-w-md text-center">
-        <FileX className="w-16 h-16 text-destructive mx-auto mb-4" />
-        <h2 className="text-xl font-display font-bold mb-2">Invalid or Expired Link</h2>
-        <p className="text-muted-foreground">This secure signing link is no longer valid or does not exist. Please request a new one.</p>
-      </GlassCard>
+    <div className="min-h-screen bg-[#04080f] flex items-center justify-center p-6">
+      <div className="bg-white/[0.04] border border-red-500/20 rounded-3xl p-10 max-w-sm w-full text-center">
+        <FileX className="w-14 h-14 text-red-400/60 mx-auto mb-5" />
+        <h2 className="text-xl font-bold text-white mb-2">Link Invalid or Expired</h2>
+        <p className="text-white/40 text-sm">This signing link is no longer valid. Please ask for a new one to be generated.</p>
+      </div>
     </div>
   );
 
-  if (session.status === 'signed') return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <GlassCard className="p-8 max-w-md text-center border-emerald-500/30">
-        <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
-        <h2 className="text-xl font-display font-bold mb-2 text-white">Agreement Signed</h2>
-        <p className="text-muted-foreground">This document has already been fully executed and locked. Thank you.</p>
-      </GlassCard>
+  /* ── Already signed ──────────────────────────────────────────────────────── */
+  if (session.status === "signed" && step !== "done") return (
+    <div className="min-h-screen bg-[#04080f] flex items-center justify-center p-6">
+      <div className="bg-white/[0.04] border border-emerald-500/20 rounded-3xl p-10 max-w-sm w-full text-center">
+        <CheckCircle className="w-14 h-14 text-emerald-500 mx-auto mb-5" />
+        <h2 className="text-xl font-bold text-white mb-2">Already Signed</h2>
+        <p className="text-white/40 text-sm">This agreement has already been executed. Thank you.</p>
+        {returnUrl && (
+          <a href={returnUrl} className="mt-6 block text-sm text-white/40 hover:text-white underline underline-offset-4">
+            ← Return to store screen
+          </a>
+        )}
+      </div>
     </div>
   );
-
-  const handleVerify = (e: React.FormEvent) => {
-    e.preventDefault();
-    verifyMutation.mutate({
-      token,
-      data: { retailerName: rName, branchName: bName, customerName: cName }
-    }, {
-      onSuccess: (res) => {
-        setDetails(res);
-        setStep(2);
-      }
-    });
-  };
-
-  const handleSubmitSignature = () => {
-    if (sigCanvas.current?.isEmpty()) {
-      alert("Please provide a signature first.");
-      return;
-    }
-    const signatureData = sigCanvas.current.toDataURL();
-    submitMutation.mutate({
-      token,
-      data: { signatureData }
-    }, {
-      onSuccess: () => setStep(3)
-    });
-  };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col py-10 px-4 items-center">
-      {/* Brand Header */}
-      <div className="mb-8 flex flex-col items-center">
-        <div className="w-12 h-12 mb-3 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20">
-          <Zap className="w-7 h-7 text-white" />
+    <div className="min-h-screen bg-[#04080f] flex flex-col" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+
+      {/* ── Top bar ────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] shrink-0">
+        <div>
+          <p className="text-white/25 text-xs tracking-widest uppercase">HukuPlus Central</p>
+          <p className="text-white font-semibold text-sm">{session.retailerName} · {session.branchName}</p>
         </div>
-        <h1 className="font-display font-bold text-2xl text-gradient">HukuPlus Central</h1>
-        <p className="text-sm font-medium tracking-widest text-muted-foreground uppercase mt-1">Secure Signing Gateway</p>
+        <div className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-400 text-xs font-medium">
+          Secure Signing
+        </div>
       </div>
 
-      <AnimatePresence mode="wait">
-        {step === 1 && (
-          <motion.div key="step1" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-md">
-            <GlassCard className="p-8">
-              <div className="flex items-center gap-3 mb-6 pb-6 border-b border-white/5">
-                <ShieldCheck className="w-8 h-8 text-primary" />
-                <div>
-                  <h2 className="text-xl font-display font-bold text-white">Identity Verification</h2>
-                  <p className="text-sm text-muted-foreground">Please confirm location details.</p>
-                </div>
+      {/* ── Main ───────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col items-center justify-start px-4 py-6 overflow-y-auto">
+        <AnimatePresence mode="wait">
+
+          {/* ── STEP 1: Confirm details ────────────────────────────────────── */}
+          {step === "confirm" && (
+            <motion.div
+              key="confirm"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              className="w-full max-w-md"
+            >
+              <div className="text-center mb-8">
+                <h1 className="text-3xl font-bold text-white mb-1">Loan Agreement</h1>
+                <p className="text-white/40 text-sm">Please confirm the details below are correct before signing.</p>
               </div>
 
-              {verifyMutation.isError && (
-                <div className="bg-destructive/10 border border-destructive/20 text-destructive-foreground p-3 rounded-lg text-sm mb-6">
-                  Verification failed. Please check the details and try again.
-                </div>
-              )}
-
-              <form onSubmit={handleVerify} className="space-y-5">
-                <div>
-                  <Label>Retailer Name</Label>
-                  <Input required placeholder={`e.g. ${session.retailerName}`} value={rName} onChange={e => setRName(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Branch Name</Label>
-                  <Input required placeholder={`e.g. ${session.branchName}`} value={bName} onChange={e => setBName(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Customer Name</Label>
-                  <Input required placeholder="Exact full name" value={cName} onChange={e => setCName(e.target.value)} />
-                </div>
-                <GradientButton type="submit" isLoading={verifyMutation.isPending} className="w-full py-3.5 mt-4 text-base">
-                  Verify & Access Document
-                </GradientButton>
-              </form>
-            </GlassCard>
-          </motion.div>
-        )}
-
-        {step === 2 && details && (
-          <motion.div key="step2" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-4xl">
-            <GlassCard className="p-0 overflow-hidden">
-              <div className="p-6 md:p-8 bg-black/20 border-b border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                  <h2 className="text-2xl font-display font-bold text-white">{details.customerName}</h2>
-                  <p className="text-muted-foreground mt-1">Loan Agreement Execution</p>
-                </div>
-                <div className="text-left md:text-right">
-                  <Badge status="success">{details.loanProduct}</Badge>
-                  <p className="text-xl font-bold text-white mt-1">KES {details.loanAmount.toLocaleString()}</p>
-                </div>
-              </div>
-
-              <div className="p-6 md:p-8">
-                {details.formitizeFormUrl ? (
-                  <div className="w-full rounded-xl overflow-hidden border border-white/10 mb-8 bg-white shadow-inner">
-                    <iframe src={details.formitizeFormUrl} className="w-full h-[60vh] border-0" title="Loan Document" />
+              {/* Agreement summary card */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-3xl p-6 mb-6 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Customer</p>
+                    <p className="text-white text-2xl font-bold">{session.customerName}</p>
                   </div>
-                ) : (
-                  <div className="w-full py-20 flex flex-col items-center justify-center rounded-xl border border-white/10 mb-8 bg-black/20">
-                    <FileX className="w-12 h-12 text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground text-center max-w-md">The document visualizer is currently unavailable, but the agreement details above are confirmed.</p>
+                  <div className="text-right">
+                    <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Product</p>
+                    <p className="text-white font-semibold">{session.loanProduct}</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-white/[0.06] pt-4">
+                  <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Loan Amount</p>
+                  <p className="text-white text-3xl font-bold">{formatAmount(session.loanAmount)}</p>
+                </div>
+
+                {(session as any).formitizeFormUrl && (
+                  <div className="border-t border-white/[0.06] pt-4">
+                    <a
+                      href={(session as any).formitizeFormUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-violet-400 text-sm underline underline-offset-4 hover:text-violet-300"
+                    >
+                      View full agreement document →
+                    </a>
                   </div>
                 )}
-
-                <div className="max-w-2xl mx-auto">
-                  <div className="flex items-center gap-2 mb-3">
-                    <PenTool className="w-5 h-5 text-primary" />
-                    <h3 className="font-semibold text-white">Digital Signature</h3>
-                  </div>
-                  <div className="bg-card border-2 border-white/10 rounded-xl overflow-hidden mb-3 relative group focus-within:border-primary/50 transition-colors">
-                    <SignatureCanvas 
-                      ref={sigCanvas}
-                      penColor="white"
-                      canvasProps={{ className: 'w-full h-48 cursor-crosshair' }}
-                    />
-                    <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => sigCanvas.current?.clear()} className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded-md text-xs font-medium backdrop-blur-md">Clear</button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-8 text-center">I confirm that I have read and agree to the terms of this loan product.</p>
-
-                  <GradientButton onClick={handleSubmitSignature} isLoading={submitMutation.isPending} className="w-full py-4 text-lg shadow-xl shadow-primary/20">
-                    Sign & Submit Agreement
-                  </GradientButton>
-                </div>
               </div>
-            </GlassCard>
-          </motion.div>
-        )}
 
-        {step === 3 && (
-          <motion.div key="step3" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md">
-            <GlassCard className="p-10 text-center border-emerald-500/30 shadow-2xl shadow-emerald-500/10">
-              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}>
-                <CheckCircle className="w-20 h-20 text-emerald-500 mx-auto mb-6" />
+              {/* Terms notice */}
+              <div className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-4 mb-6 text-xs text-white/30 leading-relaxed">
+                By proceeding to sign, I confirm that I am <strong className="text-white/50">{session.customerName}</strong> and that I have read and understood the terms of this {session.loanProduct} loan agreement for {formatAmount(session.loanAmount)} from {session.retailerName} ({session.branchName}).
+              </div>
+
+              <button
+                onClick={() => setStep("sign")}
+                className="block w-full py-5 rounded-2xl text-white text-xl font-bold text-center transition-all active:scale-95"
+                style={{
+                  background: "linear-gradient(135deg, #5b21b6 0%, #7c3aed 50%, #9333ea 100%)",
+                  boxShadow: "0 0 50px rgba(124, 58, 237, 0.3), inset 0 1px 0 rgba(255,255,255,0.1)"
+                }}
+              >
+                Details correct — Proceed to sign
+              </button>
+            </motion.div>
+          )}
+
+          {/* ── STEP 2: Signature canvas ───────────────────────────────────── */}
+          {step === "sign" && (
+            <motion.div
+              key="sign"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              className="w-full max-w-2xl"
+            >
+              <div className="text-center mb-6">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <PenTool className="w-5 h-5 text-violet-400" />
+                  <h2 className="text-2xl font-bold text-white">Sign Here</h2>
+                </div>
+                <p className="text-white/35 text-sm">Use your finger or stylus to draw your signature in the box below.</p>
+              </div>
+
+              {/* Summary strip */}
+              <div className="flex items-center justify-between px-5 py-3 bg-white/[0.03] border border-white/[0.06] rounded-2xl mb-4 text-sm">
+                <span className="text-white/50">{session.customerName}</span>
+                <span className="text-white/50">{formatAmount(session.loanAmount)}</span>
+              </div>
+
+              {/* Signature pad */}
+              <div className="relative bg-white rounded-2xl overflow-hidden mb-2" style={{ height: "240px" }}>
+                <SignatureCanvas
+                  ref={sigCanvas}
+                  penColor="#1e1b4b"
+                  velocityFilterWeight={0.7}
+                  minWidth={1.5}
+                  maxWidth={3.5}
+                  canvasProps={{ className: "w-full h-full", style: { touchAction: "none" } }}
+                  onBegin={() => setIsEmpty(false)}
+                />
+                {isEmpty && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <p className="text-slate-300 text-sm select-none">Draw your signature here</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Clear & hint */}
+              <div className="flex items-center justify-between mb-6">
+                <p className="text-white/20 text-xs">Sign within the white box above</p>
+                <button
+                  onClick={() => { sigCanvas.current?.clear(); setIsEmpty(true); }}
+                  className="flex items-center gap-1.5 text-xs text-white/30 hover:text-white/60 transition-colors px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/25"
+                >
+                  <RotateCcw className="w-3 h-3" /> Clear
+                </button>
+              </div>
+
+              <GradientButton
+                onClick={handleSubmit}
+                isLoading={submitMutation.isPending}
+                disabled={isEmpty}
+                className="w-full py-5 text-lg"
+              >
+                Submit Signature
+              </GradientButton>
+
+              {submitMutation.isError && (
+                <p className="text-red-400 text-sm text-center mt-3">
+                  Submission failed — please try again.
+                </p>
+              )}
+
+              <button
+                onClick={() => setStep("confirm")}
+                className="mt-4 block w-full text-center text-xs text-white/20 hover:text-white/40 transition-colors py-2"
+              >
+                ← Back to agreement details
+              </button>
+            </motion.div>
+          )}
+
+          {/* ── STEP 3: Success ────────────────────────────────────────────── */}
+          {step === "done" && (
+            <motion.div
+              key="done"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-sm text-center"
+            >
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", bounce: 0.5, delay: 0.1 }}
+                className="w-24 h-24 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-8"
+              >
+                <CheckCircle className="w-12 h-12 text-emerald-500" />
               </motion.div>
-              <h2 className="text-3xl font-display font-bold mb-3 text-white">Success!</h2>
-              <p className="text-muted-foreground">The loan agreement has been successfully signed and secured in the central register.</p>
-              <p className="text-xs text-muted-foreground mt-8">You may now close this window.</p>
-            </GlassCard>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+              <h2 className="text-3xl font-bold text-white mb-3">Signed!</h2>
+              <p className="text-white/40 text-sm mb-2">
+                The loan agreement for <strong className="text-white/60">{session.customerName}</strong> has been signed and recorded.
+              </p>
+              <p className="text-white/25 text-xs mb-10">
+                A copy will be sent to Tefco Finance for processing.
+              </p>
+
+              {returnUrl ? (
+                <a
+                  href={returnUrl}
+                  className="block w-full py-4 rounded-2xl text-white font-semibold text-center transition-all active:scale-95 bg-white/[0.08] border border-white/10 hover:bg-white/[0.12]"
+                >
+                  ← Return to Store Screen
+                </a>
+              ) : (
+                <p className="text-white/20 text-sm">You may now close this window.</p>
+              )}
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
