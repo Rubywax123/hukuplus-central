@@ -407,37 +407,47 @@ router.post("/formitize/webhook", async (req, res) => {
     return;
   }
 
-  // Recursively walk the content object and collect all field key→value pairs
+  // Walk the content object and collect all field key→value pairs.
+  // Formitize Simplified format: { fieldName: { "0": "value" } }
+  // Formitize full format:       { fieldName: { value: "value", label: "..." } }
+  // Both are handled below.
   const fieldMap: Record<string, string> = {};
-  function extractFields(obj: any, path = "") {
+  function extractFields(obj: any, parentKey = "") {
     if (!obj || typeof obj !== "object") return;
     for (const key of Object.keys(obj)) {
       const node = obj[key];
-      if (!node || typeof node !== "object") {
-        // Leaf primitive — store by key
-        if (node !== undefined && node !== null && String(node).trim()) {
-          fieldMap[key.toLowerCase()] = String(node).trim();
-        }
+      const fieldKey = key.toLowerCase();
+
+      if (node === null || node === undefined) continue;
+
+      // Primitive value — store directly
+      if (typeof node !== "object") {
+        if (String(node).trim()) fieldMap[fieldKey] = String(node).trim();
         continue;
       }
-      // Node with a value property → this is a form field
-      if (node.value !== undefined && node.value !== null && node.value !== "" && typeof node.value !== "object") {
-        const fieldKey = (node.name || node.label || key).toString().toLowerCase();
-        const fieldVal = String(node.value).trim();
-        if (fieldVal) {
-          fieldMap[fieldKey] = fieldVal;
-          console.log(`[formitize] Field "${fieldKey}" = "${fieldVal}"`);
-        }
+
+      // Simplified format: { "0": "string value" } with no other meaningful keys
+      const nodeKeys = Object.keys(node);
+      if (nodeKeys.length === 1 && nodeKeys[0] === "0" && typeof node["0"] === "string" && node["0"].trim()) {
+        fieldMap[fieldKey] = node["0"].trim();
+        console.log(`[formitize] Field (simplified) "${fieldKey}" = "${node["0"].trim()}"`);
+        continue;
       }
-      // Also recurse into children
-      if (node.children) extractFields(node.children, key);
-      // Recurse into the node itself for nested structures
-      if (node.value && typeof node.value === "object") extractFields(node.value, key);
+
+      // Full format: node has a scalar .value property
+      if (node.value !== undefined && node.value !== null && typeof node.value !== "object" && String(node.value).trim()) {
+        const resolvedKey = (node.name || node.label || key).toString().toLowerCase();
+        fieldMap[resolvedKey] = String(node.value).trim();
+        console.log(`[formitize] Field (full) "${resolvedKey}" = "${String(node.value).trim()}"`);
+      }
+
+      // Recurse into children or nested objects
+      if (node.children && typeof node.children === "object") extractFields(node.children, key);
+      else if (typeof node === "object") extractFields(node, key);
     }
   }
-  const content = body.content || body;
   console.log("[formitize] Raw content keys:", Object.keys(body.content || {}));
-  extractFields(content);
+  extractFields(body.content || {});
 
   // Helper: find first matching value from a list of possible label substrings
   const findField = (...needles: string[]): string | undefined => {
