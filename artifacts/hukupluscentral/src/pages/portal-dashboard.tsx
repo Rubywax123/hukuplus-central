@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { LogOut, FileText, CheckCircle, Clock, AlertCircle, Zap, Search, ChevronDown, User } from "lucide-react";
+import { LogOut, FileText, CheckCircle, Clock, AlertCircle, Zap, Search, User, Monitor, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PortalUser {
@@ -25,9 +25,11 @@ interface Agreement {
   status: string;
   signedAt: string | null;
   createdAt: string;
+  branchId: number | null;
   branchName: string | null;
   branchLocation: string | null;
   formitizeJobId: string | null;
+  signingToken: string | null;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; icon: any; color: string; bg: string }> = {
@@ -58,7 +60,15 @@ export default function PortalDashboardPage() {
   const [me, setMe] = useState<PortalUser | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const [changingPass, setChangingPass] = useState(false);
+
+  const copySigningLink = (token: string, id: number) => {
+    const url = `${window.location.origin}/sign/${token}`;
+    navigator.clipboard.writeText(url);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
   const [passForm, setPassForm] = useState({ current: "", newPass: "", confirm: "" });
   const [passError, setPassError] = useState("");
 
@@ -247,13 +257,40 @@ export default function PortalDashboardPage() {
                       {agreement.formitizeJobId && <span className="font-mono">#{agreement.formitizeJobId}</span>}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-lg font-bold text-white">${agreement.loanAmount.toLocaleString()}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {agreement.signedAt
-                        ? `Signed ${format(new Date(agreement.signedAt), "MMM d, yyyy")}`
-                        : `Created ${format(new Date(agreement.createdAt), "MMM d, yyyy")}`}
-                    </p>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-white">${agreement.loanAmount.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {agreement.signedAt
+                          ? `Signed ${format(new Date(agreement.signedAt), "MMM d, yyyy")}`
+                          : `Created ${format(new Date(agreement.createdAt), "MMM d, yyyy")}`}
+                      </p>
+                    </div>
+                    {agreement.status === "pending" && (
+                      <div className="flex flex-col gap-1.5">
+                        {agreement.branchId && (
+                          <a
+                            href={`/kiosk/${agreement.branchId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20 whitespace-nowrap"
+                          >
+                            <Monitor className="w-3.5 h-3.5" /> Open Kiosk
+                          </a>
+                        )}
+                        {agreement.signingToken && (
+                          <button
+                            onClick={() => copySigningLink(agreement.signingToken!, agreement.id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-colors border border-white/10 text-muted-foreground hover:text-white whitespace-nowrap"
+                          >
+                            {copiedId === agreement.id
+                              ? <><CheckCircle className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
+                              : <><Copy className="w-3.5 h-3.5" /> Copy Link</>
+                            }
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </motion.div>

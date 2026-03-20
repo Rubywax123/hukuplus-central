@@ -99,9 +99,11 @@ router.get("/portal/agreements", requirePortalAuth, async (req, res) => {
       status: agreementsTable.status,
       signedAt: agreementsTable.signedAt,
       createdAt: agreementsTable.createdAt,
+      branchId: agreementsTable.branchId,
       branchName: branchesTable.name,
       branchLocation: branchesTable.location,
       formitizeJobId: agreementsTable.formitizeJobId,
+      signingToken: agreementsTable.signingToken,
     })
     .from(agreementsTable)
     .leftJoin(branchesTable, eq(agreementsTable.branchId, branchesTable.id))
