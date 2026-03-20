@@ -446,11 +446,14 @@ router.post("/formitize/webhook", async (req, res) => {
   }
   extractFields(body.content || {});
 
-  // Helper: find first matching value from a list of possible label substrings
+  // Helper: find first matching value from a list of possible label substrings.
+  // Normalises both sides by stripping spaces, hyphens and underscores before comparing.
+  const normalise = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
   const findField = (...needles: string[]): string | undefined => {
     for (const needle of needles) {
+      const normNeedle = normalise(needle);
       for (const [label, value] of Object.entries(fieldMap)) {
-        if (label.includes(needle) && value) return value;
+        if (normalise(label).includes(normNeedle) && value) return value;
       }
     }
     return undefined;
