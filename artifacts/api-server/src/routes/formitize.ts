@@ -463,18 +463,26 @@ router.post("/formitize/webhook", async (req, res) => {
 
   // Extract key fields using actual Formitize field names from the NOVAFEED AGREEMENT form
   // Phone and amount have confirmed field names; customer name and branch are TBD
+  // "Select Client" in Formitize is a CRM lookup field → formcrm_1
   const customerName  = findField(
-    // Try known/likely field names first, fall back to ID
-    "borrowername", "clientname", "customername", "client name", "customer name",
-    "formtext_1", "formtext_2", "formtext_3",
-    "borrowerid"   // last resort — use national ID until proper name field is found
+    "formcrm_1", "borrowername", "clientname", "customername",
+    "formtext_1", "formtext_2", "formtext_3", "borrowerid"
   );
-  // This form is always Novafeeds — look it up by name directly
+  // This form is always Novafeeds — hardcoded
   const retailerName  = "Novafeeds";
+  // "Store Branch" is a manually typed text field — likely one of the formtext_X fields
+  // Log all formtext values so we can identify which one it is
+  console.log("[formitize] formtext values:", {
+    formtext_1: fieldMap["formtext_1"],
+    formtext_2: fieldMap["formtext_2"],
+    formtext_3: fieldMap["formtext_3"],
+    formtext_4: fieldMap["formtext_4"],
+    formtext_5: fieldMap["formtext_5"],
+    formcrm_1:  fieldMap["formcrm_1"],
+  });
   const branchName    = findField(
-    "branchname", "branch name", "branch",
-    "appliedsettlement", "formtext_2", "formtext_3", "formtext_4", "formtext_5",
-    "storeemail_1"  // last resort — will likely fail branch lookup
+    "storebranch", "store branch", "branchname", "branch",
+    "formtext_1", "formtext_2", "formtext_3", "formtext_4", "formtext_5"
   );
   const customerPhone = findField("borrowermobile", "phone", "mobile", "cell", "contact number", "contactnumber") || null;
   const loanAmountRaw = findField("loanamount", "loan amount", "amount");
