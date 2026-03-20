@@ -187,6 +187,10 @@ export interface SigningSession {
   branchName: string;
   loanProduct: string;
   status: SigningSessionStatus;
+  customerName: string;
+  loanAmount: number;
+  /** @nullable */
+  formitizeFormUrl: string | null;
 }
 
 export interface VerifySigningIdentityBody {
@@ -206,8 +210,14 @@ export interface AgreementDetails {
 }
 
 export interface SubmitSignatureBody {
-  /** Base64-encoded signature image or SVG path data */
+  /** Customer signature 1 (loan terms) — Base64 PNG */
   signatureData: string;
+  /** Customer signature 2 (repayment schedule) — Base64 PNG */
+  customerSignature2: string;
+  /** Customer signature 3 (final authorization) — Base64 PNG */
+  customerSignature3: string;
+  /** Store manager signature — Base64 PNG */
+  managerSignature: string;
 }
 
 export interface SignatureConfirmation {

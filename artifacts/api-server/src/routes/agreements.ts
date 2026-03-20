@@ -147,6 +147,9 @@ router.get("/sign/:token", async (req, res): Promise<void> => {
     branchName: branch?.name ?? "",
     loanProduct: agreement.loanProduct,
     status: agreement.status,
+    customerName: agreement.customerName,
+    loanAmount: agreement.loanAmount,
+    formitizeFormUrl: (agreement as any).formitizeFormUrl ?? null,
   });
 });
 
@@ -234,7 +237,14 @@ router.post("/sign/:token/submit", async (req, res): Promise<void> => {
   const signedAt = new Date();
   await db
     .update(agreementsTable)
-    .set({ status: "signed", signedAt, signatureData: parsed.data.signatureData })
+    .set({
+      status: "signed",
+      signedAt,
+      signatureData: parsed.data.signatureData,
+      customerSignature2: parsed.data.customerSignature2,
+      customerSignature3: parsed.data.customerSignature3,
+      managerSignature: parsed.data.managerSignature,
+    })
     .where(eq(agreementsTable.id, agreement.id));
 
   const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, agreement.retailerId));

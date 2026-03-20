@@ -103,6 +103,26 @@ export async function runMigrations() {
       );
     `);
 
+    // Add multi-signature columns to agreements (idempotent)
+    await client.query(`
+      ALTER TABLE agreements
+        ADD COLUMN IF NOT EXISTS customer_signature_2 TEXT,
+        ADD COLUMN IF NOT EXISTS customer_signature_3 TEXT,
+        ADD COLUMN IF NOT EXISTS manager_signature TEXT,
+        ADD COLUMN IF NOT EXISTS formitize_form_url TEXT,
+        ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+
+    // Add missing columns to activity table (idempotent)
+    await client.query(`
+      ALTER TABLE activity
+        ADD COLUMN IF NOT EXISTS retailer_name TEXT,
+        ADD COLUMN IF NOT EXISTS branch_name TEXT,
+        ADD COLUMN IF NOT EXISTS loan_product TEXT,
+        ADD COLUMN IF NOT EXISTS reference_id INTEGER;
+    `);
+
     // Seed principal admin if not exists
     const adminEmail = "simon.reid@marishoma.com";
     const existing = await client.query(

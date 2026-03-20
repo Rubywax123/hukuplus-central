@@ -351,9 +351,10 @@ export const SubmitSignatureParams = zod.object({
 });
 
 export const SubmitSignatureBody = zod.object({
-  signatureData: zod
-    .string()
-    .describe("Base64-encoded signature image or SVG path data"),
+  signatureData: zod.string().describe("Customer signature 1 — Base64 PNG"),
+  customerSignature2: zod.string().describe("Customer signature 2 — Base64 PNG"),
+  customerSignature3: zod.string().describe("Customer signature 3 — Base64 PNG"),
+  managerSignature: zod.string().describe("Store manager signature — Base64 PNG"),
 });
 
 export const SubmitSignatureResponse = zod.object({
