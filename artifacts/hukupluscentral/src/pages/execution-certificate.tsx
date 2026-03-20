@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { format } from "date-fns";
-import { Printer, ExternalLink, ArrowLeft, CheckCircle, AlertCircle } from "lucide-react";
+import { Printer, ExternalLink, ArrowLeft, CheckCircle, AlertCircle, Download } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -120,6 +120,13 @@ export default function ExecutionCertificatePage({ agreementId }: { agreementId:
               <ExternalLink className="w-4 h-4" /> View Formitize PDF
             </a>
           )}
+          <a
+            href={`${BASE}/api/agreements/${data.id}/download-pdf`}
+            download
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium hover:bg-emerald-500/20 transition-colors"
+          >
+            <Download className="w-4 h-4" /> Download Signed PDF
+          </a>
           <button
             onClick={() => window.print()}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20 text-primary text-sm font-medium hover:bg-primary/20 transition-colors"
