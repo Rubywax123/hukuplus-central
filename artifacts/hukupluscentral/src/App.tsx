@@ -12,6 +12,7 @@ import AgreementsPage from "@/pages/agreements";
 import LoanAppsPage from "@/pages/loan-apps";
 import TeamPage from "@/pages/team";
 import PublicSigningPage from "@/pages/public-signing";
+import KioskPage from "@/pages/kiosk";
 import PortalLoginPage from "@/pages/portal-login";
 import PortalDashboardPage from "@/pages/portal-dashboard";
 import NotFound from "@/pages/not-found";
@@ -31,6 +32,11 @@ function Router() {
       {/* Public Unauthenticated Zone */}
       <Route path="/sign/:token">
         {params => <PublicSigningPage token={params.token} />}
+      </Route>
+
+      {/* Public Kiosk — no auth required */}
+      <Route path="/kiosk/:branchId">
+        {params => <KioskPage branchId={params.branchId!} />}
       </Route>
 
       {/* Retailer Portal Zone (own auth) */}

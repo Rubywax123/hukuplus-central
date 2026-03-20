@@ -11,6 +11,7 @@ import portalRouter from "./portal";
 import formitizeRouter from "./formitize";
 import syncRouter from "./sync";
 import externalRouter from "./external";
+import kioskRouter from "./kiosk";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(portalRouter);
 router.use(formitizeRouter);
 router.use(syncRouter);
 router.use(externalRouter);
+router.use(kioskRouter);
 
 export default router;
