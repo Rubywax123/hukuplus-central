@@ -394,7 +394,7 @@ router.post("/formitize/webhook", async (req, res) => {
   }
 
   const body = req.body;
-  console.log("[formitize] Received webhook payload:", JSON.stringify(body, null, 2));
+  console.log(`[formitize:webhook] Hit — form="${body.formTitle || body.title}" submittedFormID=${body.submittedFormID} jobID=${body.jobID}`);
 
   // Formitize sends formTitle / title at the top level
   const formName: string = (
