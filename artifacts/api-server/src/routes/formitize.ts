@@ -396,28 +396,72 @@ router.post("/formitize/webhook", async (req, res) => {
   const body = req.body;
   console.log("[formitize] Received webhook payload:", JSON.stringify(body, null, 2));
 
+  // Formitize sends formTitle / title at the top level
   const formName: string = (
-    body.form_name || body.FormName || body.formName ||
-    body.form_type || body.FormType || body.formType ||
-    body.template_name || body.TemplateName || ""
-  ).toLowerCase();
+    body.formTitle || body.title || body.form_name || body.FormName || body.formName || ""
+  ).toLowerCase().trim();
 
-  if (formName !== "novafeed agreement") {
+  if (!formName.includes("novafeed agreement")) {
     console.log(`[formitize] Ignored form: "${formName || "(unnamed)"}"`);
     res.status(200).json({ ok: true, skipped: true, reason: "Not a Novafeed Agreement — ignored" });
     return;
   }
 
-  const retailerName  = body.retailer_name  || body.RetailerName  || body.retailerName;
-  const branchName    = body.branch_name    || body.BranchName    || body.branchName;
-  const customerName  = body.customer_name  || body.CustomerName  || body.customerName;
-  const customerPhone = body.customer_phone || body.CustomerPhone || body.customerPhone || null;
-  const loanAmount    = parseFloat(body.loan_amount || body.LoanAmount || body.loanAmount || "0");
-  const jobId         = body.job_id || body.JobId || body.formitize_job_id || null;
-  const formUrl       = body.form_url || body.FormUrl || body.formUrl || null;
+  // Formitize puts form field data inside body.content as { "0": {label, value}, "1": {...}, ... }
+  // Build a label → value map so we can look up fields by their label text
+  const fieldMap: Record<string, string> = {};
+  const content = body.content || {};
+  for (const key of Object.keys(content)) {
+    const field = content[key];
+    if (field && field.label) {
+      const label = String(field.label).toLowerCase().trim();
+      const value = field.value !== undefined ? String(field.value).trim() : "";
+      fieldMap[label] = value;
+      console.log(`[formitize] Field "${field.label}" = "${value}"`);
+    }
+  }
+
+  // Helper: find first matching value from a list of possible label substrings
+  const findField = (...needles: string[]): string | undefined => {
+    for (const needle of needles) {
+      for (const [label, value] of Object.entries(fieldMap)) {
+        if (label.includes(needle) && value) return value;
+      }
+    }
+    return undefined;
+  };
+
+  // Extract key fields — try multiple label variations to be resilient
+  const customerName  = findField("client name", "customer name", "client", "customer", "name");
+  const retailerName  = findField("store name", "retailer name", "store", "retailer", "novafeed");
+  const branchName    = findField("branch name", "branch");
+  const customerPhone = findField("phone", "mobile", "cell", "contact number") || null;
+  const loanAmountRaw = findField("loan amount", "amount", "loan");
+  const loanAmount    = parseFloat(loanAmountRaw || "0");
+
+  // Job ID: prefer the real jobID, fall back to submittedFormID
+  const rawJobId = body.jobID || body.jobId || body.job_id || null;
+  const jobId    = (rawJobId && String(rawJobId) !== "0")
+    ? String(rawJobId)
+    : (body.submittedFormID ? String(body.submittedFormID) : null);
+
+  // Dedup — don't import the same submission twice
+  if (jobId) {
+    const existing = await db.select({ id: agreementsTable.id })
+      .from(agreementsTable).where(eq(agreementsTable.formitizeJobId, jobId));
+    if (existing.length > 0) {
+      console.log(`[formitize] Duplicate jobId ${jobId} — skipped`);
+      res.status(200).json({ ok: true, skipped: true, reason: "Already imported" });
+      return;
+    }
+  }
+
+  console.log(`[formitize] Parsed fields — customer: "${customerName}", retailer: "${retailerName}", branch: "${branchName}", amount: ${loanAmount}`);
 
   if (!retailerName || !branchName || !customerName) {
-    res.status(400).json({ error: "retailer_name, branch_name, customer_name are required" });
+    const missing = [!customerName && "customer_name", !retailerName && "retailer_name", !branchName && "branch_name"].filter(Boolean).join(", ");
+    console.log(`[formitize] Missing required fields: ${missing}. Available labels: ${Object.keys(fieldMap).join(", ")}`);
+    res.status(400).json({ error: `Missing required fields: ${missing}`, availableFields: Object.keys(fieldMap) });
     return;
   }
 
@@ -440,16 +484,16 @@ router.post("/formitize/webhook", async (req, res) => {
     loanProduct: "Novafeeds",
     loanAmount: isNaN(loanAmount) ? 0 : loanAmount,
     formitizeJobId: jobId,
-    formitizeFormUrl: formUrl,
+    formitizeFormUrl: null,
     signingToken,
     status: "pending",
     expiresAt,
-    createdBy: "formitize",
+    createdBy: "formitize-webhook",
   }).returning();
 
+  console.log(`[formitize:webhook] Imported: ${customerName} @ ${retailer.name}/${branch.name}`);
   const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
-  const signingUrl = formUrl || `${appUrl}/sign/${signingToken}`;
-  res.status(201).json({ ok: true, agreementId: agreement.id, signingUrl, retailer: retailer.name, branch: branch.name });
+  res.status(201).json({ ok: true, agreementId: agreement.id, signingUrl: `${appUrl}/sign/${signingToken}`, retailer: retailer.name, branch: branch.name });
 });
 
 export default router;
