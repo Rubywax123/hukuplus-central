@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { LogOut, FileText, CheckCircle, Clock, AlertCircle, Zap, Search, User, Monitor, Copy } from "lucide-react";
+import { LogOut, FileText, CheckCircle, Clock, AlertCircle, Zap, Search, User, Monitor, Copy, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PortalUser {
@@ -290,6 +290,16 @@ export default function PortalDashboardPage() {
                           </button>
                         )}
                       </div>
+                    )}
+                    {agreement.status === "signed" && (
+                      <a
+                        href={`/agreements/${agreement.id}/execution`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20 whitespace-nowrap"
+                      >
+                        <ScrollText className="w-3.5 h-3.5" /> View Certificate
+                      </a>
                     )}
                   </div>
                 </div>
