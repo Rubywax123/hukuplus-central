@@ -46,7 +46,12 @@ function Router() {
       <Route path="/portal">
         {() => { window.location.replace("/portal/login"); return null; }}
       </Route>
-      
+
+      {/* Standalone — accessible to portal users and admins, no admin chrome */}
+      <Route path="/agreements/:id/execution">
+        {params => <ExecutionCertificatePage agreementId={params.id!} />}
+      </Route>
+
       {/* Internal Authenticated Zone */}
       <Route path="*">
         <AuthGuard>
@@ -54,9 +59,6 @@ function Router() {
             <Route path="/" component={DashboardPage} />
             <Route path="/retailers" component={RetailersPage} />
             <Route path="/agreements" component={AgreementsPage} />
-            <Route path="/agreements/:id/execution">
-              {params => <ExecutionCertificatePage agreementId={params.id!} />}
-            </Route>
             <Route path="/loan-apps" component={LoanAppsPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />

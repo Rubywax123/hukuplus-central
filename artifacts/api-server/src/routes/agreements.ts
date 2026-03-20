@@ -122,7 +122,9 @@ router.get("/agreements/:agreementId", async (req, res): Promise<void> => {
 
 // ADMIN: Get full executed agreement with all signatures
 router.get("/agreements/:id/execution", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) {
+  const isAdmin      = req.isAuthenticated();
+  const portalUser   = (req.session as any)?.portalUser ?? null;
+  if (!isAdmin && !portalUser) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -131,6 +133,12 @@ router.get("/agreements/:id/execution", async (req, res): Promise<void> => {
 
   const [agreement] = await db.select().from(agreementsTable).where(eq(agreementsTable.id, id));
   if (!agreement) { res.status(404).json({ error: "Agreement not found" }); return; }
+
+  // Portal users may only view agreements that belong to their retailer
+  if (!isAdmin && portalUser && agreement.retailerId !== portalUser.retailerId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
 
   const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, agreement.retailerId));
   const [branch] = await db.select().from(branchesTable).where(eq(branchesTable.id, agreement.branchId));
