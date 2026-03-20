@@ -23,11 +23,15 @@ export default function AgreementsPage() {
   const [loanProduct, setLoanProduct] = useState("HukuPlus");
   const [loanAmount, setLoanAmount] = useState("");
 
+  // PDF URL field for quick-entry
+  const [pdfUrl, setPdfUrl] = useState("");
+
   // CSV import state
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{
     imported: number; skipped: number; errors: string[];
+    detectedColumns?: string[];
     agreements: { customerName: string; branch: string; signingUrl: string }[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,13 +46,14 @@ export default function AgreementsPage() {
         branchId: Number(branchId),
         customerName,
         loanProduct,
-        loanAmount: Number(loanAmount)
+        loanAmount: Number(loanAmount),
+        formitizeFormUrl: pdfUrl.trim() || null,
       }
     }, {
       onSuccess: () => {
         setIsModalOpen(false);
         queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
-        setRetailerId(""); setBranchId(""); setCustomerName(""); setLoanAmount("");
+        setRetailerId(""); setBranchId(""); setCustomerName(""); setLoanAmount(""); setPdfUrl("");
       }
     });
   };
@@ -202,16 +207,27 @@ export default function AgreementsPage() {
                 <option value="HukuPlus">HukuPlus (Broiler)</option>
                 <option value="Revolver">Revolver (Layer)</option>
                 <option value="Salary">Salary (Payroll)</option>
+                <option value="Novafeeds">Novafeeds</option>
               </Select>
             </div>
             <div>
-              <Label>Amount (KES)</Label>
-              <Input type="number" required placeholder="50000" min="1" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} />
+              <Label>Amount (USD)</Label>
+              <Input type="number" required placeholder="500" min="1" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} />
             </div>
+          </div>
+          <div>
+            <Label>Formitize PDF URL <span className="text-muted-foreground font-normal">(optional — paste from the notification email)</span></Label>
+            <Input
+              type="url"
+              placeholder="https://service.formitize.com/..."
+              value={pdfUrl}
+              onChange={e => setPdfUrl(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground mt-1">If provided, the kiosk QR code will open this PDF directly so the customer can view and sign it on screen.</p>
           </div>
           <div className="pt-4 flex justify-end gap-3">
             <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Cancel</button>
-            <GradientButton type="submit" isLoading={createMutation.isPending}>Generate Link</GradientButton>
+            <GradientButton type="submit" isLoading={createMutation.isPending}>Add to Kiosk</GradientButton>
           </div>
         </form>
       </Modal>
@@ -312,11 +328,19 @@ export default function AgreementsPage() {
               )}
 
               {importResult.errors.length > 0 && (
-                <div className="space-y-1 max-h-32 overflow-y-auto">
+                <div className="space-y-2">
                   <p className="text-xs font-medium text-red-400 uppercase tracking-wider flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Errors</p>
-                  {importResult.errors.map((e, i) => (
-                    <p key={i} className="text-xs text-red-300/80 bg-red-500/5 rounded px-2 py-1">{e}</p>
-                  ))}
+                  <div className="space-y-1 max-h-36 overflow-y-auto">
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="text-xs text-red-300/80 bg-red-500/5 rounded px-2 py-1">{e}</p>
+                    ))}
+                  </div>
+                  {importResult.detectedColumns && (
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer hover:text-white">Show columns detected in your CSV ({importResult.detectedColumns.length})</summary>
+                      <p className="mt-1 bg-white/5 rounded px-2 py-1 font-mono break-all">{importResult.detectedColumns.join(", ")}</p>
+                    </details>
+                  )}
                 </div>
               )}
 

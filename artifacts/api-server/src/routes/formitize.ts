@@ -43,13 +43,30 @@ function parseCSV(text: string): Record<string, string>[] {
 // ─── Column name resolver — handles Formitize's various export formats ────────
 function getField(row: Record<string, string>, ...candidates: string[]): string {
   for (const key of candidates) {
+    // Exact match (case-insensitive)
     const found = Object.keys(row).find(k => k.toLowerCase() === key.toLowerCase());
     if (found && row[found]) return row[found];
-    // partial match fallback
+    // Partial match — column name contains the candidate
     const partial = Object.keys(row).find(k => k.toLowerCase().includes(key.toLowerCase()));
     if (partial && row[partial]) return row[partial];
   }
   return "";
+}
+
+// ─── Check if a string looks like a form template name, not a customer name ──
+function isTemplateName(s: string): boolean {
+  const upper = s.toUpperCase();
+  return (
+    upper.includes("LOAN AGREEMENT") ||
+    upper.includes("NOVAFEED AGREEMENT") ||
+    upper.includes("FINISHER LOAN") ||
+    upper.includes("HUKUPLUS") ||
+    upper.includes("CHIKWERET") ||
+    upper.includes("REVOLVER") ||
+    // Placeholder text like [Customer Full Name]
+    s.includes("[") ||
+    s.includes("]")
+  );
 }
 
 // ─── POST /api/formitize/import-csv ──────────────────────────────────────────
@@ -65,9 +82,12 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
     return;
   }
 
+  // Return the detected column names so staff can debug mismatches
+  const detectedColumns = Object.keys(rows[0]);
+
   const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
-  const results: { imported: number; skipped: number; errors: string[] } = {
-    imported: 0, skipped: 0, errors: [],
+  const results: { imported: number; skipped: number; errors: string[]; detectedColumns: string[] } = {
+    imported: 0, skipped: 0, errors: [], detectedColumns,
   };
   const importedAgreements: { customerName: string; branch: string; signingUrl: string }[] = [];
 
@@ -80,10 +100,9 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
     const rowNum = i + 2; // 1-indexed, +1 for header
 
     try {
-      // ── Extract fields (tries many Formitize column name variants) ───────
+      // ── Extract Job ID for dedup ─────────────────────────────────────────
       const jobId = getField(row, "ID", "id", "Job ID", "job_id", "FormId", "form_id");
 
-      // Dedup: skip if formitizeJobId already exists
       if (jobId) {
         const existing = await db.select({ id: agreementsTable.id })
           .from(agreementsTable)
@@ -91,60 +110,88 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
         if (existing.length > 0) { results.skipped++; continue; }
       }
 
-      // Customer name — try dedicated field first, then parse from Title
+      // ── Extract raw title ────────────────────────────────────────────────
+      const title = getField(row, "Title", "title", "Job Title");
+
+      // ── Customer name — dedicated field first, then parse from Title ─────
       let customerName = getField(row,
         "Customer Name", "customer_name", "CustomerName",
-        "Full Name", "full_name", "Client Name", "client_name",
-        "Customer", "Name"
+        "Full Name", "full_name", "Fullname",
+        "Client Name", "client_name",
+        "Name", "Customer"
       );
-      if (!customerName) {
-        const title = getField(row, "Title", "title", "Job Title");
-        // Title format is often "Branch - Customer Name" or "StoreName - CustomerName"
-        if (title.includes(" - ")) {
-          customerName = title.split(" - ").slice(1).join(" - ").trim();
-        } else {
-          customerName = title;
+
+      // Try parsing from Title: format is usually "Branch - Customer Name"
+      if (!customerName && title.includes(" - ")) {
+        const afterDash = title.split(" - ").slice(1).join(" - ").trim();
+        if (afterDash && !isTemplateName(afterDash)) {
+          customerName = afterDash;
         }
       }
 
-      // Retailer/chain
+      // Last resort: use the whole title if it looks like a person's name
+      if (!customerName && title && !isTemplateName(title)) {
+        customerName = title;
+      }
+
+      if (!customerName || isTemplateName(customerName)) {
+        results.errors.push(`Row ${rowNum}: Could not determine customer name (title="${title}")`);
+        continue;
+      }
+
+      // ── Retailer/chain ───────────────────────────────────────────────────
       const retailerRaw = getField(row,
         "Store Chain", "store_chain", "StoreChain",
-        "Retailer", "retailer_name", "Chain", "Company", "Store"
+        "Retailer", "retailer_name", "Chain", "Company",
+        "Feed Company", "Feed Store", "Store"
       );
 
-      // Branch
-      const branchRaw = getField(row,
+      // ── Branch — try column first, then extract from Title prefix ────────
+      let branchRaw = getField(row,
         "Store Branch", "store_branch", "StoreBranch",
-        "Branch", "branch_name", "Location", "Site"
+        "Branch", "branch_name", "Location", "Site",
+        "Store Location", "Shop", "Outlet"
       );
 
-      // Loan amount
+      // If branch is empty, try the part before " - " in the Title
+      if (!branchRaw && title.includes(" - ")) {
+        const beforeDash = title.split(" - ")[0].trim();
+        if (beforeDash && !isTemplateName(beforeDash)) {
+          branchRaw = beforeDash;
+        }
+      }
+
+      // ── Loan amount ──────────────────────────────────────────────────────
       const amountRaw = getField(row,
         "Loan Amount", "loan_amount", "LoanAmount",
-        "Amount", "Value", "Total"
+        "Amount", "Value", "Total", "Feed Amount",
+        "Amount Requested", "Requested Amount"
       );
       const loanAmount = parseFloat(amountRaw.replace(/[^0-9.]/g, "")) || 0;
 
-      // Phone
+      // ── Phone ────────────────────────────────────────────────────────────
       const customerPhone = getField(row,
         "Phone", "customer_phone", "CustomerPhone", "Mobile",
-        "Cell", "Contact Number", "contact_number"
+        "Cell", "Contact Number", "contact_number", "Tel",
+        "Phone Number", "Telephone"
       ) || null;
 
-      // Form URL
-      const formUrl = getField(row, "Form URL", "form_url", "FormUrl", "URL", "Link") || null;
+      // ── Form / PDF URL ───────────────────────────────────────────────────
+      const formUrl = getField(row,
+        "Form URL", "form_url", "FormUrl", "URL", "Link", "PDF", "PDF URL", "pdf_url"
+      ) || null;
 
-      if (!customerName) {
-        results.errors.push(`Row ${rowNum}: Could not determine customer name`);
-        continue;
-      }
+      // ── Validate customer name ───────────────────────────────────────────
       if (!branchRaw) {
-        results.errors.push(`Row ${rowNum} (${customerName}): Could not determine branch`);
+        results.errors.push(
+          `Row ${rowNum} (${customerName}): Could not determine branch — ` +
+          `check that your CSV has a "Store Branch" column with a value. ` +
+          `Columns found: ${detectedColumns.join(", ")}`
+        );
         continue;
       }
 
-      // ── Match retailer ──────────────────────────────────────────────────
+      // ── Match retailer ───────────────────────────────────────────────────
       let retailer = allRetailers.find(r =>
         r.name.toLowerCase() === retailerRaw.toLowerCase()
       ) ?? allRetailers.find(r =>
@@ -152,8 +199,8 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
         retailerRaw.toLowerCase().includes(r.name.toLowerCase())
       );
 
-      // If no retailer found but branch given, try to find branch directly
-      if (!retailer && branchRaw) {
+      // If no retailer match, try to find branch directly across all retailers
+      if (!retailer) {
         const matchedBranch = allBranches.find(b =>
           b.name.toLowerCase().includes(branchRaw.toLowerCase()) ||
           branchRaw.toLowerCase().includes(b.name.toLowerCase())
@@ -164,11 +211,14 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
       }
 
       if (!retailer) {
-        results.errors.push(`Row ${rowNum} (${customerName}): Retailer not found — "${retailerRaw || "(blank)"}"`);
+        results.errors.push(
+          `Row ${rowNum} (${customerName}): Retailer not found — ` +
+          `"${retailerRaw || "(blank)"}" — add this retailer in Central first`
+        );
         continue;
       }
 
-      // ── Match branch ────────────────────────────────────────────────────
+      // ── Match branch ─────────────────────────────────────────────────────
       const branchesForRetailer = allBranches.filter(b => b.retailerId === retailer!.id);
       const branch = branchesForRetailer.find(b =>
         b.name.toLowerCase() === branchRaw.toLowerCase()
@@ -178,11 +228,15 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
       );
 
       if (!branch) {
-        results.errors.push(`Row ${rowNum} (${customerName}): Branch not found — "${branchRaw}" under ${retailer.name}`);
+        const available = branchesForRetailer.map(b => b.name).join(", ");
+        results.errors.push(
+          `Row ${rowNum} (${customerName}): Branch not found — ` +
+          `"${branchRaw}" under ${retailer.name}. Available branches: ${available || "none"}`
+        );
         continue;
       }
 
-      // ── Insert agreement ────────────────────────────────────────────────
+      // ── Insert agreement ─────────────────────────────────────────────────
       const signingToken = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
@@ -210,10 +264,11 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
         referenceId: agreement.id,
       });
 
+      const signingUrl = formUrl || `${appUrl}/sign/${signingToken}`;
       importedAgreements.push({
         customerName,
         branch: `${retailer.name} / ${branch.name}`,
-        signingUrl: `${appUrl}/sign/${signingToken}`,
+        signingUrl,
       });
       results.imported++;
     } catch (err: any) {
@@ -227,6 +282,7 @@ router.post("/formitize/import-csv", upload.single("file"), async (req, res): Pr
     imported: results.imported,
     skipped: results.skipped,
     errors: results.errors,
+    detectedColumns,
     agreements: importedAgreements,
   });
 });
@@ -296,7 +352,8 @@ router.post("/formitize/webhook", async (req, res) => {
     createdBy: "formitize",
   }).returning();
 
-  const signingUrl = `${process.env.APP_URL || "https://huku-plus-central.replit.app"}/sign/${signingToken}`;
+  const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
+  const signingUrl = formUrl || `${appUrl}/sign/${signingToken}`;
   res.status(201).json({ ok: true, agreementId: agreement.id, signingUrl, retailer: retailer.name, branch: branch.name });
 });
 
