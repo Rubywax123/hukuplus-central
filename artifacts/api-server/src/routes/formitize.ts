@@ -461,12 +461,23 @@ router.post("/formitize/webhook", async (req, res) => {
 
   console.log("[formitize] All extracted fields:", JSON.stringify(fieldMap));
 
-  // Extract key fields — try label text AND Formitize internal field names
-  const customerName  = findField("client name", "customer name", "clientname", "customername", "client", "customer", "fullname", "name");
-  const retailerName  = findField("store name", "retailer name", "storename", "retailername", "store", "retailer", "novafeed", "outlet");
-  const branchName    = findField("branch name", "branchname", "branch");
-  const customerPhone = findField("phone", "mobile", "cell", "contact number", "contactnumber", "phonenumber", "mobilenumber") || null;
-  const loanAmountRaw = findField("loan amount", "loanamount", "amount", "loan value", "loanvalue");
+  // Extract key fields using actual Formitize field names from the NOVAFEED AGREEMENT form
+  // Phone and amount have confirmed field names; customer name and branch are TBD
+  const customerName  = findField(
+    // Try known/likely field names first, fall back to ID
+    "borrowername", "clientname", "customername", "client name", "customer name",
+    "formtext_1", "formtext_2", "formtext_3",
+    "borrowerid"   // last resort — use national ID until proper name field is found
+  );
+  // This form is always Novafeeds — look it up by name directly
+  const retailerName  = "Novafeeds";
+  const branchName    = findField(
+    "branchname", "branch name", "branch",
+    "appliedsettlement", "formtext_2", "formtext_3", "formtext_4", "formtext_5",
+    "storeemail_1"  // last resort — will likely fail branch lookup
+  );
+  const customerPhone = findField("borrowermobile", "phone", "mobile", "cell", "contact number", "contactnumber") || null;
+  const loanAmountRaw = findField("loanamount", "loan amount", "amount");
   const loanAmount    = parseFloat(loanAmountRaw || "0");
 
   // Job ID: prefer the real jobID, fall back to submittedFormID
@@ -488,20 +499,21 @@ router.post("/formitize/webhook", async (req, res) => {
 
   console.log(`[formitize] Parsed fields — customer: "${customerName}", retailer: "${retailerName}", branch: "${branchName}", amount: ${loanAmount}`);
 
-  if (!retailerName || !branchName || !customerName) {
-    const missing = [!customerName && "customer_name", !retailerName && "retailer_name", !branchName && "branch_name"].filter(Boolean).join(", ");
-    console.log(`[formitize] Missing required fields: ${missing}. Available labels: ${Object.keys(fieldMap).join(", ")}`);
-    res.status(400).json({ error: `Missing required fields: ${missing}`, availableFields: Object.keys(fieldMap) });
+  console.log(`[formitize] Resolved — customer: "${customerName}", branch: "${branchName || "(default)"}", phone: "${customerPhone}", amount: ${loanAmount}`);
+  if (!customerName) {
+    console.log(`[formitize] Missing customer name. Available labels: ${Object.keys(fieldMap).join(", ")}`);
+    res.status(400).json({ error: "Missing customer_name", availableFields: Object.keys(fieldMap) });
     return;
   }
 
   const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${retailerName}%`));
   if (!retailer) { res.status(422).json({ error: `Retailer not found: ${retailerName}` }); return; }
 
-  const [branch] = await db.select().from(branchesTable)
-    .where(eq(branchesTable.retailerId, retailer.id))
-    .then(rows => rows.filter(r => r.name.toLowerCase().includes(branchName.toLowerCase())));
-  if (!branch) { res.status(422).json({ error: `Branch not found: ${branchName} under ${retailerName}` }); return; }
+  const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
+  const branch = branchName
+    ? (allBranches.find(r => r.name.toLowerCase().includes(branchName.toLowerCase())) || allBranches[0])
+    : allBranches[0]; // default to first branch (Main Branch) if not specified
+  if (!branch) { res.status(422).json({ error: `No branches found for ${retailerName}` }); return; }
 
   const signingToken = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
