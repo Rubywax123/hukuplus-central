@@ -17,6 +17,9 @@ import PortalLoginPage from "@/pages/portal-login";
 import PortalDashboardPage from "@/pages/portal-dashboard";
 import ExecutionCertificatePage from "@/pages/execution-certificate";
 import CustomersPage from "@/pages/customers";
+import ApplicationsPage from "@/pages/applications";
+import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
+import ApplyRevolverPage from "@/pages/apply-revolver";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -41,6 +44,10 @@ function Router() {
         {params => <KioskPage branchId={params.branchId!} />}
       </Route>
 
+      {/* Public Customer Application Forms — no auth required */}
+      <Route path="/apply/hukuplus" component={ApplyHukuPlusPage} />
+      <Route path="/apply/revolver" component={ApplyRevolverPage} />
+
       {/* Retailer Portal Zone (own auth) */}
       <Route path="/portal/login" component={PortalLoginPage} />
       <Route path="/portal/dashboard" component={PortalDashboardPage} />
@@ -62,6 +69,7 @@ function Router() {
             <Route path="/agreements" component={AgreementsPage} />
             <Route path="/loan-apps" component={LoanAppsPage} />
             <Route path="/customers" component={CustomersPage} />
+            <Route path="/applications" component={ApplicationsPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />
           </Switch>

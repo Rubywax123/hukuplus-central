@@ -261,6 +261,69 @@ export async function runMigrations() {
       console.log("[migrate] Retailers seeded.");
     }
 
+    // ── HukuPlus Repeat Loan Applications ──────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS loan_applications (
+        id                    SERIAL PRIMARY KEY,
+        customer_id           INTEGER REFERENCES customers(id),
+        customer_name         TEXT NOT NULL,
+        customer_phone        TEXT,
+        retailer_id           INTEGER REFERENCES retailers(id),
+        branch_id             INTEGER REFERENCES branches(id),
+        collection_retailer_id INTEGER REFERENCES retailers(id),
+        collection_branch_id   INTEGER REFERENCES branches(id),
+        chick_count           INTEGER NOT NULL,
+        chick_purchase_date   DATE NOT NULL,
+        expected_collection_date DATE NOT NULL,
+        amount_requested      NUMERIC(12,2) NOT NULL,
+        amount_limit          NUMERIC(12,2) NOT NULL,
+        status                VARCHAR(50) NOT NULL DEFAULT 'submitted',
+        notes                 TEXT,
+        created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // ── Revolver Drawdown Requests ──────────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS drawdown_requests (
+        id                      SERIAL PRIMARY KEY,
+        customer_id             INTEGER REFERENCES customers(id),
+        customer_name           TEXT NOT NULL,
+        customer_phone          TEXT,
+        agreement_id            INTEGER REFERENCES agreements(id),
+        retailer_id             INTEGER REFERENCES retailers(id),
+        branch_id               INTEGER REFERENCES branches(id),
+        collection_retailer_id  INTEGER REFERENCES retailers(id),
+        collection_branch_id    INTEGER REFERENCES branches(id),
+        amount_requested        NUMERIC(12,2) NOT NULL,
+        facility_limit          NUMERIC(12,2),
+        facility_balance        NUMERIC(12,2),
+        status                  VARCHAR(50) NOT NULL DEFAULT 'pending',
+        store_notified_at       TIMESTAMPTZ,
+        store_actioned_at       TIMESTAMPTZ,
+        store_actioned_by       TEXT,
+        notes                   TEXT,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // ── In-App Messages (store portal notifications) ────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS in_app_messages (
+        id              SERIAL PRIMARY KEY,
+        retailer_id     INTEGER REFERENCES retailers(id),
+        branch_id       INTEGER REFERENCES branches(id),
+        reference_type  VARCHAR(50),
+        reference_id    INTEGER,
+        subject         TEXT NOT NULL,
+        body            TEXT NOT NULL,
+        is_read         BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { LogOut, FileText, CheckCircle, Clock, AlertCircle, Zap, Search, User, Monitor, Copy, ScrollText } from "lucide-react";
+import { LogOut, FileText, CheckCircle, Clock, AlertCircle, Zap, Search, User, Monitor, Copy, ScrollText, Bell, MessageSquare, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PortalUser {
@@ -62,6 +62,8 @@ export default function PortalDashboardPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [changingPass, setChangingPass] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(true);
+  const qc = useQueryClient();
 
   const copySigningLink = (token: string, id: number) => {
     const url = `${window.location.origin}/sign/${token}`;
@@ -90,6 +92,41 @@ export default function PortalDashboardPage() {
     },
     enabled: !!me,
   });
+
+  const { data: messages = [], refetch: refetchMessages } = useQuery<any[]>({
+    queryKey: ["portal-messages"],
+    queryFn: async () => {
+      const res = await fetch("/api/applications/messages");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!me,
+    refetchInterval: 60000,
+  });
+
+  const { data: storeDrawdowns = [], refetch: refetchDrawdowns } = useQuery<any[]>({
+    queryKey: ["portal-drawdowns"],
+    queryFn: async () => {
+      const res = await fetch("/api/applications/drawdown/store");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!me,
+    refetchInterval: 60000,
+  });
+
+  const markRead = async (id: number) => {
+    await fetch(`/api/applications/messages/${id}/read`, { method: "PUT" });
+    refetchMessages();
+  };
+
+  const confirmDrawdown = async (id: number) => {
+    await fetch(`/api/applications/drawdown/${id}/confirm`, { method: "PUT" });
+    refetchDrawdowns();
+  };
+
+  const unreadCount = messages.filter((m: any) => !m.is_read).length;
+  const pendingDrawdowns = storeDrawdowns.filter((d: any) => d.status === "pending" || d.status === "notified");
 
   const handleLogout = async () => {
     await fetch("/api/portal/logout", { method: "POST" });
@@ -198,6 +235,75 @@ export default function PortalDashboardPage() {
       </header>
 
       <div className="max-w-6xl mx-auto p-6 md:p-8">
+
+        {/* Notifications + Drawdown Requests */}
+        {(unreadCount > 0 || pendingDrawdowns.length > 0) && (
+          <div className="mb-6 border border-amber-400/20 bg-amber-400/5 rounded-2xl overflow-hidden">
+            <button
+              onClick={() => setShowNotifications(v => !v)}
+              className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-amber-400/5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Bell className="w-4 h-4 text-amber-400" />
+                <span className="text-sm font-semibold text-amber-400">
+                  {pendingDrawdowns.length > 0
+                    ? `${pendingDrawdowns.length} drawdown${pendingDrawdowns.length > 1 ? "s" : ""} pending action`
+                    : `${unreadCount} unread notification${unreadCount > 1 ? "s" : ""}`}
+                </span>
+              </div>
+              {showNotifications ? <ChevronUp className="w-4 h-4 text-amber-400" /> : <ChevronDown className="w-4 h-4 text-amber-400" />}
+            </button>
+
+            {showNotifications && (
+              <div className="border-t border-amber-400/10 divide-y divide-white/5">
+                {/* Pending Drawdowns */}
+                {pendingDrawdowns.map((d: any) => (
+                  <div key={d.id} className="px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Drawdown Request</span>
+                        <span className="text-xs text-muted-foreground">#{d.id}</span>
+                      </div>
+                      <p className="text-sm font-semibold text-white">{d.customer_name}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Amount: <span className="text-white font-medium">${parseFloat(d.amount_requested).toFixed(2)}</span>
+                        {d.customer_phone && <span> &middot; {d.customer_phone}</span>}
+                        <span> &middot; {format(new Date(d.created_at), "dd MMM yyyy HH:mm")}</span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => confirmDrawdown(d.id)}
+                      className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-colors"
+                    >
+                      <CheckCircle className="w-4 h-4" /> Confirm Actioned
+                    </button>
+                  </div>
+                ))}
+
+                {/* Unread Messages */}
+                {messages.filter((m: any) => !m.is_read).slice(0, 5).map((m: any) => (
+                  <div key={m.id} className="px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-sm font-medium text-white truncate">{m.subject}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{m.body}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{format(new Date(m.created_at), "dd MMM yyyy HH:mm")}</p>
+                    </div>
+                    <button
+                      onClick={() => markRead(m.id)}
+                      className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-muted-foreground hover:text-white transition-colors"
+                    >
+                      Mark read
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-8">
           {[

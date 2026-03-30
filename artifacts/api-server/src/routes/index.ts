@@ -14,6 +14,7 @@ import externalRouter from "./external";
 import kioskRouter from "./kiosk";
 import customersRouter from "./customers";
 import xeroRouter from "./xero";
+import applicationsRouter from "./applications";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(externalRouter);
 router.use(kioskRouter);
 router.use(customersRouter);
 router.use(xeroRouter);
+router.use(applicationsRouter);
 
 export default router;
