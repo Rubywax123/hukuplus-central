@@ -382,6 +382,31 @@ router.get("/formitize/one-click", async (req, res): Promise<void> => {
   res.redirect(`${appUrl}/kiosk/${branch.id}`);
 });
 
+// ─── Form context detection ────────────────────────────────────────────────────
+function parseFormContext(formName: string): {
+  product: "HukuPlus" | "ChikweretiOne" | "Revolver";
+  formType: "agreement" | "application" | "reapplication" | "drawdown" | "payment" | "upload" | "approval" | "undertaking" | "unknown";
+} {
+  const n = formName.toLowerCase();
+
+  let product: "HukuPlus" | "ChikweretiOne" | "Revolver" = "HukuPlus";
+  if (n.includes("chikweret")) product = "ChikweretiOne";
+  else if (n.includes("revolver")) product = "Revolver";
+  // HukuPlus catches: "hukuplus", "novafeed", "new customer", "drawdown approval", "payment receipt"
+
+  let formType: "agreement" | "application" | "reapplication" | "drawdown" | "payment" | "upload" | "approval" | "undertaking" | "unknown" = "unknown";
+  if (n.includes("agreement")) formType = "agreement";
+  else if (n.includes("re-application") || n.includes("reapplication") || n.includes("re application")) formType = "reapplication";
+  else if (n.includes("application")) formType = "application";
+  else if (n.includes("drawdown")) formType = "drawdown";
+  else if (n.includes("payment") || n.includes("receipt") || n.includes("payment notice")) formType = "payment";
+  else if (n.includes("upload") || n.includes("document")) formType = "upload";
+  else if (n.includes("approval")) formType = "approval";
+  else if (n.includes("undertaking")) formType = "undertaking";
+
+  return { product, formType };
+}
+
 // ─── POST /api/formitize/webhook ──────────────────────────────────────────────
 router.post("/formitize/webhook", async (req, res) => {
   const webhookSecret = process.env.FORMITIZE_WEBHOOK_SECRET;
@@ -394,60 +419,50 @@ router.post("/formitize/webhook", async (req, res) => {
   }
 
   const body = req.body;
-  console.log(`[formitize:webhook] Hit — form="${body.formTitle || body.title}" submittedFormID=${body.submittedFormID} jobID=${body.jobID}`);
+  const rawFormName: string = body.formTitle || body.title || body.form_name || body.FormName || body.formName || "";
+  console.log(`[formitize:webhook] Hit — form="${rawFormName}" submittedFormID=${body.submittedFormID} jobID=${body.jobID}`);
 
-  // Formitize sends formTitle / title at the top level
-  const formName: string = (
-    body.formTitle || body.title || body.form_name || body.FormName || body.formName || ""
-  ).toLowerCase().trim();
-
-  if (!formName.includes("novafeed agreement")) {
-    console.log(`[formitize] Ignored form: "${formName || "(unnamed)"}"`);
-    res.status(200).json({ ok: true, skipped: true, reason: "Not a Novafeed Agreement — ignored" });
+  const formName = rawFormName.toLowerCase().trim();
+  if (!formName) {
+    res.status(400).json({ error: "No form name in payload" });
     return;
   }
 
-  // Walk the content object and collect all field key→value pairs.
-  // Formitize Simplified format: { fieldName: { "0": "value" } }
-  // Formitize full format:       { fieldName: { value: "value", label: "..." } }
-  // Both are handled below.
+  const { product, formType } = parseFormContext(formName);
+  console.log(`[formitize:webhook] Detected — product="${product}" formType="${formType}"`);
+
+  // ── Extract all field values from Formitize payload ────────────────────────
+  // Handles both Simplified format ({ fieldName: { "0": "value" } })
+  // and Full format ({ fieldName: { value: "...", label: "..." } })
   const fieldMap: Record<string, string> = {};
-  function extractFields(obj: any, parentKey = "") {
+  function extractFields(obj: any) {
     if (!obj || typeof obj !== "object") return;
     for (const key of Object.keys(obj)) {
       const node = obj[key];
-      const fieldKey = key.toLowerCase();
-
       if (node === null || node === undefined) continue;
 
-      // Primitive value — store directly
       if (typeof node !== "object") {
-        if (String(node).trim()) fieldMap[fieldKey] = String(node).trim();
+        if (String(node).trim()) fieldMap[key.toLowerCase()] = String(node).trim();
         continue;
       }
 
-      // Simplified format: { "0": "string value" } with no other meaningful keys
       const nodeKeys = Object.keys(node);
       if (nodeKeys.length === 1 && nodeKeys[0] === "0" && typeof node["0"] === "string" && node["0"].trim()) {
-        fieldMap[fieldKey] = node["0"].trim();
+        fieldMap[key.toLowerCase()] = node["0"].trim();
         continue;
       }
 
-      // Full format: node has a scalar .value property
       if (node.value !== undefined && node.value !== null && typeof node.value !== "object" && String(node.value).trim()) {
         const resolvedKey = (node.name || node.label || key).toString().toLowerCase();
         fieldMap[resolvedKey] = String(node.value).trim();
       }
 
-      // Recurse into children or nested objects
-      if (node.children && typeof node.children === "object") extractFields(node.children, key);
-      else if (typeof node === "object") extractFields(node, key);
+      if (node.children && typeof node.children === "object") extractFields(node.children);
+      else extractFields(node);
     }
   }
   extractFields(body.content || {});
 
-  // Helper: find first matching value from a list of possible label substrings.
-  // Normalises both sides by stripping spaces, hyphens and underscores before comparing.
   const normalise = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
   const findField = (...needles: string[]): string | undefined => {
     for (const needle of needles) {
@@ -459,58 +474,113 @@ router.post("/formitize/webhook", async (req, res) => {
     return undefined;
   };
 
-  console.log("[formitize] Extracted fields:", JSON.stringify(fieldMap));
+  console.log("[formitize:webhook] Fields:", JSON.stringify(fieldMap));
 
-  // "Select Client" CRM field → formcrm_1; fallback to borrowerID (national ID)
-  const customerName  = findField(
-    "formcrm_1", "borrowername", "clientname", "customername",
-    "formtext_1", "formtext_2", "formtext_3", "borrowerid"
-  );
-  // This form is always Novafeeds — hardcoded
-  const retailerName  = "Novafeeds";
-  // "Store Branch" lives in formtext_5 on the Novafeed Agreement form.
-  // appliedDisbursement and appliedSettlement are dates — do not use them for branch.
-  const branchName    = findField("formtext_5", "storebranch", "store branch", "branchname");
-  const customerPhone = findField("borrowermobile", "phone", "mobile", "cell", "contact number", "contactnumber") || null;
-  const loanAmountRaw = findField("loanamount", "loan amount", "amount");
-  const loanAmount    = parseFloat(loanAmountRaw || "0");
-
-  // Job ID: prefer the real jobID, fall back to submittedFormID
+  // ── Job ID dedup ───────────────────────────────────────────────────────────
   const rawJobId = body.jobID || body.jobId || body.job_id || null;
-  const jobId    = (rawJobId && String(rawJobId) !== "0")
+  const jobId = (rawJobId && String(rawJobId) !== "0")
     ? String(rawJobId)
     : (body.submittedFormID ? String(body.submittedFormID) : null);
 
-  // Dedup — don't import the same submission twice
   if (jobId) {
     const existing = await db.select({ id: agreementsTable.id })
       .from(agreementsTable).where(eq(agreementsTable.formitizeJobId, jobId));
     if (existing.length > 0) {
-      console.log(`[formitize] Duplicate jobId ${jobId} — skipped`);
+      console.log(`[formitize:webhook] Duplicate jobId ${jobId} — skipped`);
       res.status(200).json({ ok: true, skipped: true, reason: "Already imported" });
       return;
     }
   }
 
-  console.log(`[formitize] Parsed fields — customer: "${customerName}", retailer: "${retailerName}", branch: "${branchName}", amount: ${loanAmount}`);
+  // ── Activity-only form types (no agreement record needed) ──────────────────
+  // Drawdowns, payments, uploads, approvals, undertakings are events against
+  // existing agreements — store as activity log and return.
+  const activityOnly = ["drawdown", "payment", "upload", "approval", "undertaking"];
+  if (activityOnly.includes(formType)) {
+    const customerName = findField(
+      "formcrm_1", "borrowername", "clientname", "customername", "employeename",
+      "applicantname", "fullname", "name", "formtext_1", "formtext_2"
+    ) || rawFormName;
 
-  console.log(`[formitize] Resolved — customer: "${customerName}", branch: "${branchName || "(default)"}", phone: "${customerPhone}", amount: ${loanAmount}`);
-  if (!customerName) {
-    console.log(`[formitize] Missing customer name. Available labels: ${Object.keys(fieldMap).join(", ")}`);
-    res.status(400).json({ error: "Missing customer_name", availableFields: Object.keys(fieldMap) });
+    await db.insert(activityTable).values({
+      type: `formitize_${formType}`,
+      description: `${rawFormName} received for ${customerName}`,
+      loanProduct: product,
+      referenceId: jobId ? parseInt(jobId) || null : null,
+    });
+
+    console.log(`[formitize:webhook] Stored as activity — ${rawFormName}`);
+    res.status(200).json({ ok: true, stored: "activity", product, formType });
     return;
   }
 
-  const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${retailerName}%`));
-  if (!retailer) { res.status(422).json({ error: `Retailer not found: ${retailerName}` }); return; }
+  // ── Agreement and Application forms — create a record ─────────────────────
+  // Extract customer identity fields (broad search across all product field names)
+  const customerName = findField(
+    // HukuPlus: CRM lookup field + known text fields
+    "formcrm_1", "borrowername", "clientname", "customername",
+    // ChikweretiOne: payroll deduction
+    "employeename", "employee name", "debtorname", "debtor name",
+    // Revolver: similar to HukuPlus
+    "applicantname", "applicant name", "revolverName",
+    // Generic fallbacks
+    "fullname", "full name", "name",
+    "formtext_1", "formtext_2", "formtext_3",
+    "borrowerid"
+  );
 
-  const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
-  const branch = branchName
-    ? (allBranches.find(r => r.name.toLowerCase().includes(branchName.toLowerCase())) || allBranches[0])
-    : allBranches[0]; // default to first branch (Main Branch) if not specified
-  if (!branch) { res.status(422).json({ error: `No branches found for ${retailerName}` }); return; }
+  if (!customerName) {
+    console.log(`[formitize:webhook] Missing customer name. Fields: ${Object.keys(fieldMap).join(", ")}`);
+    res.status(400).json({ error: "Missing customer name", availableFields: Object.keys(fieldMap) });
+    return;
+  }
 
-  // ── Find or create unified customer record ──────────────────────────────────
+  const customerPhone = findField(
+    "borrowermobile", "employeemobile", "mobile", "phone",
+    "cell", "cellphone", "contact number", "contactnumber", "phonenumber"
+  ) || null;
+
+  const loanAmountRaw = findField(
+    "loanamount", "loan amount", "creditlimit", "credit limit",
+    "revolveramount", "revolver amount", "deductionamount", "deduction amount", "amount"
+  );
+  const loanAmount = parseFloat(loanAmountRaw || "0");
+
+  // ── Retailer / branch resolution (product-specific) ────────────────────────
+  let retailerId: number | null = null;
+  let branchId: number | null = null;
+  let resolvedRetailerName = "";
+  let resolvedBranchName = "";
+
+  if (product === "HukuPlus") {
+    // HukuPlus → always Novafeeds; branch from formtext_5 / storebranch
+    const branchName = findField("formtext_5", "storebranch", "store branch", "branchname");
+    const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, "%novafeed%"));
+    if (retailer) {
+      retailerId = retailer.id;
+      resolvedRetailerName = retailer.name;
+      const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
+      const branch = branchName
+        ? (allBranches.find(r => r.name.toLowerCase().includes(branchName.toLowerCase())) || allBranches[0])
+        : allBranches[0];
+      if (branch) { branchId = branch.id; resolvedBranchName = branch.name; }
+    }
+  } else if (product === "Revolver") {
+    // Revolver → look for store name in form; search synced Revolver retailers
+    const storeName = findField("storename", "store name", "store", "branch", "branchname", "formtext_5");
+    if (storeName) {
+      const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${storeName}%`));
+      if (retailer) {
+        retailerId = retailer.id;
+        resolvedRetailerName = retailer.name;
+        const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
+        if (allBranches[0]) { branchId = allBranches[0].id; resolvedBranchName = allBranches[0].name; }
+      }
+    }
+  }
+  // ChikweretiOne: no retailer/branch — employer details live in form_data
+
+  // ── Find or create unified customer record ─────────────────────────────────
   const normalisePhone = (p: string) => {
     if (!p) return null;
     let s = p.replace(/[\s\-\(\)\.]/g, "");
@@ -520,7 +590,6 @@ router.post("/formitize/webhook", async (req, res) => {
   };
   const normPhone = normalisePhone(customerPhone || "");
 
-  // Try to extract a Formitize CRM contact ID from any formcrm_* field
   let formitizeCrmId: string | null = null;
   for (const key of Object.keys(body.content || {})) {
     if (key.toLowerCase().startsWith("formcrm")) {
@@ -533,64 +602,80 @@ router.post("/formitize/webhook", async (req, res) => {
   }
 
   let customerId: number | null = null;
-
-  // 1. Match by Formitize CRM ID (most reliable)
   if (formitizeCrmId) {
     const [hit] = await db.select({ id: customersTable.id })
       .from(customersTable).where(eq(customersTable.formitizeCrmId, formitizeCrmId));
     if (hit) customerId = hit.id;
   }
-
-  // 2. Match by normalised phone
   if (!customerId && normPhone) {
     const [hit] = await db.select({ id: customersTable.id })
       .from(customersTable).where(eq(customersTable.phone, normPhone));
     if (hit) customerId = hit.id;
   }
-
-  // 3. Match by customer name (case-insensitive) within same retailer
   if (!customerId) {
     const allByName = await db.select({ id: customersTable.id })
-      .from(customersTable).where(ilike(customersTable.fullName, customerName!));
+      .from(customersTable).where(ilike(customersTable.fullName, customerName));
     if (allByName.length === 1) customerId = allByName[0].id;
   }
-
-  // 4. Create new customer if no match found
   if (!customerId) {
     const [newCustomer] = await db.insert(customersTable).values({
-      fullName: customerName!,
+      fullName: customerName,
       phone: normPhone,
       ...(formitizeCrmId ? { formitizeCrmId } : {}),
     }).returning({ id: customersTable.id });
     customerId = newCustomer.id;
-    console.log(`[formitize] Created new customer record #${customerId} for "${customerName}"`);
+    console.log(`[formitize:webhook] Created customer #${customerId} for "${customerName}"`);
   } else {
-    console.log(`[formitize] Linked to existing customer record #${customerId} for "${customerName}"`);
+    console.log(`[formitize:webhook] Linked to customer #${customerId} for "${customerName}"`);
   }
 
+  // ── Create agreement record ────────────────────────────────────────────────
+  const isAgreement = formType === "agreement";
   const signingToken = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
 
   const [agreement] = await db.insert(agreementsTable).values({
-    retailerId: retailer.id,
-    branchId: branch.id,
+    ...(retailerId ? { retailerId } : {}),
+    ...(branchId ? { branchId } : {}),
+    customerId,
     customerName,
     customerPhone,
-    loanProduct: "Novafeeds",
+    loanProduct: product,
+    formType,
     loanAmount: isNaN(loanAmount) ? 0 : loanAmount,
     formitizeJobId: jobId,
     formitizeFormUrl: null,
     signingToken,
-    status: "pending",
+    // Agreements go "pending" (awaiting signature); applications just sit as "application"
+    status: isAgreement ? "pending" : "application",
     expiresAt,
     createdBy: "formitize-webhook",
     formData: fieldMap as any,
-    customerId,
   }).returning();
 
-  console.log(`[formitize:webhook] Imported: ${customerName} @ ${retailer.name}/${branch.name}`);
+  await db.insert(activityTable).values({
+    type: isAgreement ? "agreement_created" : "application_received",
+    description: `${rawFormName} received for ${customerName}${resolvedRetailerName ? ` @ ${resolvedRetailerName}` : ""}`,
+    loanProduct: product,
+    referenceId: agreement.id,
+    ...(resolvedRetailerName ? { retailerName: resolvedRetailerName } : {}),
+    ...(resolvedBranchName ? { branchName: resolvedBranchName } : {}),
+  });
+
   const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
-  res.status(201).json({ ok: true, agreementId: agreement.id, signingUrl: `${appUrl}/sign/${signingToken}`, retailer: retailer.name, branch: branch.name });
+  const signingUrl = `${appUrl}/sign/${signingToken}`;
+
+  console.log(`[formitize:webhook] Created ${formType} #${agreement.id} — ${product} — ${customerName}`);
+
+  res.status(201).json({
+    ok: true,
+    agreementId: agreement.id,
+    product,
+    formType,
+    status: agreement.status,
+    ...(isAgreement ? { signingUrl } : {}),
+    ...(resolvedRetailerName ? { retailer: resolvedRetailerName, branch: resolvedBranchName } : {}),
+  });
 });
 
 export default router;

@@ -140,8 +140,13 @@ export async function runMigrations() {
         ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS created_by TEXT,
         ADD COLUMN IF NOT EXISTS form_data JSONB,
-        ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id);
+        ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id),
+        ADD COLUMN IF NOT EXISTS form_type TEXT DEFAULT 'agreement';
     `);
+
+    // ── Phase 2: make retailer_id / branch_id nullable (for non-HukuPlus products) ──
+    await client.query(`ALTER TABLE agreements ALTER COLUMN retailer_id DROP NOT NULL`).catch(() => {});
+    await client.query(`ALTER TABLE agreements ALTER COLUMN branch_id DROP NOT NULL`).catch(() => {});
 
     // ── Backfill: create customer records for existing agreements ─────────────
     // Normalise phone: strip spaces/dashes, convert 263xxx → 0xxx

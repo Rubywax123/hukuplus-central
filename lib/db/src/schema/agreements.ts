@@ -8,8 +8,9 @@ import { customersTable } from "./customers";
 export const agreementsTable = pgTable("agreements", {
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").references(() => customersTable.id),
-  retailerId: integer("retailer_id").notNull().references(() => retailersTable.id),
-  branchId: integer("branch_id").notNull().references(() => branchesTable.id),
+  retailerId: integer("retailer_id").references(() => retailersTable.id),
+  branchId: integer("branch_id").references(() => branchesTable.id),
+  formType: text("form_type").default("agreement"),
   customerName: text("customer_name").notNull(),
   customerPhone: text("customer_phone"),
   loanProduct: text("loan_product").notNull(),

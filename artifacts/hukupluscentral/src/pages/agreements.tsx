@@ -17,6 +17,7 @@ export default function AgreementsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [productFilter, setProductFilter] = useState<string>("all");
 
   // Create form state
   const [retailerId, setRetailerId] = useState("");
@@ -98,7 +99,39 @@ export default function AgreementsPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const filtered = agreements?.filter(a => a.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
+  const PRODUCTS = [
+    { id: "all", label: "All Products" },
+    { id: "HukuPlus", label: "HukuPlus" },
+    { id: "ChikweretiOne", label: "ChikweretiOne" },
+    { id: "Revolver", label: "Revolver" },
+  ];
+
+  const PRODUCT_COLOURS: Record<string, string> = {
+    HukuPlus: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+    ChikweretiOne: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+    Revolver: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+    Novafeeds: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  };
+
+  const FORMTYPE_LABELS: Record<string, string> = {
+    agreement: "Agreement",
+    application: "Application",
+    reapplication: "Re-Application",
+    drawdown: "Drawdown",
+    payment: "Payment",
+    upload: "Upload",
+    approval: "Approval",
+    undertaking: "Undertaking",
+    unknown: "",
+  };
+
+  const filtered = agreements?.filter(a => {
+    const matchesSearch = a.customerName.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesProduct = productFilter === "all"
+      || a.loanProduct === productFilter
+      || (productFilter === "HukuPlus" && a.loanProduct === "Novafeeds");
+    return matchesSearch && matchesProduct;
+  });
 
   return (
     <div className="pb-10">
@@ -119,6 +152,32 @@ export default function AgreementsPage() {
           </div>
         }
       />
+
+      {/* Product filter tabs */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {PRODUCTS.map(p => (
+          <button
+            key={p.id}
+            onClick={() => setProductFilter(p.id)}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-200 ${
+              productFilter === p.id
+                ? p.id === "all"
+                  ? "bg-white/10 border-white/20 text-white"
+                  : `border ${PRODUCT_COLOURS[p.id] ?? "text-white bg-white/10 border-white/20"}`
+                : "border-transparent text-muted-foreground hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            {p.label}
+            {p.id !== "all" && (
+              <span className="ml-2 text-xs opacity-60">
+                {agreements?.filter(a =>
+                  a.loanProduct === p.id || (p.id === "HukuPlus" && a.loanProduct === "Novafeeds")
+                ).length ?? 0}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
       <GlassCard className="p-0 overflow-hidden">
         <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/20">
@@ -153,16 +212,27 @@ export default function AgreementsPage() {
                     <p className="text-xs text-muted-foreground">{format(new Date(a.createdAt), 'MMM d, yyyy')}</p>
                   </td>
                   <td className="p-4">
-                    <Badge status="neutral">{a.loanProduct}</Badge>
-                    <p className="text-sm font-medium mt-1">USD {a.loanAmount.toLocaleString()}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${PRODUCT_COLOURS[a.loanProduct] ?? "text-muted-foreground bg-white/5 border-white/10"}`}>
+                        {a.loanProduct === "Novafeeds" ? "HukuPlus" : a.loanProduct}
+                      </span>
+                      {(a as any).formType && (a as any).formType !== "agreement" && (a as any).formType !== "unknown" && (
+                        <span className="text-xs text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                          {FORMTYPE_LABELS[(a as any).formType] ?? (a as any).formType}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium mt-1">{a.loanAmount > 0 ? `USD ${a.loanAmount.toLocaleString()}` : "—"}</p>
                   </td>
                   <td className="p-4">
-                    <p className="text-sm text-foreground">{a.retailerName}</p>
-                    <p className="text-xs text-muted-foreground">{a.branchName}</p>
+                    <p className="text-sm text-foreground">{(a.retailerName as string) || <span className="text-muted-foreground">—</span>}</p>
+                    <p className="text-xs text-muted-foreground">{a.branchName || ""}</p>
                   </td>
                   <td className="p-4">
-                    {a.status === 'signed'  ? <Badge status="success"><CheckCircle2 className="w-3 h-3 inline mr-1" />Signed</Badge>  :
-                     a.status === 'pending' ? <Badge status="warning"><Clock className="w-3 h-3 inline mr-1" />Pending</Badge> :
+                    {a.status === 'signed'      ? <Badge status="success"><CheckCircle2 className="w-3 h-3 inline mr-1" />Signed</Badge>  :
+                     a.status === 'pending'     ? <Badge status="warning"><Clock className="w-3 h-3 inline mr-1" />Pending</Badge> :
+                     a.status === 'application' ? <Badge status="neutral"><FileText className="w-3 h-3 inline mr-1" />Application</Badge> :
+                     a.status === 'disbursed'   ? <Badge status="success"><CheckCircle2 className="w-3 h-3 inline mr-1" />Disbursed</Badge> :
                      <Badge status="danger"><XCircle className="w-3 h-3 inline mr-1" />Expired</Badge>}
                   </td>
                   <td className="p-4 text-right">
@@ -174,6 +244,8 @@ export default function AgreementsPage() {
                         >
                           <ScrollText className="w-3.5 h-3.5" /> View Certificate
                         </button>
+                      ) : a.status === "application" ? (
+                        <span className="text-xs text-muted-foreground italic px-3 py-1.5">Awaiting processing</span>
                       ) : (
                         <>
                           <a
@@ -235,10 +307,9 @@ export default function AgreementsPage() {
             <div>
               <Label>Loan Product</Label>
               <Select required value={loanProduct} onChange={e => setLoanProduct(e.target.value)}>
-                <option value="HukuPlus">HukuPlus (Broiler)</option>
-                <option value="Revolver">Revolver (Layer)</option>
-                <option value="Salary">Salary (Payroll)</option>
-                <option value="Novafeeds">Novafeeds</option>
+                <option value="HukuPlus">HukuPlus (Broiler Feed)</option>
+                <option value="Revolver">Revolver (Layer Feed)</option>
+                <option value="ChikweretiOne">ChikweretiOne (Payroll)</option>
               </Select>
             </div>
             <div>
