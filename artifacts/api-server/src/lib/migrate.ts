@@ -324,6 +324,28 @@ export async function runMigrations() {
       );
     `);
 
+    // ── Data correction: NEW CUSTOMER APPLICATION webhook mis-mapped fields ─────
+    // The first submission used formtext_1 (store name) as customer name.
+    // Fix customer record and linked agreement to the correct values.
+    await client.query(`
+      UPDATE customers
+      SET full_name = 'Tamuka Tsigo', phone = '0787087472'
+      WHERE full_name = 'Mazowe Profarmer';
+    `);
+    await client.query(`
+      UPDATE agreements
+      SET
+        customer_name = 'Tamuka Tsigo',
+        retailer_id   = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1),
+        branch_id     = (
+          SELECT b.id FROM branches b
+          JOIN retailers r ON r.id = b.retailer_id
+          WHERE r.name ILIKE '%profeed%' AND b.name ILIKE '%mazow%'
+          LIMIT 1
+        )
+      WHERE customer_name = 'Mazowe Profarmer';
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

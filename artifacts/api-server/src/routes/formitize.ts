@@ -515,19 +515,25 @@ router.post("/formitize/webhook", async (req, res) => {
   }
 
   // ── Agreement and Application forms — create a record ─────────────────────
+  // "New Customer Application" forms use a different field layout:
+  //   formtext_1 = store/branch name, formtext_2 = customer name
+  // All other forms use the standard layout where formtext_1 = customer name.
+  const isNewCustomerForm = formName.includes("new customer");
+
   // Extract customer identity fields (broad search across all product field names)
-  const customerName = findField(
-    // HukuPlus: CRM lookup field + known text fields
-    "formcrm_1", "borrowername", "clientname", "customername",
-    // ChikweretiOne: payroll deduction
-    "employeename", "employee name", "debtorname", "debtor name",
-    // Revolver: similar to HukuPlus
-    "applicantname", "applicant name", "revolverName",
-    // Generic fallbacks
-    "fullname", "full name", "name",
-    "formtext_1", "formtext_2", "formtext_3",
-    "borrowerid"
-  );
+  const customerName = isNewCustomerForm
+    ? (findField("formtext_2") || findField(
+        "formcrm_1", "borrowername", "clientname", "customername",
+        "fullname", "full name", "name", "formtext_1"
+      ))
+    : findField(
+        "formcrm_1", "borrowername", "clientname", "customername",
+        "employeename", "employee name", "debtorname", "debtor name",
+        "applicantname", "applicant name", "revolverName",
+        "fullname", "full name", "name",
+        "formtext_1", "formtext_2", "formtext_3",
+        "borrowerid"
+      );
 
   if (!customerName) {
     console.log(`[formitize:webhook] Missing customer name. Fields: ${Object.keys(fieldMap).join(", ")}`);
@@ -537,7 +543,8 @@ router.post("/formitize/webhook", async (req, res) => {
 
   const customerPhone = findField(
     "borrowermobile", "employeemobile", "mobile", "phone",
-    "cell", "cellphone", "contact number", "contactnumber", "phonenumber"
+    "cell", "cellphone", "contact number", "contactnumber", "phonenumber",
+    "formtel_1", "formtel_2"
   ) || null;
 
   const loanAmountRaw = findField(
@@ -552,8 +559,35 @@ router.post("/formitize/webhook", async (req, res) => {
   let resolvedRetailerName = "";
   let resolvedBranchName = "";
 
-  if (product === "HukuPlus") {
-    // HukuPlus → always Novafeeds; branch from formtext_5 / storebranch
+  if (product === "HukuPlus" && isNewCustomerForm) {
+    // "New Customer Application" — formtext_1 contains the actual store/branch name.
+    // Search all branches for a match, then resolve parent retailer.
+    const storeName = (fieldMap["formtext_1"] || "").trim();
+    if (storeName) {
+      const allBranches = await db.select().from(branchesTable);
+      const storeWords = storeName.toLowerCase().split(/\s+/);
+      const matchedBranch = allBranches.find(b => {
+        const bn = b.name.toLowerCase();
+        return storeWords.some(w => w.length > 2 && bn.includes(w));
+      });
+      if (matchedBranch) {
+        branchId = matchedBranch.id;
+        resolvedBranchName = matchedBranch.name;
+        const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, matchedBranch.retailerId));
+        if (retailer) { retailerId = retailer.id; resolvedRetailerName = retailer.name; }
+      } else {
+        // Fallback: match retailer name directly
+        const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${storeWords[0]}%`));
+        if (retailer) {
+          retailerId = retailer.id;
+          resolvedRetailerName = retailer.name;
+          const [firstBranch] = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
+          if (firstBranch) { branchId = firstBranch.id; resolvedBranchName = firstBranch.name; }
+        }
+      }
+    }
+  } else if (product === "HukuPlus") {
+    // Standard HukuPlus agreement → always Novafeeds; branch from formtext_5 / storebranch
     const branchName = findField("formtext_5", "storebranch", "store branch", "branchname");
     const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, "%novafeed%"));
     if (retailer) {
