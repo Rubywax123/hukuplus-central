@@ -102,15 +102,12 @@ async function getValidAccessToken(): Promise<{ accessToken: string; tenantId: s
 
 // GET /xero/auth — initiate OAuth (no auth required — Xero itself handles identity)
 router.get("/xero/auth", (req: Request, res: Response) => {
-  const state = crypto.randomBytes(16).toString("hex");
-  (req.session as any).xeroState = state;
-
   const params = new URLSearchParams({
     response_type: "code",
     client_id: XERO_CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     scope: SCOPES,
-    state,
+    state: "hukupluscentral",
   });
 
   res.redirect(`https://login.xero.com/identity/connect/authorize?${params}`);
