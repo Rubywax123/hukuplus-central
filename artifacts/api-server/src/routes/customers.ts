@@ -1,8 +1,11 @@
 import { Router, type IRouter } from "express";
 import { eq, ilike, or, desc, sql } from "drizzle-orm";
 import { db, customersTable, agreementsTable, branchesTable, retailersTable } from "@workspace/db";
+import multer from "multer";
+import { parse } from "csv-parse/sync";
 
 const router: IRouter = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 function normalisePhone(p: string): string | null {
   if (!p) return null;
@@ -16,32 +19,44 @@ function normalisePhone(p: string): string | null {
 router.get("/customers", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
 
-  const search = (req.query.search as string || "").trim();
-  const limit  = Math.min(parseInt(req.query.limit as string || "50"), 200);
-  const offset = parseInt(req.query.offset as string || "0");
+  const search         = (req.query.search as string || "").trim();
+  const incompleteOnly = req.query.incompleteOnly === "true";
+  const limit          = Math.min(parseInt(req.query.limit as string || "50"), 200);
+  const offset         = parseInt(req.query.offset as string || "0");
 
-  let rows;
+  // Build WHERE conditions
+  const conditions: ReturnType<typeof ilike>[] = [];
   if (search) {
-    rows = await db
-      .select()
-      .from(customersTable)
-      .where(or(
+    conditions.push(
+      or(
         ilike(customersTable.fullName, `%${search}%`),
         ilike(customersTable.phone, `%${search}%`),
         ilike(customersTable.nationalId, `%${search}%`),
         ilike(customersTable.email, `%${search}%`),
-      ))
-      .orderBy(desc(customersTable.createdAt))
-      .limit(limit)
-      .offset(offset);
-  } else {
-    rows = await db
-      .select()
-      .from(customersTable)
-      .orderBy(desc(customersTable.createdAt))
-      .limit(limit)
-      .offset(offset);
+      ) as any
+    );
   }
+  if (incompleteOnly) {
+    conditions.push(
+      or(
+        sql`${customersTable.phone} IS NULL`,
+        sql`${customersTable.nationalId} IS NULL`,
+        sql`${customersTable.email} IS NULL`,
+      ) as any
+    );
+  }
+
+  const where = conditions.length === 0 ? undefined
+    : conditions.length === 1 ? conditions[0]
+    : sql`${conditions[0]} AND ${conditions[1]}`;
+
+  const rows = await db
+    .select()
+    .from(customersTable)
+    .where(where)
+    .orderBy(desc(customersTable.createdAt))
+    .limit(limit)
+    .offset(offset);
 
   // Attach agreement counts per customer
   const ids = rows.map(r => r.id);
@@ -126,6 +141,106 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
 
   if (!updated) { res.status(404).json({ error: "Customer not found" }); return; }
   res.json(updated);
+});
+
+// ── CSV Enrichment — POST /api/customers/enrich-csv ──────────────────────────
+// Accepts a CSV from Formitize (New Customer Application export) or any simple
+// CSV with Name/Phone/National ID/Email/Address columns.
+// Matches existing customers by phone (priority) or name, then fills in any
+// blank fields using COALESCE logic (never overwrites existing values).
+router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+
+  let records: Record<string, string>[];
+  try {
+    records = parse(req.file.buffer.toString("utf8"), {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+    }) as Record<string, string>[];
+  } catch {
+    res.status(400).json({ error: "Could not parse CSV — check the file format" });
+    return;
+  }
+
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
+
+  const getField = (row: Record<string, string>, ...needles: string[]): string | null => {
+    for (const needle of needles) {
+      const normNeedle = normalize(needle);
+      for (const [k, v] of Object.entries(row)) {
+        if (normalize(k) === normNeedle && v?.trim()) return v.trim();
+      }
+    }
+    return null;
+  };
+
+  const isPlaceholder = (v: string | null) =>
+    !v || ["na", "n/a", "none", "nil", "-", "n.a"].includes(v.toLowerCase().trim());
+
+  const results = {
+    total: records.length,
+    matched: 0,
+    enriched: 0,
+    notFound: 0,
+    skipped: 0,
+    details: [] as { name: string; status: string; fields: string[] }[],
+  };
+
+  for (const row of records) {
+    const name      = getField(row, "formtext2", "name", "fullname", "customername", "customer", "formtext_2", "full_name");
+    const phoneRaw  = getField(row, "formtel1", "formtel_1", "phone", "mobile", "contactnumber", "formtel2", "formtel_2");
+    const natId     = getField(row, "formtext7", "formtext_7", "nationalid", "national_id", "idnumber", "nid");
+    const emailRaw  = getField(row, "formemail1", "formemail_1", "email", "emailaddress", "borroweremail");
+    const addrRaw   = getField(row, "formlocation1", "formlocation_1", "address", "homeaddress", "residential_address");
+
+    const email   = isPlaceholder(emailRaw) ? null : emailRaw;
+    const address = isPlaceholder(addrRaw)  ? null : addrRaw;
+    const normPhone = phoneRaw ? normalisePhone(phoneRaw) : null;
+
+    if (!name && !normPhone) { results.skipped++; continue; }
+
+    // Match customer — phone first (exact), then name (case-insensitive, unique)
+    let customer: typeof customersTable.$inferSelect | null = null;
+    if (normPhone) {
+      const hits = await db.select().from(customersTable).where(eq(customersTable.phone, normPhone));
+      if (hits.length === 1) customer = hits[0];
+    }
+    if (!customer && name) {
+      const hits = await db.select().from(customersTable).where(ilike(customersTable.fullName, name));
+      if (hits.length === 1) customer = hits[0];
+    }
+
+    if (!customer) {
+      results.notFound++;
+      results.details.push({ name: name || phoneRaw || "?", status: "not_found", fields: [] });
+      continue;
+    }
+
+    results.matched++;
+
+    // Only fill fields that are currently blank
+    const updates: Partial<typeof customersTable.$inferInsert> = {};
+    const filled: string[] = [];
+    if (normPhone && !customer.phone)      { updates.phone      = normPhone; filled.push("phone"); }
+    if (natId    && !customer.nationalId)  { updates.nationalId = natId;     filled.push("national_id"); }
+    if (email    && !customer.email)       { updates.email      = email;     filled.push("email"); }
+    if (address  && !customer.address)     { updates.address    = address;   filled.push("address"); }
+
+    if (Object.keys(updates).length > 0) {
+      await db.update(customersTable)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(customersTable.id, customer.id));
+      results.enriched++;
+      results.details.push({ name: customer.fullName, status: "enriched", fields: filled });
+    } else {
+      results.details.push({ name: customer.fullName, status: "already_complete", fields: [] });
+    }
+  }
+
+  res.json(results);
 });
 
 export default router;
