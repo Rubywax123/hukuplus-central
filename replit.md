@@ -148,9 +148,50 @@ A separate login system at `/portal/login` for retail partners (not Tefco staff)
 ### DB Schema
 - `portal_users` — id, name, email, passwordHash, retailerId, branchId, role, isActive, mustChangePassword
 
+## Phase 4 — Customer Requests (Communications)
+
+### HukuPlus Repeat Loan Applications
+- Public form at `/apply/hukuplus` — customers verify by name + phone
+- Validation: amount limit = 2.06 × chick count; collection date >= chick date + 12 days
+- On submit: email sent to operations@marishoma.com + in-app notification to registered store
+- Admin page at `/applications` (tab: HukuPlus Repeat Loans) — status management
+
+### Revolver Drawdown Requests
+- Public form at `/apply/revolver` — customers verify by name + phone
+- Shows facility limit + calculated available balance (limit minus actioned drawdowns)
+- Customer picks collection store (defaults to their registered store, can override)
+- On submit: email to operations@marishoma.com + store email(s) + in-app store notification
+- Store portal: amber banner shows pending drawdowns with "Confirm Actioned" button
+- Admin page at `/applications` (tab: Revolver Drawdowns) — status management
+
+### New API Routes
+- `POST /api/applications/customer-verify` — verify customer by name + phone (public)
+- `POST /api/applications/loan` — submit HukuPlus repeat loan application (public)
+- `GET /api/applications/loan` — list all loan applications (admin)
+- `PUT /api/applications/loan/:id` — update status/notes (admin)
+- `POST /api/applications/drawdown` — submit Revolver drawdown request (public)
+- `GET /api/applications/drawdown` — list all drawdown requests (admin)
+- `PUT /api/applications/drawdown/:id` — update status (admin)
+- `PUT /api/applications/drawdown/:id/confirm` — store confirms actioned (portal)
+- `GET /api/applications/drawdown/store` — store's own drawdown requests (portal)
+- `GET /api/applications/messages` — in-app messages for store (portal)
+- `GET /api/applications/messages/unread-count` — unread count (portal)
+- `PUT /api/applications/messages/:id/read` — mark message read (portal)
+- `GET /api/applications/retailers` — store picker for public forms (public)
+
+### New DB Tables
+- `loan_applications` — HukuPlus repeat loan application records
+- `drawdown_requests` — Revolver drawdown request records  
+- `in_app_messages` — in-app notifications for store portal
+
+### Email (SMTP)
+- Provider: Gmail/Google Workspace SMTP (smtp.gmail.com:587)
+- From: operations@marishoma.com
+- Secrets: EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_USER, EMAIL_SMTP_PASS
+
 ## Future Roadmap
 
-- Enable API key support in each loan app → live data sync in HukuPlusCentral
-- Gmail integration for email-based communications
-- WhatsApp Business API (Twilio) for mass messaging to customers/stores using flyer assets
-- AI credit decision layer (ML-based approvals)
+- Phase 5: APS (Automated Payment System) integration
+- Phase 6: AI/ML credit decision layer
+- WhatsApp Business API (dedicated number) for automated 1:1 customer messaging
+- AI analysis of captured conversation and application data
