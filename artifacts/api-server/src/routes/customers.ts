@@ -12,6 +12,8 @@ function normalisePhone(p: string): string | null {
   let s = p.replace(/[\s\-\(\)\.]/g, "");
   if (s.startsWith("+263")) s = "0" + s.slice(4);
   else if (s.startsWith("263") && s.length >= 12) s = "0" + s.slice(3);
+  // Handle 9-digit Zim numbers missing the leading 0 (e.g. "777482993" → "0777482993")
+  else if (/^7[0-9]{8}$/.test(s)) s = "0" + s;
   return s || null;
 }
 
