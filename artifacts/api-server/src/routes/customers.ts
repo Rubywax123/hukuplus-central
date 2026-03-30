@@ -153,6 +153,7 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
 router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
   if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+  const importMode = req.query.mode === "import";
 
   // Log raw first line for debugging encoding/delimiter issues
   const rawText = req.file.buffer.toString("utf8").replace(/^\uFEFF/, ""); // strip BOM
@@ -213,6 +214,7 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
     total: records.length,
     matched: 0,
     enriched: 0,
+    created: 0,
     notFound: 0,
     skipped: 0,
     columnHeaders,
@@ -223,6 +225,15 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
   for (const row of records) {
     // Formitize field-ID headers AND human-readable label variants
     // "Billing Name" and "Primary Contact" are the CRM export column names for customer name
+
+    // Formitize CRM "ID" column — exact match only so it doesn't bleed into natId
+    const formitizeId = (() => {
+      for (const [k, v] of Object.entries(row)) {
+        if (normalize(k) === "id" && v?.trim()) return v.trim();
+      }
+      return null;
+    })();
+
     const name      = getField(row,
       "formtext2", "formtext_2",
       "billingname", "billing name",
@@ -239,7 +250,8 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
     const natId     = getField(row,
       "formtext7", "formtext_7",
       "nationalid", "national id", "nationalidnumber", "national id number",
-      "idnumber", "id number", "nid", "id"
+      "idnumber", "id number", "nid"
+      // Note: "id" deliberately excluded — matches Formitize's "ID" (contact ID) column instead
     );
     const emailRaw  = getField(row,
       "formemail1", "formemail_1", "formemail2", "formemail_2",
@@ -257,9 +269,13 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
 
     if (!name && !normPhone) { results.skipped++; continue; }
 
-    // Match customer — phone first (exact), then name (case-insensitive, unique)
+    // Match customer — formitize_crm_id first, then phone (exact), then name (case-insensitive)
     let customer: typeof customersTable.$inferSelect | null = null;
-    if (normPhone) {
+    if (formitizeId) {
+      const hits = await db.select().from(customersTable).where(eq(customersTable.formitizeCrmId, formitizeId));
+      if (hits.length === 1) customer = hits[0];
+    }
+    if (!customer && normPhone) {
       const hits = await db.select().from(customersTable).where(eq(customersTable.phone, normPhone));
       if (hits.length === 1) customer = hits[0];
     }
@@ -269,8 +285,27 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
     }
 
     if (!customer) {
-      results.notFound++;
-      results.details.push({ name: name || phoneRaw || "?", status: "not_found", fields: [] });
+      if (importMode && name) {
+        // Create a new customer record from the CSV row
+        const [newCustomer] = await db.insert(customersTable).values({
+          fullName: name,
+          phone: normPhone ?? undefined,
+          email: email ?? undefined,
+          address: address ?? undefined,
+          nationalId: natId ?? undefined,
+          formitizeCrmId: formitizeId ?? undefined,
+        }).returning();
+        results.created++;
+        const createdFields = ["name"];
+        if (normPhone) createdFields.push("phone");
+        if (natId)     createdFields.push("national_id");
+        if (email)     createdFields.push("email");
+        if (address)   createdFields.push("address");
+        results.details.push({ name: newCustomer.fullName, status: "created", fields: createdFields });
+      } else {
+        results.notFound++;
+        results.details.push({ name: name || phoneRaw || "?", status: "not_found", fields: [] });
+      }
       continue;
     }
 

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ActiveAppBanner } from "@/components/layout";
 
@@ -562,7 +562,7 @@ function CompletenessDot({ c }: { c: Customer }) {
 // ── CSV Enrichment Modal ─────────────────────────────────────────────────────
 
 interface EnrichResult {
-  total: number; matched: number; enriched: number; notFound: number; skipped: number;
+  total: number; matched: number; enriched: number; created: number; notFound: number; skipped: number;
   columnHeaders?: string[];
   firstLine?: string;
   details: { name: string; status: string; fields: string[] }[];
@@ -571,18 +571,16 @@ interface EnrichResult {
 function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [importMode, setImportMode] = useState(false);
   const [result, setResult] = useState<EnrichResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: async (f: File) => {
+    mutationFn: async ({ f, mode }: { f: File; mode: boolean }) => {
       const fd = new FormData();
       fd.append("file", f);
-      const r = await fetch(`${BASE}/api/customers/enrich-csv`, {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
+      const url = `${BASE}/api/customers/enrich-csv${mode ? "?mode=import" : ""}`;
+      const r = await fetch(url, { method: "POST", credentials: "include", body: fd });
       if (!r.ok) throw new Error((await r.json()).error || "Upload failed");
       return r.json() as Promise<EnrichResult>;
     },
@@ -615,13 +613,35 @@ function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
             <>
               {/* Instructions */}
               <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2 text-sm text-muted-foreground">
-                <p className="font-medium text-white">How to prepare your CSV:</p>
+                <p className="font-medium text-white">How to use:</p>
                 <ol className="list-decimal list-inside space-y-1">
-                  <li>Go to <strong className="text-white">Formitize</strong> and export the <strong className="text-white">New Customer Application</strong> submissions as CSV</li>
-                  <li>Upload the file here — no column renaming needed</li>
-                  <li>The system will match customers by phone or name and fill in any missing phone, national ID, email and address fields without overwriting existing data</li>
+                  <li>Export contacts from <strong className="text-white">Formitize</strong> as CSV — no column renaming needed</li>
+                  <li>Choose whether to only fill in missing details, or also create new customer records</li>
+                  <li>Upload — the system matches by phone first, then name, and never overwrites existing data</li>
                 </ol>
               </div>
+
+              {/* Import mode toggle */}
+              <button
+                type="button"
+                onClick={() => setImportMode(m => !m)}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-colors ${
+                  importMode
+                    ? "bg-primary/10 border-primary/40 text-primary"
+                    : "bg-white/5 border-white/10 text-muted-foreground"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <UserPlus className="w-4 h-4" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-white">Create new records</p>
+                    <p className="text-xs">Contacts not yet in the system will be added as new customers</p>
+                  </div>
+                </div>
+                <div className={`w-10 h-5.5 rounded-full transition-colors flex items-center px-0.5 ${importMode ? "bg-primary" : "bg-white/20"}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${importMode ? "translate-x-4.5" : "translate-x-0"}`} />
+                </div>
+              </button>
 
               {/* File picker */}
               <div
@@ -655,27 +675,28 @@ function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
                   Cancel
                 </button>
                 <button
-                  onClick={() => file && mutation.mutate(file)}
+                  onClick={() => file && mutation.mutate({ f: file, mode: importMode })}
                   disabled={!file || mutation.isPending}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm font-medium transition-colors disabled:opacity-50"
                 >
                   <UploadCloud className="w-4 h-4" />
-                  {mutation.isPending ? "Processing…" : "Run Enrichment"}
+                  {mutation.isPending ? "Processing…" : importMode ? "Import & Enrich" : "Run Enrichment"}
                 </button>
               </div>
             </>
           ) : (
             /* Results */
             <div className="space-y-4">
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-5 gap-2">
                 {[
-                  { label: "Total rows", value: result.total, color: "text-white" },
+                  { label: "Total", value: result.total, color: "text-white" },
                   { label: "Matched", value: result.matched, color: "text-blue-400" },
                   { label: "Enriched", value: result.enriched, color: "text-green-400" },
+                  { label: "Created", value: result.created ?? 0, color: "text-violet-400" },
                   { label: "Not found", value: result.notFound, color: "text-amber-400" },
                 ].map(s => (
                   <div key={s.label} className="p-3 rounded-xl bg-white/5 border border-white/10 text-center">
-                    <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                    <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
                   </div>
                 ))}
@@ -714,6 +735,23 @@ function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
                       <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-green-500/10 border border-green-500/20">
                         <span className="text-sm text-white font-medium">{d.name}</span>
                         <span className="text-xs text-green-400">{d.fields.join(", ")} added</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.details.filter(d => d.status === "created").length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">New records created</p>
+                  <div className="max-h-48 overflow-y-auto space-y-1.5">
+                    {result.details.filter(d => d.status === "created").map((d, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                        <div className="flex items-center gap-2">
+                          <UserPlus className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                          <span className="text-sm text-white font-medium">{d.name}</span>
+                        </div>
+                        <span className="text-xs text-violet-400">{d.fields.filter(f => f !== "name").join(", ") || "name only"}</span>
                       </div>
                     ))}
                   </div>
