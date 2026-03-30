@@ -100,8 +100,8 @@ async function getValidAccessToken(): Promise<{ accessToken: string; tenantId: s
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-// GET /xero/auth — initiate OAuth
-router.get("/xero/auth", requireAuth, (req: Request, res: Response) => {
+// GET /xero/auth — initiate OAuth (no auth required — Xero itself handles identity)
+router.get("/xero/auth", (req: Request, res: Response) => {
   const state = crypto.randomBytes(16).toString("hex");
   (req.session as any).xeroState = state;
 
@@ -118,7 +118,7 @@ router.get("/xero/auth", requireAuth, (req: Request, res: Response) => {
 
 // GET /xero/callback — handle OAuth callback
 router.get("/xero/callback", async (req: Request, res: Response) => {
-  const { code, state, error } = req.query;
+  const { code, error } = req.query;
 
   if (error) {
     console.error("[xero] OAuth error:", error);
