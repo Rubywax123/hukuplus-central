@@ -329,7 +329,10 @@ export async function runMigrations() {
     // Fix customer record and linked agreement to the correct values.
     await client.query(`
       UPDATE customers
-      SET full_name = 'Tamuka Tsigo', phone = '0787087472'
+      SET full_name   = 'Tamuka Tsigo',
+          phone       = '0787087472',
+          national_id = '15-114456 F 15',
+          address     = 'Henderson Research Bag 2004, Mazowe'
       WHERE full_name = 'Mazowe Profarmer';
     `);
     await client.query(`

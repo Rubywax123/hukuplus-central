@@ -547,6 +547,28 @@ router.post("/formitize/webhook", async (req, res) => {
     "formtel_1", "formtel_2"
   ) || null;
 
+  // National ID — checked against common field names; formtext_7 is the "new customer" form slot
+  const nationalIdRaw = findField(
+    "nationalid", "national_id", "idnumber", "id number", "national id",
+    "employeeid", "employee id", "debtornid", "nid", "formtext_7"
+  ) || null;
+
+  // Email — filter out placeholder "na" / "n/a" values
+  const isNa = (v: string | undefined) =>
+    !v || ["na", "n/a", "none", "nil", "-"].includes(v.toLowerCase().trim());
+  const customerEmailRaw = findField(
+    "email", "emailaddress", "email address", "borroweremail",
+    "employeeemail", "formemail_1", "formemail_2"
+  );
+  const customerEmail = isNa(customerEmailRaw) ? null : (customerEmailRaw || null);
+
+  // Address — formlocation_1 is the "new customer" form slot; also check generic labels
+  const customerAddressRaw = findField(
+    "address", "homeaddress", "home address", "residentialaddress",
+    "residential address", "formlocation_1"
+  );
+  const customerAddress = isNa(customerAddressRaw) ? null : (customerAddressRaw || null);
+
   const loanAmountRaw = findField(
     "loanamount", "loan amount", "creditlimit", "credit limit",
     "revolveramount", "revolver amount", "deductionamount", "deduction amount", "amount"
@@ -654,12 +676,31 @@ router.post("/formitize/webhook", async (req, res) => {
   if (!customerId) {
     const [newCustomer] = await db.insert(customersTable).values({
       fullName: customerName,
-      phone: normPhone,
-      ...(formitizeCrmId ? { formitizeCrmId } : {}),
+      ...(normPhone       ? { phone:          normPhone       } : {}),
+      ...(nationalIdRaw   ? { nationalId:     nationalIdRaw   } : {}),
+      ...(customerEmail   ? { email:          customerEmail   } : {}),
+      ...(customerAddress ? { address:        customerAddress } : {}),
+      ...(formitizeCrmId  ? { formitizeCrmId: formitizeCrmId  } : {}),
     }).returning({ id: customersTable.id });
     customerId = newCustomer.id;
     console.log(`[formitize:webhook] Created customer #${customerId} for "${customerName}"`);
   } else {
+    // Enrich existing customer record with any new details from this form
+    const updates: Record<string, string> = {};
+    if (normPhone)       updates.phone        = normPhone;
+    if (nationalIdRaw)   updates.national_id  = nationalIdRaw;
+    if (customerEmail)   updates.email        = customerEmail;
+    if (customerAddress) updates.address      = customerAddress;
+    if (Object.keys(updates).length > 0) {
+      const setClauses = Object.entries(updates)
+        .map(([k], i) => `${k} = COALESCE(${k}, $${i + 2})`)
+        .join(", ");
+      const values = [customerId, ...Object.values(updates)];
+      await pool.query(
+        `UPDATE customers SET ${setClauses} WHERE id = $1`,
+        values
+      );
+    }
     console.log(`[formitize:webhook] Linked to customer #${customerId} for "${customerName}"`);
   }
 
