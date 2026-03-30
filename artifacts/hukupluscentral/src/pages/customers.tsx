@@ -563,6 +563,7 @@ function CompletenessDot({ c }: { c: Customer }) {
 
 interface EnrichResult {
   total: number; matched: number; enriched: number; notFound: number; skipped: number;
+  columnHeaders?: string[];
   details: { name: string; status: string; fields: string[] }[];
 }
 
@@ -678,6 +679,19 @@ function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
                   </div>
                 ))}
               </div>
+
+              {/* Show column headers when nothing matched — helps diagnose format issues */}
+              {result.matched === 0 && result.columnHeaders && result.columnHeaders.length > 0 && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
+                  <p className="text-xs font-semibold text-amber-400">No customers matched — CSV columns detected:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.columnHeaders.map(h => (
+                      <span key={h} className="px-2 py-0.5 rounded bg-white/10 text-xs font-mono text-white">{h}</span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Please share these column names so the system can be updated to match your CSV format.</p>
+                </div>
+              )}
 
               {result.details.filter(d => d.status === "enriched").length > 0 && (
                 <div>

@@ -165,20 +165,36 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
     return;
   }
 
-  const normalize = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s_\-\(\)\/\.]/g, "");
 
+  // Two-pass matching: exact normalised match first, then "column contains needle" fallback.
+  // This handles both Formitize field-ID headers (formtext_2) and human-readable labels
+  // (e.g. "Customer Full Name", "National ID Number", "Phone Number").
   const getField = (row: Record<string, string>, ...needles: string[]): string | null => {
+    // Pass 1 — exact
     for (const needle of needles) {
       const normNeedle = normalize(needle);
       for (const [k, v] of Object.entries(row)) {
         if (normalize(k) === normNeedle && v?.trim()) return v.trim();
       }
     }
+    // Pass 2 — column header contains needle
+    for (const needle of needles) {
+      const normNeedle = normalize(needle);
+      if (normNeedle.length < 3) continue; // skip too-short needles to avoid false positives
+      for (const [k, v] of Object.entries(row)) {
+        if (normalize(k).includes(normNeedle) && v?.trim()) return v.trim();
+      }
+    }
     return null;
   };
 
   const isPlaceholder = (v: string | null) =>
-    !v || ["na", "n/a", "none", "nil", "-", "n.a"].includes(v.toLowerCase().trim());
+    !v || ["na", "n/a", "none", "nil", "-", "n.a", "null"].includes(v.toLowerCase().trim());
+
+  // Log column headers from first row to help diagnose mismatches
+  const columnHeaders = records.length > 0 ? Object.keys(records[0]) : [];
+  console.log(`[enrich-csv] ${records.length} rows, columns: ${columnHeaders.join(" | ")}`);
 
   const results = {
     total: records.length,
@@ -186,15 +202,37 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
     enriched: 0,
     notFound: 0,
     skipped: 0,
+    columnHeaders,
     details: [] as { name: string; status: string; fields: string[] }[],
   };
 
   for (const row of records) {
-    const name      = getField(row, "formtext2", "name", "fullname", "customername", "customer", "formtext_2", "full_name");
-    const phoneRaw  = getField(row, "formtel1", "formtel_1", "phone", "mobile", "contactnumber", "formtel2", "formtel_2");
-    const natId     = getField(row, "formtext7", "formtext_7", "nationalid", "national_id", "idnumber", "nid");
-    const emailRaw  = getField(row, "formemail1", "formemail_1", "email", "emailaddress", "borroweremail");
-    const addrRaw   = getField(row, "formlocation1", "formlocation_1", "address", "homeaddress", "residential_address");
+    // Formitize field-ID headers AND human-readable label variants
+    const name      = getField(row,
+      "formtext2", "formtext_2",
+      "customername", "customer name", "fullname", "full name", "name",
+      "borrowername", "borrower name", "applicantname", "applicant name", "clientname", "client name"
+    );
+    const phoneRaw  = getField(row,
+      "formtel1", "formtel_1", "formtel2", "formtel_2",
+      "phone", "mobile", "contactnumber", "contact number",
+      "phonenumber", "phone number", "cellphone", "cell phone",
+      "borrowermobile", "borrower mobile"
+    );
+    const natId     = getField(row,
+      "formtext7", "formtext_7",
+      "nationalid", "national id", "nationalidnumber", "national id number",
+      "idnumber", "id number", "nid", "id"
+    );
+    const emailRaw  = getField(row,
+      "formemail1", "formemail_1", "formemail2", "formemail_2",
+      "email", "emailaddress", "email address", "borroweremail", "borrower email"
+    );
+    const addrRaw   = getField(row,
+      "formlocation1", "formlocation_1",
+      "address", "homeaddress", "home address",
+      "residentialaddress", "residential address", "physicaladdress", "physical address"
+    );
 
     const email   = isPlaceholder(emailRaw) ? null : emailRaw;
     const address = isPlaceholder(addrRaw)  ? null : addrRaw;
