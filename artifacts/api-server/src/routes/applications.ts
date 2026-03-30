@@ -70,14 +70,21 @@ router.post("/applications/customer-verify", async (req: Request, res: Response)
     };
     const normPhone = normalise(phone);
 
-    // Find customer by normalised phone
+    // Find customer by normalised phone + name
     const cResult = await pool.query(
-      `SELECT c.*, r.name as retailer_name, b.name as branch_name
+      `SELECT c.id, c.full_name AS name, c.phone,
+              a.retailer_id, r.name as retailer_name,
+              a.branch_id, b.name as branch_name
        FROM customers c
-       LEFT JOIN retailers r ON r.id = c.retailer_id
-       LEFT JOIN branches b ON b.id = c.branch_id
-       WHERE LOWER(TRIM(c.name)) = LOWER(TRIM($1))
-         AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone,' ',''),'-',''),'(',''),')',''),' ','') = $2`,
+       LEFT JOIN LATERAL (
+         SELECT retailer_id, branch_id FROM agreements
+         WHERE customer_id = c.id
+         ORDER BY created_at DESC LIMIT 1
+       ) a ON true
+       LEFT JOIN retailers r ON r.id = a.retailer_id
+       LEFT JOIN branches b ON b.id = a.branch_id
+       WHERE LOWER(TRIM(c.full_name)) = LOWER(TRIM($1))
+         AND REPLACE(REPLACE(REPLACE(REPLACE(c.phone,' ',''),'-',''),'(',''),')','') = $2`,
       [name, normPhone]
     );
 
