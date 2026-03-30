@@ -70,11 +70,12 @@ async function getValidAccessToken(): Promise<{ accessToken: string; tenantId: s
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${Buffer.from(`${XERO_CLIENT_ID}:${XERO_CLIENT_SECRET}`).toString("base64")}`,
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: tokens.refresh_token,
+        client_id: XERO_CLIENT_ID,
+        client_secret: XERO_CLIENT_SECRET,
       }),
     });
 
@@ -126,16 +127,19 @@ router.get("/xero/callback", async (req: Request, res: Response) => {
     return res.redirect("/?xero=error");
   }
 
+  console.log(`[xero] Exchanging code — client_id present: ${!!XERO_CLIENT_ID}, client_secret present: ${!!XERO_CLIENT_SECRET}, redirect_uri: ${REDIRECT_URI}`);
+
   const tokenResponse = await fetch("https://identity.xero.com/connect/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${Buffer.from(`${XERO_CLIENT_ID}:${XERO_CLIENT_SECRET}`).toString("base64")}`,
     },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code: code as string,
       redirect_uri: REDIRECT_URI,
+      client_id: XERO_CLIENT_ID,
+      client_secret: XERO_CLIENT_SECRET,
     }),
   });
 
