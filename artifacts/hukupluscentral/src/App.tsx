@@ -16,6 +16,7 @@ import KioskPage from "@/pages/kiosk";
 import PortalLoginPage from "@/pages/portal-login";
 import PortalDashboardPage from "@/pages/portal-dashboard";
 import ExecutionCertificatePage from "@/pages/execution-certificate";
+import CustomersPage from "@/pages/customers";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -60,6 +61,7 @@ function Router() {
             <Route path="/retailers" component={RetailersPage} />
             <Route path="/agreements" component={AgreementsPage} />
             <Route path="/loan-apps" component={LoanAppsPage} />
+            <Route path="/customers" component={CustomersPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />
           </Switch>

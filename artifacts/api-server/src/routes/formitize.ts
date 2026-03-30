@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
+import { db, agreementsTable, retailersTable, branchesTable, activityTable, customersTable } from "@workspace/db";
 import { eq, ilike } from "drizzle-orm";
 import crypto from "crypto";
 import multer from "multer";
@@ -510,6 +510,64 @@ router.post("/formitize/webhook", async (req, res) => {
     : allBranches[0]; // default to first branch (Main Branch) if not specified
   if (!branch) { res.status(422).json({ error: `No branches found for ${retailerName}` }); return; }
 
+  // ── Find or create unified customer record ──────────────────────────────────
+  const normalisePhone = (p: string) => {
+    if (!p) return null;
+    let s = p.replace(/[\s\-\(\)\.]/g, "");
+    if (s.startsWith("+263")) s = "0" + s.slice(4);
+    else if (s.startsWith("263") && s.length >= 12) s = "0" + s.slice(3);
+    return s || null;
+  };
+  const normPhone = normalisePhone(customerPhone || "");
+
+  // Try to extract a Formitize CRM contact ID from any formcrm_* field
+  let formitizeCrmId: string | null = null;
+  for (const key of Object.keys(body.content || {})) {
+    if (key.toLowerCase().startsWith("formcrm")) {
+      const node = (body.content as any)[key];
+      if (node && typeof node === "object") {
+        const crmid = node.crmid || node.id || node.contactId || node.contact_id || node.crm_id;
+        if (crmid) { formitizeCrmId = String(crmid); break; }
+      }
+    }
+  }
+
+  let customerId: number | null = null;
+
+  // 1. Match by Formitize CRM ID (most reliable)
+  if (formitizeCrmId) {
+    const [hit] = await db.select({ id: customersTable.id })
+      .from(customersTable).where(eq(customersTable.formitizeCrmId, formitizeCrmId));
+    if (hit) customerId = hit.id;
+  }
+
+  // 2. Match by normalised phone
+  if (!customerId && normPhone) {
+    const [hit] = await db.select({ id: customersTable.id })
+      .from(customersTable).where(eq(customersTable.phone, normPhone));
+    if (hit) customerId = hit.id;
+  }
+
+  // 3. Match by customer name (case-insensitive) within same retailer
+  if (!customerId) {
+    const allByName = await db.select({ id: customersTable.id })
+      .from(customersTable).where(ilike(customersTable.fullName, customerName!));
+    if (allByName.length === 1) customerId = allByName[0].id;
+  }
+
+  // 4. Create new customer if no match found
+  if (!customerId) {
+    const [newCustomer] = await db.insert(customersTable).values({
+      fullName: customerName!,
+      phone: normPhone,
+      ...(formitizeCrmId ? { formitizeCrmId } : {}),
+    }).returning({ id: customersTable.id });
+    customerId = newCustomer.id;
+    console.log(`[formitize] Created new customer record #${customerId} for "${customerName}"`);
+  } else {
+    console.log(`[formitize] Linked to existing customer record #${customerId} for "${customerName}"`);
+  }
+
   const signingToken = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
 
@@ -527,6 +585,7 @@ router.post("/formitize/webhook", async (req, res) => {
     expiresAt,
     createdBy: "formitize-webhook",
     formData: fieldMap as any,
+    customerId,
   }).returning();
 
   console.log(`[formitize:webhook] Imported: ${customerName} @ ${retailer.name}/${branch.name}`);

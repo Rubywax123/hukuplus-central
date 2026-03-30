@@ -12,6 +12,7 @@ import formitizeRouter from "./formitize";
 import syncRouter from "./sync";
 import externalRouter from "./external";
 import kioskRouter from "./kiosk";
+import customersRouter from "./customers";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(formitizeRouter);
 router.use(syncRouter);
 router.use(externalRouter);
 router.use(kioskRouter);
+router.use(customersRouter);
 
 export default router;

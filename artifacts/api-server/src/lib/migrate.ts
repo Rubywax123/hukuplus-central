@@ -103,7 +103,34 @@ export async function runMigrations() {
       );
     `);
 
-    // Add multi-signature columns to agreements (idempotent)
+    // ── Unified customers table ──────────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        full_name TEXT NOT NULL,
+        national_id TEXT,
+        phone TEXT,
+        email TEXT,
+        formitize_crm_id TEXT,
+        xero_contact_id TEXT,
+        address TEXT,
+        notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // Unique indexes for deduplication (idempotent)
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS customers_formitize_crm_id_idx
+        ON customers(formitize_crm_id) WHERE formitize_crm_id IS NOT NULL;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS customers_national_id_idx
+        ON customers(national_id) WHERE national_id IS NOT NULL;
+    `);
+
+    // Add multi-signature + customer_id columns to agreements (idempotent)
     await client.query(`
       ALTER TABLE agreements
         ADD COLUMN IF NOT EXISTS customer_signature_2 TEXT,
@@ -112,8 +139,62 @@ export async function runMigrations() {
         ADD COLUMN IF NOT EXISTS formitize_form_url TEXT,
         ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS created_by TEXT,
-        ADD COLUMN IF NOT EXISTS form_data JSONB;
+        ADD COLUMN IF NOT EXISTS form_data JSONB,
+        ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id);
     `);
+
+    // ── Backfill: create customer records for existing agreements ─────────────
+    // Normalise phone: strip spaces/dashes, convert 263xxx → 0xxx
+    const normalisePhone = (p: string) => {
+      if (!p) return null;
+      let s = p.replace(/[\s\-\(\)\.]/g, "");
+      if (s.startsWith("+263")) s = "0" + s.slice(4);
+      else if (s.startsWith("263") && s.length >= 12) s = "0" + s.slice(3);
+      return s || null;
+    };
+
+    const orphans = await client.query(
+      `SELECT id, customer_name, customer_phone FROM agreements WHERE customer_id IS NULL ORDER BY id`
+    );
+
+    let backfilled = 0;
+    for (const row of orphans.rows) {
+      const phone = normalisePhone(row.customer_phone || "");
+      let customerId: number | null = null;
+
+      // Try match by phone
+      if (phone) {
+        const hit = await client.query(
+          "SELECT id FROM customers WHERE phone = $1 LIMIT 1", [phone]
+        );
+        if (hit.rows.length) customerId = hit.rows[0].id;
+      }
+
+      // Try match by name (exact, case-insensitive) as last resort
+      if (!customerId) {
+        const hit = await client.query(
+          "SELECT id FROM customers WHERE lower(full_name) = lower($1) LIMIT 1",
+          [row.customer_name]
+        );
+        if (hit.rows.length) customerId = hit.rows[0].id;
+      }
+
+      // Create new customer record if no match
+      if (!customerId) {
+        const ins = await client.query(
+          `INSERT INTO customers (full_name, phone) VALUES ($1, $2) RETURNING id`,
+          [row.customer_name, phone]
+        );
+        customerId = ins.rows[0].id;
+      }
+
+      await client.query(
+        "UPDATE agreements SET customer_id = $1 WHERE id = $2",
+        [customerId, row.id]
+      );
+      backfilled++;
+    }
+    if (backfilled > 0) console.log(`[migrate] Backfilled ${backfilled} agreements → customer records.`);
 
     // Add missing columns to activity table (idempotent)
     await client.query(`

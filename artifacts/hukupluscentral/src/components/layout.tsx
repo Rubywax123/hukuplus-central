@@ -1,13 +1,14 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound } from "lucide-react";
+import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
+  { path: "/customers", label: "Customers", icon: ContactRound },
   { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Agreements", icon: FileSignature },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
