@@ -182,14 +182,20 @@ router.get("/xero/callback", async (req: Request, res: Response) => {
 });
 
 // GET /xero/status
-router.get("/xero/status", requireAuth, async (req: Request, res: Response) => {
-  const tokens = await getXeroTokens();
-  if (!tokens) return res.json({ connected: false });
-  res.json({
-    connected: true,
-    tenantName: tokens.tenant_name,
-    expiresAt: tokens.expires_at,
-  });
+router.get("/xero/status", async (req: Request, res: Response) => {
+  try {
+    const tokens = await getXeroTokens();
+    console.log(`[xero] Status check — tokens found: ${!!tokens}, tenant: ${tokens?.tenant_name || "none"}`);
+    if (!tokens) return res.json({ connected: false });
+    res.json({
+      connected: true,
+      tenantName: tokens.tenant_name,
+      expiresAt: tokens.expires_at,
+    });
+  } catch (err: any) {
+    console.error("[xero] Status check error:", err.message);
+    res.json({ connected: false });
+  }
 });
 
 // POST /xero/disconnect
