@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight } from "lucide-react";
+import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ActiveAppBanner } from "@/components/layout";
 
@@ -37,6 +37,40 @@ interface CustomerDetail {
   agreements: Agreement[];
 }
 
+interface XeroContact {
+  contactId: string;
+  name: string;
+  email: string | null;
+  status: string;
+}
+
+interface XeroInvoice {
+  invoiceId: string;
+  invoiceNumber: string;
+  type: string;
+  status: string;
+  date: string;
+  dueDate: string;
+  total: number;
+  amountDue: number;
+  amountPaid: number;
+  currencyCode: string;
+}
+
+interface XeroCustomerData {
+  linked: boolean;
+  xeroContactId?: string;
+  contactName?: string;
+  contactEmail?: string;
+  invoices?: XeroInvoice[];
+  totalOutstanding?: number;
+}
+
+interface XeroStatus {
+  connected: boolean;
+  tenantName?: string;
+}
+
 function statusBadge(status: string) {
   const map: Record<string, string> = {
     signed: "bg-green-500/10 text-green-400 border-green-500/20",
@@ -47,13 +81,246 @@ function statusBadge(status: string) {
   return `inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${map[status] ?? "bg-white/5 text-muted-foreground border-white/10"}`;
 }
 
+function xeroInvoiceStatusClass(status: string) {
+  switch (status) {
+    case "PAID": return "bg-green-500/10 text-green-400 border-green-500/20";
+    case "AUTHORISED": return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+    case "PARTIAL": return "bg-blue-500/10 text-blue-400 border-blue-500/20";
+    case "VOIDED":
+    case "DELETED": return "bg-red-500/10 text-red-400 border-red-500/20";
+    default: return "bg-white/5 text-muted-foreground border-white/10";
+  }
+}
+
 function formatUSD(v: number | null) {
   if (v == null) return "—";
   return `$${v.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 }
 
 function formatDate(d: string) {
+  if (!d) return "—";
   return new Date(d).toLocaleDateString("en-ZW", { year: "numeric", month: "short", day: "numeric" });
+}
+
+// ── Xero Panel ──────────────────────────────────────────────────────────────
+
+function XeroPanel({ customerId, xeroContactId }: { customerId: number; xeroContactId: string | null }) {
+  const queryClient = useQueryClient();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const { data: xeroStatus } = useQuery<XeroStatus>({
+    queryKey: ["xero-status"],
+    queryFn: () => fetch(`${BASE}/api/xero/status`, { credentials: "include" }).then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const { data: xeroData, isLoading: xeroLoading, refetch: refetchXero } = useQuery<XeroCustomerData>({
+    queryKey: ["xero-customer", customerId],
+    queryFn: () => fetch(`${BASE}/api/xero/customer/${customerId}/data`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!xeroStatus?.connected,
+  });
+
+  const { data: searchResults = [], isLoading: searchLoading } = useQuery<XeroContact[]>({
+    queryKey: ["xero-contacts-search", debouncedSearch],
+    queryFn: () =>
+      fetch(`${BASE}/api/xero/contacts/search?q=${encodeURIComponent(debouncedSearch)}`, { credentials: "include" })
+        .then(r => r.json()),
+    enabled: debouncedSearch.length >= 2,
+  });
+
+  const linkMutation = useMutation({
+    mutationFn: (contact: XeroContact) =>
+      fetch(`${BASE}/api/customers/${customerId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xeroContactId: contact.contactId }),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["xero-customer", customerId] });
+      setSearchQuery("");
+      setDebouncedSearch("");
+    },
+  });
+
+  const unlinkMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/customers/${customerId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xeroContactId: null }),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["xero-customer", customerId] });
+    },
+  });
+
+  const handleSearchChange = (v: string) => {
+    setSearchQuery(v);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(v), 400);
+  };
+
+  // Xero not connected
+  if (!xeroStatus?.connected) {
+    return (
+      <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3">
+        <AlertCircle className="w-4 h-4 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-muted-foreground">Xero not connected</p>
+          <p className="text-xs text-muted-foreground/60">Connect Xero to link invoices and balances</p>
+        </div>
+        <a
+          href={`${BASE}/api/xero/auth`}
+          className="text-xs font-medium text-primary hover:underline shrink-0"
+        >
+          Connect
+        </a>
+      </div>
+    );
+  }
+
+  // Loading
+  if (xeroLoading) {
+    return (
+      <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2">
+        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs text-muted-foreground">Loading Xero data...</span>
+      </div>
+    );
+  }
+
+  // Linked — show data
+  if (xeroData?.linked) {
+    const invoices = xeroData.invoices || [];
+    const outstanding = xeroData.totalOutstanding || 0;
+    const activeInvoices = invoices.filter(i => ["AUTHORISED", "PARTIAL"].includes(i.status));
+    const recentInvoices = invoices.slice(0, 5);
+
+    return (
+      <div className="space-y-3">
+        {/* Contact link + outstanding */}
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <Link2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-xs font-semibold text-emerald-400">Linked to Xero</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => refetchXero()}
+                className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => unlinkMutation.mutate()}
+                disabled={unlinkMutation.isPending}
+                className="text-xs text-muted-foreground hover:text-red-400 transition-colors px-1"
+                title="Unlink"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+          <p className="text-sm font-semibold text-white">{xeroData.contactName}</p>
+          {xeroData.contactEmail && <p className="text-xs text-muted-foreground">{xeroData.contactEmail}</p>}
+        </div>
+
+        {/* Outstanding balance */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><DollarSign className="w-3 h-3" /> Outstanding</p>
+            <p className={`text-sm font-bold ${outstanding > 0 ? "text-amber-400" : "text-green-400"}`}>
+              {formatUSD(outstanding)}
+            </p>
+          </div>
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Receipt className="w-3 h-3" /> Active Invoices</p>
+            <p className="text-sm font-bold text-white">{activeInvoices.length}</p>
+          </div>
+        </div>
+
+        {/* Recent invoices */}
+        {recentInvoices.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Recent Invoices</p>
+            <div className="space-y-1.5">
+              {recentInvoices.map(inv => (
+                <div key={inv.invoiceId} className="p-2.5 rounded-lg bg-white/5 border border-white/5">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-mono text-white">{inv.invoiceNumber}</span>
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold border ${xeroInvoiceStatusClass(inv.status)}`}>
+                      {inv.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{formatDate(inv.date)}</span>
+                    <div className="text-right">
+                      <span className="text-white font-medium">{formatUSD(inv.total)}</span>
+                      {inv.amountDue > 0 && <span className="ml-1 text-amber-400">({formatUSD(inv.amountDue)} due)</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {invoices.length === 0 && (
+          <p className="text-xs text-muted-foreground italic text-center py-2">No invoices found in Xero</p>
+        )}
+      </div>
+    );
+  }
+
+  // Not linked — show search
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">Search Xero to link this customer to their contact record.</p>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <input
+          value={searchQuery}
+          onChange={e => handleSearchChange(e.target.value)}
+          placeholder="Search Xero contacts..."
+          className="w-full pl-9 pr-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        {searchLoading && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        )}
+      </div>
+
+      {debouncedSearch.length >= 2 && !searchLoading && searchResults.length === 0 && (
+        <p className="text-xs text-muted-foreground text-center py-2">No contacts found for "{debouncedSearch}"</p>
+      )}
+
+      {searchResults.length > 0 && (
+        <div className="space-y-1.5">
+          {searchResults.map(contact => (
+            <button
+              key={contact.contactId}
+              onClick={() => linkMutation.mutate(contact)}
+              disabled={linkMutation.isPending}
+              className="w-full flex items-center justify-between p-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-primary/30 transition-colors text-left group"
+            >
+              <div>
+                <p className="text-sm font-semibold text-white">{contact.name}</p>
+                {contact.email && <p className="text-xs text-muted-foreground">{contact.email}</p>}
+              </div>
+              <span className="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity">Link</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Customer Detail Drawer ──────────────────────────────────────────────────
@@ -92,7 +359,6 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
       nationalId: data.customer.nationalId ?? "",
       address: data.customer.address ?? "",
       notes: data.customer.notes ?? "",
-      xeroContactId: data.customer.xeroContactId ?? "",
     });
     setEditMode(true);
   };
@@ -175,7 +441,6 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
               { label: "Email", field: "email" as keyof Customer, icon: null },
               { label: "National ID", field: "nationalId" as keyof Customer, icon: CreditCard },
               { label: "Address", field: "address" as keyof Customer, icon: Building2 },
-              { label: "Xero Contact ID", field: "xeroContactId" as keyof Customer, icon: null },
             ].map(({ label, field, icon: Icon }) => (
               <div key={field}>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">{label}</p>
@@ -217,6 +482,19 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Formitize CRM ID</p>
                 <p className="text-xs text-muted-foreground font-mono">{c.formitizeCrmId}</p>
+              </div>
+            )}
+
+            {/* Xero Panel */}
+            {!editMode && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#13B5EA" }}>
+                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.527l-3.542 3.473 3.542 3.472a.836.836 0 0 1 0 1.183.836.836 0 0 1-1.182 0L13.17 13.18l-3.471 3.475a.836.836 0 0 1-1.183 0 .836.836 0 0 1 0-1.183l3.471-3.472-3.471-3.473a.836.836 0 0 1 0-1.182.836.836 0 0 1 1.183 0l3.47 3.474 3.543-3.474a.836.836 0 0 1 1.182 0 .836.836 0 0 1 0 1.182z"/>
+                  </svg>
+                  Xero
+                </p>
+                <XeroPanel customerId={c.id} xeroContactId={c.xeroContactId} />
               </div>
             )}
 

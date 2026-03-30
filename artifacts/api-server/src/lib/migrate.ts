@@ -210,6 +210,20 @@ export async function runMigrations() {
         ADD COLUMN IF NOT EXISTS reference_id INTEGER;
     `);
 
+    // Xero OAuth token storage (single row, id=1)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS xero_tokens (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        tenant_name TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     // Seed principal admin if not exists
     const adminEmail = "simon.reid@marishoma.com";
     const existing = await client.query(
