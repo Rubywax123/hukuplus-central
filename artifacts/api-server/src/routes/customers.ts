@@ -154,17 +154,28 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
   if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
 
+  // Log raw first line for debugging encoding/delimiter issues
+  const rawText = req.file.buffer.toString("utf8").replace(/^\uFEFF/, ""); // strip BOM
+  const firstLine = rawText.split(/\r?\n/)[0] ?? "";
+  console.log(`[enrich-csv] raw first line (${firstLine.length} chars): ${firstLine.substring(0, 300)}`);
+
   let records: Record<string, string>[];
   try {
-    records = parse(req.file.buffer.toString("utf8"), {
+    records = parse(rawText, {
       columns: true,
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
+      bom: true,
     }) as Record<string, string>[];
   } catch {
     res.status(400).json({ error: "Could not parse CSV — check the file format" });
     return;
+  }
+
+  // Log first record keys so we can see exactly what headers were parsed
+  if (records.length > 0) {
+    console.log(`[enrich-csv] parsed keys: ${Object.keys(records[0]).map(k => JSON.stringify(k)).join(", ")}`);
   }
 
   const normalize = (s: string) => s.toLowerCase().replace(/[\s_\-\(\)\/\.]/g, "");
@@ -205,6 +216,7 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
     notFound: 0,
     skipped: 0,
     columnHeaders,
+    firstLine: firstLine.substring(0, 500),
     details: [] as { name: string; status: string; fields: string[] }[],
   };
 

@@ -564,6 +564,7 @@ function CompletenessDot({ c }: { c: Customer }) {
 interface EnrichResult {
   total: number; matched: number; enriched: number; notFound: number; skipped: number;
   columnHeaders?: string[];
+  firstLine?: string;
   details: { name: string; status: string; fields: string[] }[];
 }
 
@@ -681,15 +682,27 @@ function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
               </div>
 
               {/* Show column headers when nothing matched — helps diagnose format issues */}
-              {result.matched === 0 && result.columnHeaders && result.columnHeaders.length > 0 && (
+              {result.matched === 0 && (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
-                  <p className="text-xs font-semibold text-amber-400">No customers matched — CSV columns detected:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {result.columnHeaders.map(h => (
-                      <span key={h} className="px-2 py-0.5 rounded bg-white/10 text-xs font-mono text-white">{h}</span>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Please share these column names so the system can be updated to match your CSV format.</p>
+                  <p className="text-xs font-semibold text-amber-400">No customers matched — diagnostic info:</p>
+                  {result.columnHeaders && result.columnHeaders.length > 0 ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">Columns detected in your CSV:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {result.columnHeaders.map((h, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded bg-white/10 text-xs font-mono text-white">{h || "(empty)"}</span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No column headers could be read from the file.</p>
+                  )}
+                  {result.firstLine && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Raw first line of file:</p>
+                      <pre className="text-xs font-mono text-amber-300 bg-black/30 p-2 rounded overflow-x-auto whitespace-pre-wrap break-all">{result.firstLine}</pre>
+                    </div>
+                  )}
                 </div>
               )}
 
