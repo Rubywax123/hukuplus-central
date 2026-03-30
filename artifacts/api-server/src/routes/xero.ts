@@ -127,8 +127,6 @@ router.get("/xero/callback", async (req: Request, res: Response) => {
     return res.redirect("/?xero=error");
   }
 
-  console.log(`[xero] Exchanging code — client_id present: ${!!XERO_CLIENT_ID}, client_secret present: ${!!XERO_CLIENT_SECRET}, redirect_uri: ${REDIRECT_URI}`);
-
   const tokenResponse = await fetch("https://identity.xero.com/connect/token", {
     method: "POST",
     headers: {
@@ -185,7 +183,6 @@ router.get("/xero/callback", async (req: Request, res: Response) => {
 router.get("/xero/status", async (req: Request, res: Response) => {
   try {
     const tokens = await getXeroTokens();
-    console.log(`[xero] Status check — tokens found: ${!!tokens}, tenant: ${tokens?.tenant_name || "none"}`);
     if (!tokens) return res.json({ connected: false });
     res.json({
       connected: true,
