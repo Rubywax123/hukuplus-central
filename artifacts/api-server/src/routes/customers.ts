@@ -208,8 +208,11 @@ router.post("/customers/enrich-csv", upload.single("file"), async (req, res): Pr
 
   for (const row of records) {
     // Formitize field-ID headers AND human-readable label variants
+    // "Billing Name" and "Primary Contact" are the CRM export column names for customer name
     const name      = getField(row,
       "formtext2", "formtext_2",
+      "billingname", "billing name",
+      "primarycontact", "primary contact",
       "customername", "customer name", "fullname", "full name", "name",
       "borrowername", "borrower name", "applicantname", "applicant name", "clientname", "client name"
     );
