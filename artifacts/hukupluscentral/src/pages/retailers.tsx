@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useListRetailers, useCreateRetailer, useListBranches, useCreateBranch } from "@workspace/api-client-react";
+import { useListRetailers, useCreateRetailer, useListBranches, useCreateBranch, useUpdateRetailer, useUpdateBranch, useDeleteBranch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label } from "@/components/ui-extras";
 import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle, RefreshCcw, Pencil, Trash2 } from "lucide-react";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -51,6 +51,95 @@ function useDeletePortalUser() {
   });
 }
 
+// ─── Branch Card ─────────────────────────────────────────────────────────────
+
+function BranchCard({ branch, retailerId }: { branch: any; retailerId: number }) {
+  const queryClient = useQueryClient();
+  const updateMutation = useUpdateBranch();
+  const deleteMutation = useDeleteBranch();
+
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editName, setEditName] = useState(branch.name);
+  const [editLocation, setEditLocation] = useState(branch.location ?? "");
+  const [editPhone, setEditPhone] = useState(branch.contactPhone ?? "");
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: [`/api/retailers/${retailerId}/branches`] });
+    queryClient.invalidateQueries({ queryKey: [`/api/retailers`] });
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate(
+      { retailerId, branchId: branch.id, data: { name: editName, location: editLocation || null, contactPhone: editPhone || null } },
+      { onSuccess: () => { setEditing(false); invalidate(); } }
+    );
+  };
+
+  const handleDelete = () => {
+    deleteMutation.mutate(
+      { retailerId, branchId: branch.id },
+      { onSuccess: () => invalidate() }
+    );
+  };
+
+  if (editing) {
+    return (
+      <motion.form
+        initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
+        onSubmit={handleSave}
+        className="bg-white/5 border border-primary/30 p-3 rounded-lg space-y-2"
+      >
+        <Input placeholder="Branch Name" value={editName} onChange={e => setEditName(e.target.value)} required className="py-1.5 text-sm" />
+        <Input placeholder="Location / City" value={editLocation} onChange={e => setEditLocation(e.target.value)} className="py-1.5 text-sm" />
+        <Input placeholder="Contact Phone" value={editPhone} onChange={e => setEditPhone(e.target.value)} className="py-1.5 text-sm" />
+        <div className="flex gap-2 pt-1">
+          <GradientButton type="submit" isLoading={updateMutation.isPending} className="py-1.5 px-3 text-xs flex-1">Save</GradientButton>
+          <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-white px-2 transition-colors">Cancel</button>
+        </div>
+      </motion.form>
+    );
+  }
+
+  if (confirmDelete) {
+    return (
+      <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-lg space-y-2">
+        <p className="text-xs text-red-300 font-medium">Delete "{branch.name}"?</p>
+        <p className="text-xs text-muted-foreground">This cannot be undone.</p>
+        <div className="flex gap-2">
+          <button onClick={handleDelete} disabled={deleteMutation.isPending}
+            className="px-3 py-1.5 rounded-md bg-red-500/30 text-red-300 text-xs font-semibold hover:bg-red-500/40 transition-colors disabled:opacity-50">
+            {deleteMutation.isPending ? "Deleting…" : "Delete"}
+          </button>
+          <button onClick={() => setConfirmDelete(false)} className="text-xs text-muted-foreground hover:text-white px-2 transition-colors">Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/5 border border-white/10 p-3 rounded-lg flex items-center gap-3 group">
+      <div className="p-2 bg-white/5 rounded-md text-primary shrink-0"><MapPin className="w-4 h-4" /></div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-white truncate">{branch.name}</p>
+        {branch.location && <p className="text-xs text-muted-foreground mt-0.5">{branch.location}</p>}
+        {branch.contactPhone && <p className="text-xs text-muted-foreground">{branch.contactPhone}</p>}
+      </div>
+      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <button onClick={() => { setEditName(branch.name); setEditLocation(branch.location ?? ""); setEditPhone(branch.contactPhone ?? ""); setEditing(true); }}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-white/5 transition-colors" title="Edit branch">
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => setConfirmDelete(true)}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-white/5 transition-colors" title="Delete branch">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Branches Panel ───────────────────────────────────────────────────────────
 
 function BranchesPanel({ retailerId }: { retailerId: number }) {
@@ -60,14 +149,14 @@ function BranchesPanel({ retailerId }: { retailerId: number }) {
   const [isAdding, setIsAdding] = useState(false);
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
+  const [phone, setPhone] = useState("");
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate({ retailerId, data: { name, location } }, {
+    createMutation.mutate({ retailerId, data: { name, location: location || null, contactPhone: phone || null } }, {
       onSuccess: () => {
         setIsAdding(false);
-        setName("");
-        setLocation("");
+        setName(""); setLocation(""); setPhone("");
         queryClient.invalidateQueries({ queryKey: [`/api/retailers/${retailerId}/branches`] });
         queryClient.invalidateQueries({ queryKey: [`/api/retailers`] });
       }
@@ -90,24 +179,22 @@ function BranchesPanel({ retailerId }: { retailerId: number }) {
           <motion.form
             initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
             onSubmit={handleAdd}
-            className="flex gap-3 mb-4 bg-white/5 p-3 rounded-lg border border-white/10 overflow-hidden"
+            className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 bg-white/5 p-3 rounded-lg border border-white/10 overflow-hidden"
           >
-            <Input placeholder="Branch Name" value={name} onChange={e => setName(e.target.value)} required className="py-2 text-sm" />
+            <Input placeholder="Branch Name *" value={name} onChange={e => setName(e.target.value)} required className="py-2 text-sm" />
             <Input placeholder="Location / City" value={location} onChange={e => setLocation(e.target.value)} className="py-2 text-sm" />
-            <GradientButton type="submit" isLoading={createMutation.isPending} className="py-2 whitespace-nowrap text-sm">Save</GradientButton>
+            <Input placeholder="Contact Phone" value={phone} onChange={e => setPhone(e.target.value)} className="py-2 text-sm" />
+            <div className="sm:col-span-3 flex gap-2">
+              <GradientButton type="submit" isLoading={createMutation.isPending} className="py-2 text-sm">Save Branch</GradientButton>
+              <button type="button" onClick={() => setIsAdding(false)} className="text-sm text-muted-foreground hover:text-white px-3 transition-colors">Cancel</button>
+            </div>
           </motion.form>
         )}
       </AnimatePresence>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
         {branches?.map(b => (
-          <div key={b.id} className="bg-white/5 border border-white/10 p-3 rounded-lg flex items-center gap-3">
-            <div className="p-2 bg-white/5 rounded-md text-primary"><MapPin className="w-4 h-4" /></div>
-            <div>
-              <p className="text-sm font-medium text-white">{b.name}</p>
-              {b.location && <p className="text-xs text-muted-foreground mt-0.5">{b.location}</p>}
-            </div>
-          </div>
+          <BranchCard key={b.id} branch={b} retailerId={retailerId} />
         ))}
         {branches?.length === 0 && !isAdding && (
           <p className="text-sm text-muted-foreground italic col-span-full">No branches yet. Add one above.</p>
@@ -583,6 +670,83 @@ function BulkImportModal({ isOpen, onClose, onDone }: { isOpen: boolean; onClose
   );
 }
 
+// ─── Edit Retailer Modal ──────────────────────────────────────────────────────
+
+function EditRetailerModal({ retailer, onClose }: { retailer: any; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const updateMutation = useUpdateRetailer();
+
+  const [form, setForm] = useState({
+    name: retailer.name ?? "",
+    contactEmail: retailer.contactEmail ?? "",
+    contactPhone: retailer.contactPhone ?? "",
+    address: retailer.address ?? "",
+    isActive: retailer.isActive ?? true,
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate(
+      {
+        retailerId: retailer.id,
+        data: {
+          name: form.name,
+          contactEmail: form.contactEmail || null,
+          contactPhone: form.contactPhone || null,
+          address: form.address || null,
+          isActive: form.isActive,
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: [`/api/retailers`] });
+          onClose();
+        },
+      }
+    );
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Edit Retailer — ${retailer.name}`}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <Label>Retailer Name</Label>
+          <Input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Novafeeds Ltd" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Contact Email</Label>
+            <Input type="email" value={form.contactEmail} onChange={e => setForm(f => ({ ...f, contactEmail: e.target.value }))} placeholder="ops@retailer.co.zw" />
+          </div>
+          <div>
+            <Label>Contact Phone</Label>
+            <Input value={form.contactPhone} onChange={e => setForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="+263 77 123 4567" />
+          </div>
+        </div>
+        <div>
+          <Label>Address</Label>
+          <Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Physical address" />
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={form.isActive}
+              onChange={e => setForm(f => ({ ...f, isActive: e.target.checked }))}
+              className="w-4 h-4 accent-primary rounded"
+            />
+            Active retailer
+          </label>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-white transition-colors">Cancel</button>
+          <GradientButton type="submit" isLoading={updateMutation.isPending}>Save Changes</GradientButton>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function RetailersPage() {
@@ -593,6 +757,7 @@ export default function RetailersPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [editingRetailer, setEditingRetailer] = useState<any | null>(null);
   const [syncResult, setSyncResult] = useState<{ retailersCreated: number; branchesCreated: number; branchesSkipped: number; totalFromHukuPlus: number } | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<Record<number, "branches" | "portal">>({}); 
@@ -695,11 +860,20 @@ export default function RetailersPage() {
                         <h3 className="font-semibold text-lg text-white">{r.name}</h3>
                         <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                           <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {r.branchCount ?? 0} {r.branchCount === 1 ? "branch" : "branches"}</span>
+                          {r.contactEmail && <span>{r.contactEmail}</span>}
+                          {r.contactPhone && <span>{r.contactPhone}</span>}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
                       <Badge status={r.isActive ? "success" : "neutral"}>{r.isActive ? "Active" : "Inactive"}</Badge>
+                      <button
+                        onClick={e => { e.stopPropagation(); setEditingRetailer(r); }}
+                        title="Edit retailer"
+                        className="p-2 text-muted-foreground hover:text-blue-400 hover:bg-white/5 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
                       <button className="p-2 text-muted-foreground group-hover:text-white transition-colors">
                         {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                       </button>
@@ -770,6 +944,14 @@ export default function RetailersPage() {
         onClose={() => setIsBulkModalOpen(false)}
         onDone={() => queryClient.invalidateQueries({ queryKey: ["/api/retailers"] })}
       />
+
+      {/* Edit Retailer Modal */}
+      {editingRetailer && (
+        <EditRetailerModal
+          retailer={editingRetailer}
+          onClose={() => setEditingRetailer(null)}
+        />
+      )}
     </div>
   );
 }
