@@ -418,14 +418,76 @@ export async function runMigrations() {
     `);
     await client.query(`
       UPDATE activity
-      SET retailer_name = 'Profeeds', branch_name = 'Lupane'
+      SET retailer_name = 'Profeeds',
+          branch_name   = 'Lupane',
+          description   = REPLACE(description, '@ Novafeeds', '@ Profeeds')
       WHERE (description ILIKE '%archiford sibanda%' OR description ILIKE '%archford sibanda%')
-        AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
+        AND description ILIKE '%novafeeds%';
     `);
     await client.query(`
       UPDATE formitize_notifications
       SET retailer_name = 'Profeeds', branch_name = 'Lupane'
       WHERE (customer_name ILIKE '%archiford sibanda%' OR customer_name ILIKE '%archford sibanda%')
+        AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
+    `);
+
+    // ── Data correction: Gift Tatenda Marufu — wrong retailer/branch (Novafeeds → Profeeds Rusape) ──
+    // storeemail_1 = "rusape@profeeds.co.zw", formtext_5 = "Rusape"
+    await client.query(`
+      UPDATE agreements
+      SET
+        retailer_id = (SELECT r.id FROM retailers r WHERE r.name ILIKE '%profeed%' LIMIT 1),
+        branch_id   = (
+          SELECT b.id FROM branches b
+          JOIN retailers r ON r.id = b.retailer_id
+          WHERE r.name ILIKE '%profeed%' AND b.name ILIKE '%rusap%'
+          LIMIT 1
+        )
+      WHERE customer_name ILIKE '%gift tatenda marufu%'
+        AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%novafeed%' LIMIT 1);
+    `);
+    await client.query(`
+      UPDATE activity
+      SET retailer_name = 'Profeeds',
+          branch_name   = 'Rusape',
+          description   = REPLACE(description, '@ Novafeeds', '@ Profeeds')
+      WHERE description ILIKE '%gift tatenda marufu%'
+        AND description ILIKE '%novafeeds%';
+    `);
+    await client.query(`
+      UPDATE formitize_notifications
+      SET retailer_name = 'Profeeds', branch_name = 'Rusape'
+      WHERE customer_name ILIKE '%gift tatenda marufu%'
+        AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
+    `);
+
+    // ── Data correction: Desmond Hwete — wrong retailer/branch (Novafeeds → Profeeds Mazowe) ──
+    // formtext_5 = "Mazowe Pro Farmer", storeemail_1 = "mazowe@profeeds.co.zw"
+    await client.query(`
+      UPDATE agreements
+      SET
+        retailer_id = (SELECT r.id FROM retailers r WHERE r.name ILIKE '%profeed%' LIMIT 1),
+        branch_id   = (
+          SELECT b.id FROM branches b
+          JOIN retailers r ON r.id = b.retailer_id
+          WHERE r.name ILIKE '%profeed%' AND b.name ILIKE '%mazow%'
+          LIMIT 1
+        )
+      WHERE customer_name ILIKE '%desmond hwete%'
+        AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%novafeed%' LIMIT 1);
+    `);
+    await client.query(`
+      UPDATE activity
+      SET retailer_name = 'Profeeds',
+          branch_name   = 'Mazowe',
+          description   = REPLACE(description, '@ Novafeeds', '@ Profeeds')
+      WHERE description ILIKE '%desmond hwete%'
+        AND description ILIKE '%novafeeds%';
+    `);
+    await client.query(`
+      UPDATE formitize_notifications
+      SET retailer_name = 'Profeeds', branch_name = 'Mazowe'
+      WHERE customer_name ILIKE '%desmond hwete%'
         AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
     `);
 
