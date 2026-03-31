@@ -58,12 +58,14 @@ export default function AgreementsPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
 
   // ── Create form ───────────────────────────────────────────────────────────
-  const [isModalOpen,  setIsModalOpen]  = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(false);
-  const [branchId,     setBranchId]     = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [loanAmount,   setLoanAmount]   = useState("");
-  const [pdfUrl,       setPdfUrl]       = useState("");
+  const [isModalOpen,    setIsModalOpen]    = useState(false);
+  const [isImportOpen,   setIsImportOpen]   = useState(false);
+  const [branchId,       setBranchId]       = useState("");
+  const [customerName,   setCustomerName]   = useState("");
+  const [customerPhone,  setCustomerPhone]  = useState("");
+  const [loanAmount,     setLoanAmount]     = useState("");
+  const [pdfUrl,         setPdfUrl]         = useState("");
+  const [createError,    setCreateError]    = useState("");
 
   // Novafeeds retailer id from loaded retailers
   const novaRetailer = useMemo(
@@ -134,10 +136,12 @@ export default function AgreementsPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novaRetailer) return;
+    setCreateError("");
     createMutation.mutate({ data: {
       retailerId: novaRetailer.id,
       branchId: Number(branchId),
       customerName,
+      customerPhone: customerPhone.trim() || null,
       loanProduct: "HukuPlus",
       loanAmount: Number(loanAmount),
       formitizeFormUrl: pdfUrl.trim() || null,
@@ -145,8 +149,11 @@ export default function AgreementsPage() {
       onSuccess: () => {
         setIsModalOpen(false);
         queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
-        setBranchId(""); setCustomerName(""); setLoanAmount(""); setPdfUrl("");
-      }
+        setBranchId(""); setCustomerName(""); setCustomerPhone(""); setLoanAmount(""); setPdfUrl(""); setCreateError("");
+      },
+      onError: (err: any) => {
+        setCreateError(err?.message || "Failed to create agreement — please try again.");
+      },
     });
   };
 
@@ -436,6 +443,10 @@ export default function AgreementsPage() {
             <Input required placeholder="Jane Doe" value={customerName} onChange={e => setCustomerName(e.target.value)} />
           </div>
           <div>
+            <Label>Customer Phone <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input placeholder="+263 77 123 4567" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
+          </div>
+          <div>
             <Label>Amount (USD)</Label>
             <Input type="number" required placeholder="500" min="1" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} />
           </div>
@@ -449,8 +460,13 @@ export default function AgreementsPage() {
             />
             <p className="text-xs text-muted-foreground mt-1">If provided, the kiosk QR code will open this PDF so the customer can sign on screen.</p>
           </div>
+          {createError && (
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
+              {createError}
+            </div>
+          )}
           <div className="pt-4 flex justify-end gap-3">
-            <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Cancel</button>
+            <button type="button" onClick={() => { setIsModalOpen(false); setCreateError(""); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Cancel</button>
             <GradientButton type="submit" isLoading={createMutation.isPending}>Add to Kiosk</GradientButton>
           </div>
         </form>
