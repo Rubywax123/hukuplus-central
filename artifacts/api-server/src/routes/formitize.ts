@@ -637,17 +637,70 @@ router.post("/formitize/webhook", async (req, res) => {
       }
     }
   } else if (product === "HukuPlus") {
-    // Standard HukuPlus agreement → always Novafeeds; branch from formtext_5 / storebranch
-    const branchName = findField("formtext_5", "storebranch", "store branch", "branchname");
-    const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, "%novafeed%"));
-    if (retailer) {
-      retailerId = retailer.id;
-      resolvedRetailerName = retailer.name;
-      const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
-      const branch = branchName
-        ? (allBranches.find(r => r.name.toLowerCase().includes(branchName.toLowerCase())) || allBranches[0])
-        : allBranches[0];
-      if (branch) { branchId = branch.id; resolvedBranchName = branch.name; }
+    // Standard HukuPlus agreement — formtext_5 is the store/branch name (e.g. "Lupane").
+    // The store email (storeemail_1 / sendemail) can identify the retailer from its domain
+    // (e.g. "lupane@profeeds.co.zw" → retailer "profeeds").
+    // Search ALL retailers' branches for the correct match; fall back to Novafeeds if nothing found.
+    const storeBranchName = findField("formtext_5", "storebranch", "store branch", "branchname");
+
+    // Extract retailer hint from store email domain
+    const storeEmailRaw = (fieldMap["storeemail_1"] || fieldMap["sendemail"] || "").trim();
+    const emailDomain = storeEmailRaw.includes("@") ? storeEmailRaw.split("@")[1] : "";
+    const retailerHint = emailDomain.split(".")[0]?.toLowerCase() || ""; // e.g. "profeeds" from "lupane@profeeds.co.zw"
+
+    const fallbackToNovafeeds = async () => {
+      const [nf] = await db.select().from(retailersTable).where(ilike(retailersTable.name, "%novafeed%"));
+      if (nf) {
+        retailerId = nf.id; resolvedRetailerName = nf.name;
+        const branches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, nf.id));
+        if (branches[0]) { branchId = branches[0].id; resolvedBranchName = branches[0].name; }
+      }
+    };
+
+    if (storeBranchName) {
+      const allBranches = await db.select().from(branchesTable);
+      const searchWords = storeBranchName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+      // Narrow candidates by retailer hint from email domain (reduces false matches)
+      let candidates = allBranches;
+      if (retailerHint.length > 2) {
+        const hintRetailers = await db.select().from(retailersTable)
+          .where(ilike(retailersTable.name, `%${retailerHint}%`));
+        if (hintRetailers.length === 1) {
+          const narrowed = allBranches.filter(b => b.retailerId === hintRetailers[0].id);
+          if (narrowed.length > 0) candidates = narrowed;
+        }
+      }
+
+      // Exact branch name match first, then word-contains match
+      let matched = candidates.find(b => b.name.toLowerCase() === storeBranchName.toLowerCase());
+      if (!matched && searchWords.length > 0) {
+        matched = candidates.find(b => {
+          const bn = b.name.toLowerCase();
+          return searchWords.some(w => bn.includes(w));
+        });
+      }
+
+      if (matched) {
+        branchId = matched.id;
+        resolvedBranchName = matched.name;
+        const [ret] = await db.select().from(retailersTable).where(eq(retailersTable.id, matched.retailerId));
+        if (ret) { retailerId = ret.id; resolvedRetailerName = ret.name; }
+      } else {
+        await fallbackToNovafeeds();
+      }
+    } else if (retailerHint.length > 2) {
+      // No branch name but retailer identifiable from store email
+      const [ret] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${retailerHint}%`));
+      if (ret) {
+        retailerId = ret.id; resolvedRetailerName = ret.name;
+        const branches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, ret.id));
+        if (branches[0]) { branchId = branches[0].id; resolvedBranchName = branches[0].name; }
+      } else {
+        await fallbackToNovafeeds();
+      }
+    } else {
+      await fallbackToNovafeeds();
     }
   } else if (product === "Revolver") {
     // Revolver → look for store name in form; search synced Revolver retailers

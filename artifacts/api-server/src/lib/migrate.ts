@@ -376,6 +376,35 @@ export async function runMigrations() {
       WHERE customer_name = 'Mazowe Profarmer';
     `);
 
+    // ── Data correction: Archiford Sibanda — wrong retailer/branch (Novafeeds → Profeeds Lupane) ──
+    // formtext_5 = "Lupane" and storeemail_1 = "lupane@profeeds.co.zw" confirm Profeeds Lupane.
+    // Fix agreement, activity, and notification records.
+    await client.query(`
+      UPDATE agreements
+      SET
+        retailer_id = (SELECT r.id FROM retailers r WHERE r.name ILIKE '%profeed%' LIMIT 1),
+        branch_id   = (
+          SELECT b.id FROM branches b
+          JOIN retailers r ON r.id = b.retailer_id
+          WHERE r.name ILIKE '%profeed%' AND b.name ILIKE '%lupane%'
+          LIMIT 1
+        )
+      WHERE (customer_name ILIKE '%archiford sibanda%' OR customer_name ILIKE '%archford sibanda%')
+        AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%novafeed%' LIMIT 1);
+    `);
+    await client.query(`
+      UPDATE activity
+      SET retailer_name = 'Profeeds', branch_name = 'Lupane'
+      WHERE (description ILIKE '%archiford sibanda%' OR description ILIKE '%archford sibanda%')
+        AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
+    `);
+    await client.query(`
+      UPDATE formitize_notifications
+      SET retailer_name = 'Profeeds', branch_name = 'Lupane'
+      WHERE (customer_name ILIKE '%archiford sibanda%' OR customer_name ILIKE '%archford sibanda%')
+        AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
