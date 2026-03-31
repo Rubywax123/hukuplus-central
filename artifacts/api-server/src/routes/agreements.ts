@@ -121,6 +121,41 @@ router.get("/agreements/:agreementId", async (req, res): Promise<void> => {
   });
 });
 
+// ADMIN: Update agreement status
+router.patch("/agreements/:id/status", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+  const { status } = req.body;
+  const allowed = ["pending", "signed", "disbursed", "expired", "application"];
+  if (!allowed.includes(status)) {
+    res.status(400).json({ error: `Status must be one of: ${allowed.join(", ")}` });
+    return;
+  }
+  const [updated] = await db
+    .update(agreementsTable)
+    .set({ status, ...(status === "signed" ? { signedAt: new Date() } : {}) })
+    .where(eq(agreementsTable.id, id))
+    .returning();
+  if (!updated) { res.status(404).json({ error: "Agreement not found" }); return; }
+  res.json({ ok: true, id: updated.id, status: updated.status });
+});
+
+// ADMIN: Bulk update agreement status
+router.post("/agreements/bulk-status", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const { ids, status } = req.body;
+  const allowed = ["pending", "signed", "disbursed", "expired", "application"];
+  if (!Array.isArray(ids) || ids.length === 0) { res.status(400).json({ error: "ids must be a non-empty array" }); return; }
+  if (!allowed.includes(status)) { res.status(400).json({ error: `Status must be one of: ${allowed.join(", ")}` }); return; }
+  const { inArray } = await import("drizzle-orm");
+  await db
+    .update(agreementsTable)
+    .set({ status, ...(status === "signed" ? { signedAt: new Date() } : {}) })
+    .where(inArray(agreementsTable.id, ids.map(Number)));
+  res.json({ ok: true, updated: ids.length });
+});
+
 // ADMIN: Get full executed agreement with all signatures
 router.get("/agreements/:id/execution", async (req, res): Promise<void> => {
   const isAdmin      = req.isAuthenticated();

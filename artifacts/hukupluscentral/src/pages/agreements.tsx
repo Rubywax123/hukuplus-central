@@ -1,37 +1,80 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { useListAgreements, useCreateAgreement, useListRetailers, useListBranches } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label, Select } from "@/components/ui-extras";
-import { Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload, FileText, Copy, Monitor, ScrollText } from "lucide-react";
+import {
+  Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload,
+  FileText, Copy, Monitor, ScrollText, Filter, ChevronDown, Banknote,
+} from "lucide-react";
 import { useLocation } from "wouter";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+const PRODUCT_COLOURS: Record<string, string> = {
+  HukuPlus:      "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  ChikweretiOne: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+  Revolver:      "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+  Novafeeds:     "text-amber-400 bg-amber-500/10 border-amber-500/20",
+};
+
+const FORMTYPE_LABELS: Record<string, string> = {
+  agreement:     "Agreement",
+  application:   "Application",
+  reapplication: "Re-Application",
+  drawdown:      "Drawdown",
+  payment:       "Payment",
+  upload:        "Upload",
+  approval:      "Approval",
+  undertaking:   "Undertaking",
+  unknown:       "",
+};
+
+const STATUS_CONFIG: Record<string, { label: string; colour: string; badge: "success"|"warning"|"neutral"|"danger" }> = {
+  signed:      { label: "Signed",      colour: "text-emerald-400", badge: "success" },
+  pending:     { label: "Pending",     colour: "text-yellow-400",  badge: "warning" },
+  application: { label: "Application", colour: "text-blue-400",    badge: "neutral" },
+  disbursed:   { label: "Disbursed",   colour: "text-purple-400",  badge: "success" },
+  expired:     { label: "Expired",     colour: "text-red-400",     badge: "danger"  },
+};
+
 export default function AgreementsPage() {
   const [, navigate] = useLocation();
-  const { data: agreements, isLoading } = useListAgreements();
+  const { data: agreements, isLoading, refetch } = useListAgreements();
   const { data: retailers } = useListRetailers();
   const queryClient = useQueryClient();
   const createMutation = useCreateAgreement();
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // ── Filters ──────────────────────────────────────────────────────────────
+  const [searchTerm,     setSearchTerm]     = useState("");
+  const [productFilter,  setProductFilter]  = useState("all");
+  const [statusFilter,   setStatusFilter]   = useState("all");
+  const [retailerFilter, setRetailerFilter] = useState("");
+  const [branchFilter,   setBranchFilter]   = useState("");
+
+  // branch list keyed to retailer filter
+  const { data: filterBranches } = useListBranches(Number(retailerFilter), {
+    query: { enabled: !!retailerFilter },
+  });
+
+  // ── Bulk select ───────────────────────────────────────────────────────────
+  const [selected,     setSelected]     = useState<Set<number>>(new Set());
+  const [bulkLoading,  setBulkLoading]  = useState(false);
+
+  // ── Create form ───────────────────────────────────────────────────────────
+  const [isModalOpen,  setIsModalOpen]  = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [productFilter, setProductFilter] = useState<string>("all");
-
-  // Create form state
-  const [retailerId, setRetailerId] = useState("");
-  const [branchId, setBranchId] = useState("");
+  const [retailerId,   setRetailerId]   = useState("");
+  const [branchId,     setBranchId]     = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [loanProduct, setLoanProduct] = useState("HukuPlus");
-  const [loanAmount, setLoanAmount] = useState("");
+  const [loanProduct,  setLoanProduct]  = useState("HukuPlus");
+  const [loanAmount,   setLoanAmount]   = useState("");
+  const [pdfUrl,       setPdfUrl]       = useState("");
 
-  // PDF URL field for quick-entry
-  const [pdfUrl, setPdfUrl] = useState("");
+  const { data: createBranches } = useListBranches(Number(retailerId), { query: { enabled: !!retailerId } });
 
-  // CSV import state
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [importing, setImporting] = useState(false);
+  // ── CSV import ────────────────────────────────────────────────────────────
+  const [csvFile,      setCsvFile]      = useState<File | null>(null);
+  const [importing,    setImporting]    = useState(false);
   const [importResult, setImportResult] = useState<{
     imported: number; skipped: number; errors: string[];
     detectedColumns?: string[];
@@ -39,20 +82,71 @@ export default function AgreementsPage() {
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: branches } = useListBranches(Number(retailerId), { query: { enabled: !!retailerId }});
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const copyLink = (url: string, id?: number) => {
+    navigator.clipboard.writeText(url);
+    if (id !== undefined) { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }
+  };
 
+  // ── Filtered list ─────────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    return (agreements ?? []).filter(a => {
+      if (searchTerm && !a.customerName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      if (productFilter !== "all") {
+        const match = a.loanProduct === productFilter || (productFilter === "HukuPlus" && a.loanProduct === "Novafeeds");
+        if (!match) return false;
+      }
+      if (statusFilter !== "all" && a.status !== statusFilter) return false;
+      if (retailerFilter && String(a.retailerId) !== retailerFilter) return false;
+      if (branchFilter && String(a.branchId) !== branchFilter) return false;
+      return true;
+    });
+  }, [agreements, searchTerm, productFilter, statusFilter, retailerFilter, branchFilter]);
+
+  // ── Status summary counts (across ALL agreements, not just filtered) ──────
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: 0, signed: 0, pending: 0, application: 0, disbursed: 0, expired: 0 };
+    (agreements ?? []).forEach(a => {
+      c.all++;
+      if (c[a.status] !== undefined) c[a.status]++;
+    });
+    return c;
+  }, [agreements]);
+
+  // ── Bulk actions ──────────────────────────────────────────────────────────
+  const toggleSelect = (id: number) =>
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const toggleAll = () => {
+    if (selected.size === filtered.length) { setSelected(new Set()); return; }
+    setSelected(new Set(filtered.map(a => a.id)));
+  };
+
+  const bulkUpdateStatus = async (status: string) => {
+    if (selected.size === 0) return;
+    setBulkLoading(true);
+    try {
+      await fetch(`${BASE}/api/agreements/bulk-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ids: [...selected], status }),
+      });
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  // ── Create ────────────────────────────────────────────────────────────────
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate({
-      data: {
-        retailerId: Number(retailerId),
-        branchId: Number(branchId),
-        customerName,
-        loanProduct,
-        loanAmount: Number(loanAmount),
-        formitizeFormUrl: pdfUrl.trim() || null,
-      }
-    }, {
+    createMutation.mutate({ data: {
+      retailerId: Number(retailerId), branchId: Number(branchId),
+      customerName, loanProduct, loanAmount: Number(loanAmount),
+      formitizeFormUrl: pdfUrl.trim() || null,
+    }}, {
       onSuccess: () => {
         setIsModalOpen(false);
         queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
@@ -61,77 +155,43 @@ export default function AgreementsPage() {
     });
   };
 
+  // ── CSV import ────────────────────────────────────────────────────────────
   const handleImport = async () => {
     if (!csvFile) return;
-    setImporting(true);
-    setImportResult(null);
+    setImporting(true); setImportResult(null);
     try {
       const formData = new FormData();
       formData.append("file", csvFile);
-      const res = await fetch(`${BASE}/api/formitize/import-csv`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+      const res = await fetch(`${BASE}/api/formitize/import-csv`, { method: "POST", credentials: "include", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Import failed");
       setImportResult(data);
-      if (data.imported > 0) {
-        queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
-      }
+      if (data.imported > 0) queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
     } catch (err: any) {
       setImportResult({ imported: 0, skipped: 0, errors: [err.message], agreements: [] });
-    } finally {
-      setImporting(false);
-    }
+    } finally { setImporting(false); }
   };
 
   const resetImport = () => {
-    setCsvFile(null);
-    setImportResult(null);
+    setCsvFile(null); setImportResult(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const [copiedId, setCopiedId] = useState<number | null>(null);
-  const copyLink = (url: string, id: number) => {
-    navigator.clipboard.writeText(url);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
   const PRODUCTS = [
-    { id: "all", label: "All Products" },
-    { id: "HukuPlus", label: "HukuPlus" },
-    { id: "ChikweretiOne", label: "ChikweretiOne" },
-    { id: "Revolver", label: "Revolver" },
+    { id: "all",           label: "All Products" },
+    { id: "HukuPlus",      label: "HukuPlus"      },
+    { id: "ChikweretiOne", label: "ChikweretiOne"  },
+    { id: "Revolver",      label: "Revolver"       },
   ];
 
-  const PRODUCT_COLOURS: Record<string, string> = {
-    HukuPlus: "text-amber-400 bg-amber-500/10 border-amber-500/20",
-    ChikweretiOne: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-    Revolver: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-    Novafeeds: "text-amber-400 bg-amber-500/10 border-amber-500/20",
-  };
-
-  const FORMTYPE_LABELS: Record<string, string> = {
-    agreement: "Agreement",
-    application: "Application",
-    reapplication: "Re-Application",
-    drawdown: "Drawdown",
-    payment: "Payment",
-    upload: "Upload",
-    approval: "Approval",
-    undertaking: "Undertaking",
-    unknown: "",
-  };
-
-  const filtered = agreements?.filter(a => {
-    const matchesSearch = a.customerName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesProduct = productFilter === "all"
-      || a.loanProduct === productFilter
-      || (productFilter === "HukuPlus" && a.loanProduct === "Novafeeds");
-    return matchesSearch && matchesProduct;
-  });
+  const STATUS_TABS = [
+    { id: "all",         label: "All"         },
+    { id: "application", label: "Applications" },
+    { id: "pending",     label: "Pending Sign" },
+    { id: "signed",      label: "Signed"       },
+    { id: "disbursed",   label: "Disbursed"    },
+    { id: "expired",     label: "Expired"      },
+  ];
 
   return (
     <div className="pb-10">
@@ -144,7 +204,7 @@ export default function AgreementsPage() {
               onClick={() => { setIsImportOpen(true); resetImport(); }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-white transition-colors border border-white/10"
             >
-              <Upload className="w-4 h-4" /> Import Formitize CSV
+              <Upload className="w-4 h-4" /> Import CSV
             </button>
             <GradientButton onClick={() => setIsModalOpen(true)}>
               <Plus className="w-4 h-4" /> Issue Agreement
@@ -153,8 +213,29 @@ export default function AgreementsPage() {
         }
       />
 
-      {/* Product filter tabs */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      {/* ── Status Summary ── */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-5">
+        {[
+          { key: "all",         label: "Total",        colour: "text-white",         bg: "bg-white/5  border-white/10"  },
+          { key: "application", label: "Applications", colour: "text-blue-400",      bg: "bg-blue-500/5   border-blue-500/20"   },
+          { key: "pending",     label: "Awaiting Sign",colour: "text-yellow-400",    bg: "bg-yellow-500/5 border-yellow-500/20" },
+          { key: "signed",      label: "Signed",       colour: "text-emerald-400",   bg: "bg-emerald-500/5 border-emerald-500/20"},
+          { key: "disbursed",   label: "Disbursed",    colour: "text-purple-400",    bg: "bg-purple-500/5 border-purple-500/20" },
+          { key: "expired",     label: "Expired",      colour: "text-red-400",       bg: "bg-red-500/5    border-red-500/20"    },
+        ].map(s => (
+          <button
+            key={s.key}
+            onClick={() => setStatusFilter(s.key)}
+            className={`rounded-xl border p-3 text-center transition-all ${s.bg} ${statusFilter === s.key ? "ring-1 ring-white/20" : "opacity-70 hover:opacity-100"}`}
+          >
+            <p className={`text-2xl font-bold ${s.colour}`}>{counts[s.key] ?? 0}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Product tabs ── */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         {PRODUCTS.map(p => (
           <button
             key={p.id}
@@ -168,48 +249,143 @@ export default function AgreementsPage() {
             }`}
           >
             {p.label}
-            {p.id !== "all" && (
-              <span className="ml-2 text-xs opacity-60">
-                {agreements?.filter(a =>
-                  a.loanProduct === p.id || (p.id === "HukuPlus" && a.loanProduct === "Novafeeds")
-                ).length ?? 0}
-              </span>
-            )}
           </button>
         ))}
       </div>
 
       <GlassCard className="p-0 overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/20">
-          <div className="relative w-full max-w-sm">
+        {/* ── Filter bar ── */}
+        <div className="p-4 border-b border-white/5 bg-black/20 flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[180px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search by customer name..."
+              placeholder="Search by customer..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className="pl-9 py-2 bg-transparent border-transparent focus:border-white/10"
             />
           </div>
+
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
+            <select
+              value={retailerFilter}
+              onChange={e => { setRetailerFilter(e.target.value); setBranchFilter(""); }}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white/20"
+            >
+              <option value="">All Retailers</option>
+              {retailers?.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+
+            {retailerFilter && (
+              <select
+                value={branchFilter}
+                onChange={e => setBranchFilter(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white/20"
+              >
+                <option value="">All Branches</option>
+                {filterBranches?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            )}
+          </div>
+
+          {/* Status sub-tabs */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {STATUS_TABS.map(s => (
+              <button
+                key={s.id}
+                onClick={() => setStatusFilter(s.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  statusFilter === s.id
+                    ? "bg-white/15 text-white"
+                    : "text-muted-foreground hover:text-white hover:bg-white/5"
+                }`}
+              >
+                {s.label}
+                <span className="ml-1 opacity-50 text-[10px]">{counts[s.id] ?? 0}</span>
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* ── Bulk action bar ── */}
+        {selected.size > 0 && (
+          <div className="px-4 py-2.5 bg-primary/10 border-b border-primary/20 flex items-center gap-3">
+            <span className="text-sm text-primary font-medium">{selected.size} selected</span>
+            <div className="flex gap-2 ml-auto">
+              <button
+                onClick={() => bulkUpdateStatus("disbursed")}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-medium transition-colors border border-purple-500/20"
+              >
+                <Banknote className="w-3.5 h-3.5" /> Mark Disbursed
+              </button>
+              <button
+                onClick={() => bulkUpdateStatus("signed")}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-medium transition-colors border border-emerald-500/20"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> Mark Signed
+              </button>
+              <button
+                onClick={() => bulkUpdateStatus("expired")}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-medium transition-colors border border-red-500/20"
+              >
+                <XCircle className="w-3.5 h-3.5" /> Mark Expired
+              </button>
+              <button
+                onClick={() => setSelected(new Set())}
+                className="px-3 py-1.5 text-xs text-muted-foreground hover:text-white"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white/5 border-b border-white/10 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                <th className="p-4 w-10">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && selected.size === filtered.length}
+                    onChange={toggleAll}
+                    className="rounded accent-primary cursor-pointer"
+                  />
+                </th>
                 <th className="p-4">Customer</th>
-                <th className="p-4">Product & Amount</th>
+                <th className="p-4">Product & Form</th>
+                <th className="p-4">Amount</th>
                 <th className="p-4">Location</th>
                 <th className="p-4">Status</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {isLoading && <tr><td colSpan={5} className="p-8 text-center animate-pulse">Loading agreements...</td></tr>}
-              {filtered?.map((a) => (
-                <tr key={a.id} className="hover:bg-white/[0.02] transition-colors">
+              {isLoading && (
+                <tr><td colSpan={7} className="p-8 text-center animate-pulse text-muted-foreground">Loading agreements...</td></tr>
+              )}
+              {filtered.map((a) => (
+                <tr
+                  key={a.id}
+                  className={`hover:bg-white/[0.02] transition-colors ${selected.has(a.id) ? "bg-primary/5" : ""}`}
+                >
+                  <td className="p-4">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(a.id)}
+                      onChange={() => toggleSelect(a.id)}
+                      className="rounded accent-primary cursor-pointer"
+                    />
+                  </td>
                   <td className="p-4">
                     <p className="font-semibold text-white">{a.customerName}</p>
-                    <p className="text-xs text-muted-foreground">{format(new Date(a.createdAt), 'MMM d, yyyy')}</p>
+                    <p className="text-xs text-muted-foreground" title={format(new Date(a.createdAt), "PPP p")}>
+                      {formatDistanceToNow(new Date(a.createdAt), { addSuffix: true })}
+                    </p>
                   </td>
                   <td className="p-4">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -222,27 +398,39 @@ export default function AgreementsPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm font-medium mt-1">{a.loanAmount > 0 ? `USD ${a.loanAmount.toLocaleString()}` : "—"}</p>
+                  </td>
+                  <td className="p-4">
+                    <p className="text-sm font-medium">
+                      {(a.loanAmount ?? 0) > 0 ? `USD ${a.loanAmount!.toLocaleString()}` : <span className="text-muted-foreground">—</span>}
+                    </p>
                   </td>
                   <td className="p-4">
                     <p className="text-sm text-foreground">{(a.retailerName as string) || <span className="text-muted-foreground">—</span>}</p>
                     <p className="text-xs text-muted-foreground">{a.branchName || ""}</p>
                   </td>
                   <td className="p-4">
-                    {a.status === 'signed'      ? <Badge status="success"><CheckCircle2 className="w-3 h-3 inline mr-1" />Signed</Badge>  :
-                     a.status === 'pending'     ? <Badge status="warning"><Clock className="w-3 h-3 inline mr-1" />Pending</Badge> :
-                     a.status === 'application' ? <Badge status="neutral"><FileText className="w-3 h-3 inline mr-1" />Application</Badge> :
-                     a.status === 'disbursed'   ? <Badge status="success"><CheckCircle2 className="w-3 h-3 inline mr-1" />Disbursed</Badge> :
-                     <Badge status="danger"><XCircle className="w-3 h-3 inline mr-1" />Expired</Badge>}
+                    {(() => {
+                      const cfg = STATUS_CONFIG[a.status];
+                      if (!cfg) return <Badge status="neutral">{a.status}</Badge>;
+                      const Icon = a.status === "signed" || a.status === "disbursed" ? CheckCircle2
+                        : a.status === "pending" ? Clock
+                        : a.status === "application" ? FileText
+                        : XCircle;
+                      return (
+                        <Badge status={cfg.badge}>
+                          <Icon className="w-3 h-3 inline mr-1" />{cfg.label}
+                        </Badge>
+                      );
+                    })()}
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      {a.status === "signed" ? (
+                      {a.status === "signed" || a.status === "disbursed" ? (
                         <button
                           onClick={() => navigate(`/agreements/${a.id}/execution`)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20"
                         >
-                          <ScrollText className="w-3.5 h-3.5" /> View Certificate
+                          <ScrollText className="w-3.5 h-3.5" /> Certificate
                         </button>
                       ) : a.status === "application" ? (
                         <span className="text-xs text-muted-foreground italic px-3 py-1.5">Awaiting processing</span>
@@ -254,7 +442,7 @@ export default function AgreementsPage() {
                             rel="noreferrer"
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20"
                           >
-                            <Monitor className="w-3.5 h-3.5" /> Open Kiosk
+                            <Monitor className="w-3.5 h-3.5" /> Kiosk
                           </a>
                           <button
                             onClick={() => a.signingUrl && copyLink(a.signingUrl, a.id)}
@@ -263,7 +451,7 @@ export default function AgreementsPage() {
                           >
                             {copiedId === a.id
                               ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
-                              : <><Copy className="w-3.5 h-3.5" /> Copy Link</>
+                              : <><Copy className="w-3.5 h-3.5" /></>
                             }
                           </button>
                         </>
@@ -272,12 +460,22 @@ export default function AgreementsPage() {
                   </td>
                 </tr>
               ))}
-              {filtered?.length === 0 && !isLoading && (
-                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No agreements found.</td></tr>
+              {filtered.length === 0 && !isLoading && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                    No agreements match the current filters.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {filtered.length > 0 && (
+          <div className="px-4 py-3 border-t border-white/5 bg-black/10 text-xs text-muted-foreground">
+            Showing {filtered.length} of {agreements?.length ?? 0} agreements
+          </div>
+        )}
       </GlassCard>
 
       {/* ── Create Agreement Modal ── */}
@@ -295,7 +493,7 @@ export default function AgreementsPage() {
               <Label>Branch</Label>
               <Select required disabled={!retailerId} value={branchId} onChange={e => setBranchId(e.target.value)}>
                 <option value="">Select Branch</option>
-                {branches?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {createBranches?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </Select>
             </div>
           </div>
@@ -318,14 +516,14 @@ export default function AgreementsPage() {
             </div>
           </div>
           <div>
-            <Label>Formitize PDF URL <span className="text-muted-foreground font-normal">(optional — paste from the notification email)</span></Label>
+            <Label>Formitize PDF URL <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
               type="url"
               placeholder="https://service.formitize.com/..."
               value={pdfUrl}
               onChange={e => setPdfUrl(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground mt-1">If provided, the kiosk QR code will open this PDF directly so the customer can view and sign it on screen.</p>
+            <p className="text-xs text-muted-foreground mt-1">If provided, the kiosk QR code will open this PDF so the customer can sign on screen.</p>
           </div>
           <div className="pt-4 flex justify-end gap-3">
             <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Cancel</button>
@@ -337,7 +535,6 @@ export default function AgreementsPage() {
       {/* ── Import Formitize CSV Modal ── */}
       <Modal isOpen={isImportOpen} onClose={() => setIsImportOpen(false)} title="Import from Formitize CSV">
         <div className="space-y-5">
-          {/* Instructions */}
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 text-sm space-y-2">
             <p className="font-medium text-blue-300 flex items-center gap-2"><FileText className="w-4 h-4" /> How to export from Formitize</p>
             <ol className="text-blue-200/80 space-y-1 list-decimal list-inside">
@@ -351,7 +548,6 @@ export default function AgreementsPage() {
 
           {!importResult ? (
             <>
-              {/* File drop zone */}
               <div
                 className="border-2 border-dashed border-white/20 rounded-lg p-8 text-center cursor-pointer hover:border-white/40 transition-colors"
                 onClick={() => fileInputRef.current?.click()}
@@ -382,7 +578,6 @@ export default function AgreementsPage() {
                   onChange={e => e.target.files?.[0] && setCsvFile(e.target.files[0])}
                 />
               </div>
-
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setIsImportOpen(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Cancel</button>
                 <GradientButton onClick={handleImport} isLoading={importing} disabled={!csvFile}>
@@ -391,7 +586,6 @@ export default function AgreementsPage() {
               </div>
             </>
           ) : (
-            /* Results view */
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center">
@@ -400,7 +594,7 @@ export default function AgreementsPage() {
                 </div>
                 <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-yellow-400">{importResult.skipped}</p>
-                  <p className="text-xs text-yellow-300">Skipped (duplicates)</p>
+                  <p className="text-xs text-yellow-300">Skipped</p>
                 </div>
                 <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-red-400">{importResult.errors.length}</p>
@@ -410,18 +604,14 @@ export default function AgreementsPage() {
 
               {importResult.agreements.length > 0 && (
                 <div className="space-y-2 max-h-40 overflow-y-auto">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Imported agreements</p>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Imported</p>
                   {importResult.agreements.map((a, i) => (
                     <div key={i} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 text-sm">
                       <div>
                         <p className="font-medium text-white">{a.customerName}</p>
                         <p className="text-xs text-muted-foreground">{a.branch}</p>
                       </div>
-                      <button
-                        onClick={() => copyLink(a.signingUrl)}
-                        className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-muted-foreground hover:text-white transition-colors"
-                        title="Copy signing link"
-                      >
+                      <button onClick={() => copyLink(a.signingUrl)} className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-muted-foreground hover:text-white transition-colors">
                         <LinkIcon className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -431,7 +621,7 @@ export default function AgreementsPage() {
 
               {importResult.errors.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs font-medium text-red-400 uppercase tracking-wider flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Errors</p>
+                  <p className="text-xs font-medium text-red-400 uppercase tracking-wider">Errors</p>
                   <div className="space-y-1 max-h-36 overflow-y-auto">
                     {importResult.errors.map((e, i) => (
                       <p key={i} className="text-xs text-red-300/80 bg-red-500/5 rounded px-2 py-1">{e}</p>
@@ -439,7 +629,7 @@ export default function AgreementsPage() {
                   </div>
                   {importResult.detectedColumns && (
                     <details className="text-xs text-muted-foreground">
-                      <summary className="cursor-pointer hover:text-white">Show columns detected in your CSV ({importResult.detectedColumns.length})</summary>
+                      <summary className="cursor-pointer hover:text-white">Show detected columns ({importResult.detectedColumns.length})</summary>
                       <p className="mt-1 bg-white/5 rounded px-2 py-1 font-mono break-all">{importResult.detectedColumns.join(", ")}</p>
                     </details>
                   )}
@@ -447,7 +637,7 @@ export default function AgreementsPage() {
               )}
 
               <div className="flex justify-end gap-3 pt-2">
-                <button onClick={resetImport} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Import another file</button>
+                <button onClick={resetImport} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Import another</button>
                 <GradientButton onClick={() => setIsImportOpen(false)}>Done</GradientButton>
               </div>
             </div>
