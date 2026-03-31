@@ -1,0 +1,908 @@
+import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Bell, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Clock, User, Store,
+  RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
+  Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle,
+} from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
+import { cn } from "@/lib/utils";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+// ─── Shared helpers ─────────────────────────────────────────────────────────────
+
+function fmt(d: string) {
+  try { return format(new Date(d), "d MMM yyyy, HH:mm"); } catch { return d; }
+}
+function ago(d: string) {
+  try { return formatDistanceToNow(new Date(d), { addSuffix: true }); } catch { return ""; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 1 — FORMITIZE NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PRODUCTS = ["All", "HukuPlus", "Revolver", "ChikweretiOne"] as const;
+
+const TASK_TYPES = [
+  { value: "all",           label: "All Types" },
+  { value: "application",   label: "Applications" },
+  { value: "reapplication", label: "Re-Applications" },
+  { value: "agreement",     label: "Agreements" },
+  { value: "upload",        label: "Document Uploads" },
+  { value: "payment",       label: "Payment Notifications" },
+  { value: "drawdown",      label: "Drawdowns" },
+  { value: "approval",      label: "Approvals" },
+  { value: "undertaking",   label: "Undertakings" },
+] as const;
+
+const PRODUCT_COLORS: Record<string, { bg: string; text: string; dot: string; border: string }> = {
+  HukuPlus:      { bg: "bg-amber-500/10",  text: "text-amber-300",  dot: "bg-amber-400",  border: "border-amber-500/20" },
+  Revolver:      { bg: "bg-blue-500/10",   text: "text-blue-300",   dot: "bg-blue-400",   border: "border-blue-500/20"  },
+  ChikweretiOne: { bg: "bg-green-500/10",  text: "text-green-300",  dot: "bg-green-400",  border: "border-green-500/20" },
+};
+
+const TYPE_BADGE: Record<string, { bg: string; text: string }> = {
+  application:   { bg: "bg-purple-500/15",  text: "text-purple-300"  },
+  reapplication: { bg: "bg-indigo-500/15",  text: "text-indigo-300"  },
+  agreement:     { bg: "bg-emerald-500/15", text: "text-emerald-300" },
+  upload:        { bg: "bg-sky-500/15",     text: "text-sky-300"     },
+  payment:       { bg: "bg-yellow-500/15",  text: "text-yellow-300"  },
+  drawdown:      { bg: "bg-pink-500/15",    text: "text-pink-300"    },
+  approval:      { bg: "bg-teal-500/15",    text: "text-teal-300"    },
+  undertaking:   { bg: "bg-orange-500/15",  text: "text-orange-300"  },
+};
+
+interface FNotification {
+  id: number;
+  formitize_job_id: string | null;
+  form_name: string;
+  task_type: string;
+  product: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  branch_name: string | null;
+  retailer_name: string | null;
+  status: "new" | "actioned";
+  notes: string | null;
+  created_at: string;
+}
+
+interface CountsResponse {
+  breakdown: Array<{ product: string; task_type: string; status: string; count: string }>;
+  newTotal: number;
+}
+
+function NotificationCard({ n, onAction, loading }: { n: FNotification; onAction: () => void; loading: boolean }) {
+  const colors = PRODUCT_COLORS[n.product] ?? PRODUCT_COLORS["HukuPlus"];
+  const typeBadge = TYPE_BADGE[n.task_type] ?? { bg: "bg-white/10", text: "text-white/60" };
+  const isNew = n.status === "new";
+  const typeLabel = TASK_TYPES.find(x => x.value === n.task_type)?.label ?? n.task_type;
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.18 }}
+      className={`flex items-start gap-4 p-4 rounded-xl border transition-colors ${
+        isNew ? "bg-white/5 border-white/10 hover:bg-white/8" : "bg-white/[0.02] border-white/5 opacity-60 hover:opacity-80"
+      }`}
+    >
+      <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${colors.bg} border ${colors.border}`}>
+        <div className={`w-2.5 h-2.5 rounded-full ${colors.dot}`} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap mb-1">
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} border ${colors.border}`}>{n.product}</span>
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${typeBadge.bg} ${typeBadge.text}`}>{typeLabel}</span>
+          {isNew && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20">NEW</span>}
+        </div>
+        <p className="text-sm font-medium text-white truncate">{n.form_name}</p>
+        <div className="flex items-center gap-3 mt-1.5 text-xs text-white/50 flex-wrap">
+          {n.customer_name && <span className="flex items-center gap-1"><User className="w-3 h-3" />{n.customer_name}</span>}
+          {n.retailer_name && <span className="flex items-center gap-1"><Store className="w-3 h-3" />{n.retailer_name}{n.branch_name ? ` — ${n.branch_name}` : ""}</span>}
+          <span className="flex items-center gap-1 ml-auto"><Clock className="w-3 h-3" />{ago(n.created_at)}</span>
+        </div>
+        {n.customer_phone && <p className="text-xs text-white/30 mt-1">{n.customer_phone}</p>}
+      </div>
+      <button
+        onClick={onAction}
+        disabled={loading}
+        className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-40 ${
+          isNew
+            ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20"
+            : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+        }`}
+      >
+        <CheckCheck className="w-3.5 h-3.5" />
+        {isNew ? "Mark actioned" : "Reopen"}
+      </button>
+    </motion.div>
+  );
+}
+
+function FormitizeTab() {
+  const qc = useQueryClient();
+  const [activeProduct, setActiveProduct] = useState<string>("All");
+  const [activeType, setActiveType] = useState<string>("all");
+  const [showActioned, setShowActioned] = useState(false);
+
+  const statusFilter = showActioned ? "all" : "new";
+
+  const { data: notifications = [], isLoading, refetch } = useQuery<FNotification[]>({
+    queryKey: ["notifications", activeProduct, activeType, statusFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (activeProduct !== "All") params.set("product", activeProduct);
+      if (activeType !== "all") params.set("task_type", activeType);
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      const r = await fetch(`${BASE}/api/formitize/notifications?${params}`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const { data: counts } = useQuery<CountsResponse>({
+    queryKey: ["notification-counts"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/formitize/notifications/counts`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const markOneMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      const r = await fetch(`${BASE}/api/formitize/notifications/${id}/status`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ status }),
+      });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["notifications"] }); qc.invalidateQueries({ queryKey: ["notification-counts"] }); },
+  });
+
+  const markAllMutation = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, string> = {};
+      if (activeProduct !== "All") body.product = activeProduct;
+      if (activeType !== "all") body.task_type = activeType;
+      const r = await fetch(`${BASE}/api/formitize/notifications/mark-all`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["notifications"] }); qc.invalidateQueries({ queryKey: ["notification-counts"] }); },
+  });
+
+  const newCount = counts?.newTotal ?? 0;
+  const productNewCount = (p: string) => {
+    if (!counts) return 0;
+    if (p === "All") return newCount;
+    return counts.breakdown.filter(r => r.product === p && r.status === "new").reduce((s, r) => s + parseInt(r.count), 0);
+  };
+  const visibleNew = notifications.filter(n => n.status === "new").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-sm text-muted-foreground">{newCount > 0 ? `${newCount} unactioned` : "All caught up"}</p>
+        <div className="flex items-center gap-2">
+          <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+          {visibleNew > 0 && (
+            <button onClick={() => markAllMutation.mutate()} disabled={markAllMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-amber-500/10 border border-amber-500/20 text-amber-300 hover:bg-amber-500/20 transition-colors disabled:opacity-50">
+              <CheckCheck className="w-3.5 h-3.5" /> Mark all actioned
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-1 p-1 bg-white/5 rounded-xl border border-white/10 w-fit">
+        {PRODUCTS.map(p => {
+          const cnt = productNewCount(p);
+          return (
+            <button key={p} onClick={() => setActiveProduct(p)}
+              className={`relative px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${activeProduct === p ? "bg-white/10 text-white shadow-sm" : "text-white/50 hover:text-white/80"}`}>
+              {p}
+              {cnt > 0 && <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-500 text-[10px] font-bold text-black">{cnt > 9 ? "9+" : cnt}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="flex gap-1.5 flex-wrap">
+          {TASK_TYPES.slice(0, 6).map(tt => (
+            <button key={tt.value} onClick={() => setActiveType(tt.value)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${activeType === tt.value ? "bg-white/15 text-white" : "text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
+              {tt.label}
+            </button>
+          ))}
+          <div className="relative group">
+            <button className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium text-white/40 hover:text-white/70 hover:bg-white/5 transition-all">
+              More <ChevronDown className="w-3 h-3" />
+            </button>
+            <div className="absolute left-0 top-full mt-1 z-20 hidden group-hover:flex flex-col bg-card border border-white/10 rounded-xl shadow-xl p-1 min-w-[160px]">
+              {TASK_TYPES.slice(6).map(tt => (
+                <button key={tt.value} onClick={() => setActiveType(tt.value)}
+                  className={`px-3 py-2 rounded-lg text-xs text-left transition-colors ${activeType === tt.value ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"}`}>
+                  {tt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <label className="ml-auto flex items-center gap-2 text-xs text-white/50 cursor-pointer select-none">
+          <input type="checkbox" checked={showActioned} onChange={e => setShowActioned(e.target.checked)} className="w-3.5 h-3.5 accent-amber-500" />
+          Show actioned
+        </label>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16 text-white/40"><RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+      ) : notifications.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-white/40">
+          <Bell className="w-10 h-10 mb-3 opacity-30" />
+          <p className="text-base font-medium">No notifications</p>
+          <p className="text-sm mt-1">{showActioned ? "Nothing here yet" : "No unactioned items — you're all caught up"}</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <AnimatePresence initial={false}>
+            {notifications.map(n => (
+              <NotificationCard key={n.id} n={n}
+                onAction={() => markOneMutation.mutate({ id: n.id, status: n.status === "new" ? "actioned" : "new" })}
+                loading={markOneMutation.isPending} />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 2 — LOAN APPLICATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface LoanApplication {
+  id: number;
+  customer_name: string;
+  customer_phone: string | null;
+  retailer_name: string | null;
+  branch_name: string | null;
+  collection_retailer_name: string | null;
+  collection_branch_name: string | null;
+  chick_count: number;
+  chick_purchase_date: string;
+  expected_collection_date: string;
+  amount_requested: string;
+  amount_limit: string;
+  status: string;
+  notes: string | null;
+  created_at: string;
+}
+
+const LOAN_STATUS: Record<string, { label: string; color: string; icon: any }> = {
+  submitted:    { label: "Submitted",    color: "text-amber-400 bg-amber-400/10 border-amber-400/20",     icon: Clock },
+  under_review: { label: "Under Review", color: "text-blue-400 bg-blue-400/10 border-blue-400/20",       icon: AlertCircle },
+  approved:     { label: "Approved",     color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20", icon: CheckCircle },
+  declined:     { label: "Declined",     color: "text-red-400 bg-red-400/10 border-red-400/20",           icon: XCircle },
+};
+
+function StatusBadge({ status, map }: { status: string; map: Record<string, any> }) {
+  const cfg = map[status] ?? Object.values(map)[0];
+  const Icon = cfg.icon;
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border", cfg.color)}>
+      <Icon className="w-3 h-3" />{cfg.label}
+    </span>
+  );
+}
+
+function LoanAppRow({ app }: { app: LoanApplication }) {
+  const [expanded, setExpanded] = useState(false);
+  const [status, setStatus] = useState(app.status);
+  const [notes, setNotes] = useState(app.notes || "");
+  const [saving, setSaving] = useState(false);
+  const qc = useQueryClient();
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const resp = await fetch(`${BASE}/api/applications/loan/${app.id}`, {
+        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, notes: notes || null }),
+      });
+      if (resp.ok) qc.invalidateQueries({ queryKey: ["loan-applications"] });
+    } finally { setSaving(false); }
+  };
+
+  const fmtAmt = (v: string) => `$${parseFloat(v).toFixed(2)}`;
+
+  return (
+    <div className="border border-white/10 rounded-xl bg-card overflow-hidden">
+      <button onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/5 transition-colors">
+        <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+          <Egg className="w-5 h-5 text-orange-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-white text-sm">{app.customer_name}</span>
+            <StatusBadge status={app.status} map={LOAN_STATUS} />
+          </div>
+          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+            <span>{app.chick_count} chicks</span>
+            <span className="text-orange-400 font-medium">{fmtAmt(app.amount_requested)}</span>
+            <span>Limit: {fmtAmt(app.amount_limit)}</span>
+            {app.retailer_name && <span>{app.collection_retailer_name || app.retailer_name}</span>}
+            <span>{format(new Date(app.created_at), "dd MMM yyyy")}</span>
+          </div>
+        </div>
+        {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-white/10 p-4 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <div><span className="text-muted-foreground text-xs block">Phone</span><span className="text-white">{app.customer_phone || "—"}</span></div>
+            <div><span className="text-muted-foreground text-xs block">Registered Store</span><span className="text-white">{app.retailer_name}{app.branch_name ? ` — ${app.branch_name}` : ""}</span></div>
+            <div><span className="text-muted-foreground text-xs block">Collection Store</span><span className="text-white">{app.collection_retailer_name || app.retailer_name}{app.collection_branch_name ? ` — ${app.collection_branch_name}` : ""}</span></div>
+            <div><span className="text-muted-foreground text-xs block">Chick Purchase</span><span className="text-white">{format(new Date(app.chick_purchase_date), "dd MMM yyyy")}</span></div>
+            <div><span className="text-muted-foreground text-xs block">Expected Collection</span><span className="text-white">{format(new Date(app.expected_collection_date), "dd MMM yyyy")}</span></div>
+            <div><span className="text-muted-foreground text-xs block">Submitted</span><span className="text-white">{format(new Date(app.created_at), "dd MMM yyyy HH:mm")}</span></div>
+          </div>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Status</label>
+              <select value={status} onChange={e => setStatus(e.target.value)}
+                className="rounded-lg border border-white/10 bg-white/5 text-white text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                {Object.entries(LOAN_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <div className="flex-1 min-w-40">
+              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Add internal notes..."
+                className="w-full rounded-lg border border-white/10 bg-white/5 text-white text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+            </div>
+            <button onClick={handleSave} disabled={saving}
+              className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors disabled:opacity-50">
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoansTab() {
+  const [loanStatus, setLoanStatus] = useState("all");
+
+  const { data: loans = [], isLoading, refetch } = useQuery<LoanApplication[]>({
+    queryKey: ["loan-applications", loanStatus],
+    queryFn: async () => {
+      const url = loanStatus === "all" ? `${BASE}/api/applications/loan` : `${BASE}/api/applications/loan?status=${loanStatus}`;
+      const r = await fetch(url, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+  });
+
+  const pendingLoans = loans.filter(l => l.status === "submitted" || l.status === "under_review").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-sm text-muted-foreground">{pendingLoans > 0 ? `${pendingLoans} awaiting review` : "No pending applications"}</p>
+        <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <Filter className="w-4 h-4 text-muted-foreground" />
+        {[["all", "All"], ...Object.entries(LOAN_STATUS).map(([k, v]) => [k, v.label])].map(([k, label]) => (
+          <button key={k} onClick={() => setLoanStatus(k)}
+            className={cn("px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+              loanStatus === k ? "bg-orange-500 border-orange-500 text-white" : "border-white/10 text-muted-foreground hover:text-white")}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+      ) : loans.length === 0 ? (
+        <div className="text-center py-16 border border-dashed border-white/10 rounded-xl">
+          <Egg className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground">No loan applications{loanStatus !== "all" ? ` with status "${LOAN_STATUS[loanStatus]?.label ?? loanStatus}"` : ""}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">{loans.map(app => <LoanAppRow key={app.id} app={app} />)}</div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 3 — DRAWDOWNS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface DrawdownRequest {
+  id: number;
+  customer_name: string;
+  customer_phone: string | null;
+  amount_requested: string;
+  facility_limit: string | null;
+  facility_balance: string | null;
+  status: string;
+  retailer_name: string | null;
+  branch_name: string | null;
+  collection_retailer_name: string | null;
+  collection_branch_name: string | null;
+  notes: string | null;
+  store_notified_at: string | null;
+  store_actioned_at: string | null;
+  store_actioned_by: string | null;
+  created_at: string;
+}
+
+const DD_STATUS: Record<string, { label: string; bg: string; text: string; icon: React.ReactNode }> = {
+  pending:  { label: "Pending",  bg: "bg-yellow-500/15", text: "text-yellow-300", icon: <Clock className="w-3 h-3" /> },
+  notified: { label: "Notified", bg: "bg-blue-500/15",   text: "text-blue-300",   icon: <Send className="w-3 h-3" /> },
+  actioned: { label: "Actioned", bg: "bg-green-500/15",  text: "text-green-300",  icon: <CheckCircle2 className="w-3 h-3" /> },
+  rejected: { label: "Rejected", bg: "bg-red-500/15",    text: "text-red-300",    icon: <AlertCircle className="w-3 h-3" /> },
+};
+
+const DD_FILTERS = [
+  { value: "", label: "All" },
+  { value: "pending",  label: "Pending" },
+  { value: "notified", label: "Notified" },
+  { value: "actioned", label: "Actioned" },
+  { value: "rejected", label: "Rejected" },
+];
+
+function DrawdownRow({ dr, onUpdate }: { dr: DrawdownRequest; onUpdate: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [notes, setNotes] = useState(dr.notes || "");
+  const qc = useQueryClient();
+
+  const update = useMutation({
+    mutationFn: async (payload: { status?: string; notes?: string }) => {
+      const r = await fetch(`${BASE}/api/applications/drawdown/${dr.id}`, {
+        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["drawdowns"] }); qc.invalidateQueries({ queryKey: ["drawdown-pending-count"] }); onUpdate(); },
+  });
+
+  const s = DD_STATUS[dr.status] ?? DD_STATUS.pending;
+  const amount = parseFloat(dr.amount_requested).toFixed(2);
+
+  return (
+    <div className="border border-white/10 rounded-xl bg-white/[0.03] overflow-hidden">
+      <button className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+        onClick={() => setExpanded(v => !v)}>
+        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${s.bg} ${s.text}`}>
+          {s.icon}{s.label}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground truncate">{dr.customer_name}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {dr.retailer_name}{dr.branch_name ? ` — ${dr.branch_name}` : ""}
+            {dr.collection_retailer_name && dr.collection_retailer_name !== dr.retailer_name && (
+              <> · Collecting: {dr.collection_retailer_name}{dr.collection_branch_name ? ` — ${dr.collection_branch_name}` : ""}</>
+            )}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-sm font-bold text-amber-300">${amount}</p>
+          <p className="text-[10px] text-muted-foreground">{ago(dr.created_at)}</p>
+        </div>
+        {expanded ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}
+            className="border-t border-white/10 px-4 py-4 space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><p className="text-xs text-muted-foreground mb-0.5">Customer Phone</p><p>{dr.customer_phone || "—"}</p></div>
+              <div><p className="text-xs text-muted-foreground mb-0.5">Amount</p><p className="font-semibold">${amount}</p></div>
+              {dr.facility_limit && <div><p className="text-xs text-muted-foreground mb-0.5">Facility Limit</p><p>${parseFloat(dr.facility_limit).toFixed(2)}</p></div>}
+              {dr.facility_balance && <div><p className="text-xs text-muted-foreground mb-0.5">Balance</p><p>${parseFloat(dr.facility_balance).toFixed(2)}</p></div>}
+              <div><p className="text-xs text-muted-foreground mb-0.5">Submitted</p><p>{fmt(dr.created_at)}</p></div>
+              {dr.store_notified_at && <div><p className="text-xs text-muted-foreground mb-0.5">Notified</p><p>{fmt(dr.store_notified_at)}</p></div>}
+              {dr.store_actioned_at && <div><p className="text-xs text-muted-foreground mb-0.5">Actioned By</p><p>{dr.store_actioned_by} · {fmt(dr.store_actioned_at)}</p></div>}
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Internal Notes</label>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {dr.status === "pending" && (
+                <button onClick={() => update.mutate({ status: "notified", notes })} disabled={update.isPending}
+                  className="px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs font-semibold hover:bg-blue-500/30 transition-colors flex items-center gap-1.5">
+                  <Send className="w-3 h-3" /> Mark Notified
+                </button>
+              )}
+              {dr.status !== "actioned" && (
+                <button onClick={() => update.mutate({ status: "actioned", notes })} disabled={update.isPending}
+                  className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-300 text-xs font-semibold hover:bg-green-500/30 transition-colors flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3 h-3" /> Mark Actioned
+                </button>
+              )}
+              {dr.status !== "rejected" && dr.status !== "actioned" && (
+                <button onClick={() => update.mutate({ status: "rejected", notes })} disabled={update.isPending}
+                  className="px-3 py-1.5 rounded-lg bg-red-500/20 text-red-300 text-xs font-semibold hover:bg-red-500/30 transition-colors flex items-center gap-1.5">
+                  <AlertCircle className="w-3 h-3" /> Reject
+                </button>
+              )}
+              <button onClick={() => update.mutate({ notes })} disabled={update.isPending}
+                className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold hover:bg-white/15 transition-colors">
+                {update.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save Notes"}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function DrawdownsTab() {
+  const [statusFilter, setStatusFilter] = useState("");
+  const { data: drawdowns = [], isLoading, refetch } = useQuery<DrawdownRequest[]>({
+    queryKey: ["drawdowns", statusFilter],
+    queryFn: async () => {
+      const url = `${BASE}/api/applications/drawdown${statusFilter ? `?status=${statusFilter}` : ""}`;
+      const r = await fetch(url, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+  });
+
+  const pendingCount = drawdowns.filter(d => d.status === "pending").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-sm text-muted-foreground">{pendingCount > 0 ? `${pendingCount} pending action` : "No pending drawdowns"}</p>
+        <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+        </button>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        {DD_FILTERS.map(f => (
+          <button key={f.value} onClick={() => setStatusFilter(f.value)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${statusFilter === f.value ? "bg-amber-500 text-black" : "bg-white/5 text-muted-foreground hover:bg-white/10"}`}>
+            {f.label}{f.value === "pending" && pendingCount > 0 ? ` (${pendingCount})` : ""}
+          </button>
+        ))}
+      </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+      ) : drawdowns.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <ArrowDownCircle className="w-8 h-8 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No drawdown requests{statusFilter ? ` with status "${statusFilter}"` : ""}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">{drawdowns.map(dr => <DrawdownRow key={dr.id} dr={dr} onUpdate={() => {}} />)}</div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 4 — STORE MESSAGES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface StoreMessage {
+  id: number;
+  retailer_id: number;
+  branch_id: number | null;
+  reference_type: string | null;
+  reference_id: number | null;
+  subject: string;
+  body: string;
+  is_read: boolean;
+  retailer_name: string | null;
+  branch_name: string | null;
+  created_at: string;
+}
+
+interface Retailer {
+  id: number;
+  name: string;
+  branch_id: number;
+  branch_name: string;
+}
+
+function ComposeModal({ retailers, onClose, onSent }: { retailers: Retailer[]; onClose: () => void; onSent: () => void }) {
+  const [retailerId, setRetailerId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [error, setError] = useState("");
+
+  const branches = retailers.filter(r => String(r.id) === retailerId);
+  const retailerOptions = Array.from(new Map(retailers.map(r => [r.id, r.name])).entries());
+
+  const send = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/applications/messages/admin`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ retailer_id: parseInt(retailerId), branch_id: branchId ? parseInt(branchId) : null, subject, body }),
+      });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    onSuccess: () => { onSent(); onClose(); },
+    onError: () => setError("Failed to send. Please try again."),
+  });
+
+  const handleSend = () => {
+    setError("");
+    if (!retailerId) { setError("Please select a store."); return; }
+    if (!subject.trim()) { setError("Subject is required."); return; }
+    if (!body.trim()) { setError("Message is required."); return; }
+    send.mutate();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-[#1a1b23] border border-white/10 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold">New Message to Store</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        {error && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</div>}
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Retailer</label>
+            <select value={retailerId} onChange={e => { setRetailerId(e.target.value); setBranchId(""); }}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+              <option value="">— Select retailer —</option>
+              {retailerOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
+            </select>
+          </div>
+          {branches.length > 0 && (
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Branch (optional)</label>
+              <select value={branchId} onChange={e => setBranchId(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+                <option value="">All branches</option>
+                {branches.map(b => <option key={b.branch_id} value={String(b.branch_id)}>{b.branch_name}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Subject</label>
+            <input type="text" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Message subject…"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Message</label>
+            <textarea value={body} onChange={e => setBody(e.target.value)} rows={4} placeholder="Write your message…"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
+        </div>
+        <div className="flex gap-3 pt-1">
+          <button onClick={onClose} className="flex-1 px-4 py-2 rounded-xl border border-white/10 text-sm text-muted-foreground hover:bg-white/5 transition-colors">Cancel</button>
+          <button onClick={handleSend} disabled={send.isPending}
+            className="flex-1 px-4 py-2 rounded-xl bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 transition-colors flex items-center justify-center gap-2">
+            {send.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Send</>}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function MessageRow({ msg }: { msg: StoreMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const storeName = [msg.retailer_name, msg.branch_name].filter(Boolean).join(" — ") || "Unknown Store";
+
+  return (
+    <div className={`border rounded-xl overflow-hidden transition-colors ${msg.is_read ? "border-white/10 bg-white/[0.02]" : "border-amber-500/20 bg-amber-500/[0.04]"}`}>
+      <button className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left" onClick={() => setExpanded(v => !v)}>
+        <div className={`w-2 h-2 rounded-full shrink-0 ${msg.is_read ? "bg-white/20" : "bg-amber-400"}`} />
+        <Store className="w-4 h-4 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">{msg.subject}</p>
+          <p className="text-xs text-muted-foreground truncate">To: {storeName}</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className={`text-[10px] font-semibold ${msg.is_read ? "text-muted-foreground" : "text-amber-400"}`}>{msg.is_read ? "Read" : "Unread"}</p>
+          <p className="text-[10px] text-muted-foreground">{ago(msg.created_at)}</p>
+        </div>
+        {expanded ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}
+            className="border-t border-white/10 px-4 py-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><p className="text-xs text-muted-foreground mb-0.5">Store</p><p>{storeName}</p></div>
+              <div><p className="text-xs text-muted-foreground mb-0.5">Sent</p><p>{fmt(msg.created_at)}</p></div>
+              {msg.reference_type && <div><p className="text-xs text-muted-foreground mb-0.5">Reference</p><p className="capitalize">{msg.reference_type} #{msg.reference_id}</p></div>}
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Message</p>
+              <p className="text-sm text-foreground/90 whitespace-pre-wrap">{msg.body}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function MessagesTab() {
+  const [showCompose, setShowCompose] = useState(false);
+  const qc = useQueryClient();
+
+  const { data: messages = [], isLoading, refetch } = useQuery<StoreMessage[]>({
+    queryKey: ["admin-messages"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/applications/messages/admin`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+  });
+
+  const { data: retailers = [] } = useQuery<Retailer[]>({
+    queryKey: ["retailers-list"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/applications/retailers`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+  });
+
+  const unreadCount = messages.filter(m => !m.is_read).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-sm text-muted-foreground">{unreadCount > 0 ? `${unreadCount} unread by store` : "All messages read"}</p>
+        <div className="flex gap-2">
+          <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+          <button onClick={() => setShowCompose(true)}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 transition-colors">
+            <Plus className="w-4 h-4" /> New Message
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+      ) : messages.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <MessageSquare className="w-8 h-8 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No messages sent to stores yet</p>
+          <button onClick={() => setShowCompose(true)}
+            className="mt-4 px-4 py-2 rounded-xl bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 transition-colors inline-flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Send First Message
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">{messages.map(msg => <MessageRow key={msg.id} msg={msg} />)}</div>
+      )}
+
+      <AnimatePresence>
+        {showCompose && (
+          <ComposeModal retailers={retailers} onClose={() => setShowCompose(false)}
+            onSent={() => { refetch(); qc.invalidateQueries({ queryKey: ["admin-messages"] }); }} />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type Tab = "formitize" | "loans" | "drawdowns" | "messages";
+
+interface TabDef {
+  id: Tab;
+  label: string;
+  icon: React.ReactNode;
+  badgeKey?: string;
+}
+
+export default function ActivityPage() {
+  const [tab, setTab] = useState<Tab>("formitize");
+
+  const { data: counts } = useQuery<CountsResponse>({
+    queryKey: ["notification-counts"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/formitize/notifications/counts`, { credentials: "include" });
+      if (!r.ok) return { breakdown: [], newTotal: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const { data: ddCount } = useQuery<{ count: number }>({
+    queryKey: ["drawdown-pending-count"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/applications/drawdown/pending-count`, { credentials: "include" });
+      if (!r.ok) return { count: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const formitizeBadge = counts?.newTotal ?? 0;
+  const drawdownBadge = ddCount?.count ?? 0;
+
+  const TABS: TabDef[] = [
+    { id: "formitize",  label: "Formitize",       icon: <Bell className="w-4 h-4" /> },
+    { id: "loans",      label: "Loan Requests",   icon: <Egg className="w-4 h-4" /> },
+    { id: "drawdowns",  label: "Drawdowns",       icon: <ArrowDownCircle className="w-4 h-4" /> },
+    { id: "messages",   label: "Store Messages",  icon: <MessageSquare className="w-4 h-4" /> },
+  ];
+
+  const getBadge = (id: Tab) => {
+    if (id === "formitize") return formitizeBadge;
+    if (id === "drawdowns") return drawdownBadge;
+    return 0;
+  };
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Activity</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">All inbound events, requests, and store communications in one place</p>
+      </div>
+
+      <div className="flex gap-1 bg-white/5 rounded-xl p-1 flex-wrap">
+        {TABS.map(t => {
+          const badge = getBadge(t.id);
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${tab === t.id ? "bg-amber-500 text-black" : "text-muted-foreground hover:text-foreground"}`}>
+              {t.icon}
+              {t.label}
+              {badge > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] font-bold text-white">
+                  {badge > 99 ? "99+" : badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "formitize"  && <FormitizeTab />}
+      {tab === "loans"      && <LoansTab />}
+      {tab === "drawdowns"  && <DrawdownsTab />}
+      {tab === "messages"   && <MessagesTab />}
+    </div>
+  );
+}
