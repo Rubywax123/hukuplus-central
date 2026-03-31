@@ -527,6 +527,23 @@ export async function runMigrations() {
         AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
     `);
 
+    // ── Add disbursement_date, repayment_date, repayment_amount columns to agreements ──
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS disbursement_date TEXT;`);
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS repayment_date TEXT;`);
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS repayment_amount NUMERIC(12,2);`);
+
+    // ── Data correction: Gerald Matanda — loan amount came in as 0, branch resolved to Main
+    // Formitize sent amount in formtext_1="$620.00"; branch "Nova Blufhill" → Bluff Hill (id=13) ──
+    await client.query(`
+      UPDATE agreements
+      SET loan_amount = 620.00,
+          branch_id   = 13,
+          disbursement_date = '31 Mar 2026',
+          repayment_date    = '12 May 2026'
+      WHERE LOWER(customer_name) LIKE '%gerald%matanda%'
+        AND (loan_amount = 0 OR loan_amount IS NULL);
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

@@ -265,6 +265,14 @@ router.get("/sign/:token", async (req, res): Promise<void> => {
   }
   const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, agreement.retailerId));
   const [branch] = await db.select().from(branchesTable).where(eq(branchesTable.id, agreement.branchId));
+  // For agreements that pre-date the disbursement/repayment columns, fall back to formData
+  const fd = (agreement.formData ?? {}) as Record<string, string>;
+  const disbursementDate = agreement.disbursementDate
+    ?? fd["applieddisbursement"] ?? null;
+  const repaymentDate = agreement.repaymentDate
+    ?? fd["appliedsettlement"] ?? null;
+  const repaymentAmount = agreement.repaymentAmount ?? null;
+
   res.json({
     retailerName: retailer?.name ?? "",
     branchName: branch?.name ?? "",
@@ -273,6 +281,9 @@ router.get("/sign/:token", async (req, res): Promise<void> => {
     customerName: agreement.customerName,
     loanAmount: agreement.loanAmount,
     formitizeFormUrl: (agreement as any).formitizeFormUrl ?? null,
+    disbursementDate,
+    repaymentDate,
+    repaymentAmount,
   });
 });
 

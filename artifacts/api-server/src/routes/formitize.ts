@@ -419,15 +419,28 @@ async function upsertNotification(params: {
   retailerName?: string | null;
 }) {
   try {
-    await pool.query(
-      `INSERT INTO formitize_notifications
-         (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (formitize_job_id) DO NOTHING`,
-      [params.jobId, params.formName, params.taskType, params.product,
-       params.customerName, params.customerPhone ?? null,
-       params.branchName ?? null, params.retailerName ?? null]
-    );
+    if (params.jobId) {
+      // Known job ID — use upsert to deduplicate
+      await pool.query(
+        `INSERT INTO formitize_notifications
+           (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (formitize_job_id) DO NOTHING`,
+        [params.jobId, params.formName, params.taskType, params.product,
+         params.customerName, params.customerPhone ?? null,
+         params.branchName ?? null, params.retailerName ?? null]
+      );
+    } else {
+      // No job ID (e.g. jobID=0 from Formitize) — plain insert, no conflict clause
+      await pool.query(
+        `INSERT INTO formitize_notifications
+           (form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [params.formName, params.taskType, params.product,
+         params.customerName, params.customerPhone ?? null,
+         params.branchName ?? null, params.retailerName ?? null]
+      );
+    }
   } catch (err) {
     console.error("[formitize:webhook] Failed to upsert notification:", err);
   }
@@ -600,11 +613,19 @@ router.post("/formitize/webhook", async (req, res) => {
   );
   const customerAddress = isNa(customerAddressRaw) ? null : (customerAddressRaw || null);
 
+  // Amount may be in standard named fields OR in formtext_1/formtext_2 as "$620.00"
+  const stripCurrency = (s: string) => s.replace(/[$,ZW\s]/g, "").trim();
   const loanAmountRaw = findField(
     "loanamount", "loan amount", "creditlimit", "credit limit",
     "revolveramount", "revolver amount", "deductionamount", "deduction amount", "amount"
-  );
-  const loanAmount = parseFloat(loanAmountRaw || "0");
+  ) || stripCurrency(fieldMap["formtext_1"] || "") || stripCurrency(fieldMap["formtext_2"] || "");
+  const loanAmount = parseFloat(stripCurrency(loanAmountRaw || "") || "0");
+
+  // Disbursement and repayment dates from Novafeeds HukuPlus form
+  const disbursementDate = findField("applieddisbursement", "disbursementdate", "disbursement date", "disbursement") || null;
+  const repaymentDate    = findField("appliedsettlement", "settlementdate", "settlement date", "repaymentdate", "repayment date") || null;
+  const repaymentAmountRaw = findField("weeklyrepayment", "monthly repayment", "repaymentamount", "repayment amount", "installment") || null;
+  const repaymentAmount = repaymentAmountRaw ? parseFloat(stripCurrency(repaymentAmountRaw)) : null;
 
   // ── Retailer / branch resolution (product-specific) ────────────────────────
   let retailerId: number | null = null;
@@ -680,12 +701,21 @@ router.post("/formitize/webhook", async (req, res) => {
         }
       }
 
-      // Exact branch name match first, then word-contains match
+      // Fold repeated consecutive chars for fuzzy match: "blufhill" ≈ "bluff hill"
+      const fold = (s: string) => s.toLowerCase().replace(/\s+/g, "").replace(/(.)\1+/g, "$1");
+
+      // Exact → word-contains → fold-normalized match
       let matched = candidates.find(b => b.name.toLowerCase() === storeBranchName.toLowerCase());
       if (!matched && searchWords.length > 0) {
         matched = candidates.find(b => {
           const bn = b.name.toLowerCase();
           return searchWords.some(w => bn.includes(w));
+        });
+      }
+      if (!matched && searchWords.length > 0) {
+        matched = candidates.find(b => {
+          const foldedBranch = fold(b.name);
+          return searchWords.some(w => foldedBranch.includes(fold(w)) || fold(w).includes(foldedBranch));
         });
       }
 
@@ -810,10 +840,12 @@ router.post("/formitize/webhook", async (req, res) => {
     formitizeJobId: jobId,
     formitizeFormUrl: null,
     signingToken,
-    // Agreements go "pending" (awaiting signature); applications just sit as "application"
     status: isAgreement ? "pending" : "application",
     expiresAt,
     createdBy: "formitize-webhook",
+    ...(disbursementDate ? { disbursementDate } : {}),
+    ...(repaymentDate ? { repaymentDate } : {}),
+    ...(repaymentAmount !== null && !isNaN(repaymentAmount) ? { repaymentAmount } : {}),
     formData: fieldMap as any,
   }).returning();
 

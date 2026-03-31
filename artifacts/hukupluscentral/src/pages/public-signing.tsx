@@ -257,6 +257,28 @@ export default function PublicSigningPage({ token }: { token: string }) {
                   <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Loan Amount</p>
                   <p className="text-white text-3xl font-bold">{formatAmount(session.loanAmount)}</p>
                 </div>
+                {((session as any).disbursementDate || (session as any).repaymentDate || (session as any).repaymentAmount) && (
+                  <div className="border-t border-white/[0.06] pt-4 grid grid-cols-2 gap-4">
+                    {(session as any).disbursementDate && (
+                      <div>
+                        <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Disbursement Date</p>
+                        <p className="text-white font-semibold">{(session as any).disbursementDate}</p>
+                      </div>
+                    )}
+                    {(session as any).repaymentDate && (
+                      <div>
+                        <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Repayment Date</p>
+                        <p className="text-white font-semibold">{(session as any).repaymentDate}</p>
+                      </div>
+                    )}
+                    {(session as any).repaymentAmount && (
+                      <div className="col-span-2">
+                        <p className="text-white/30 text-xs uppercase tracking-wider mb-1">Repayment Amount</p>
+                        <p className="text-white font-semibold">{formatAmount((session as any).repaymentAmount)}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {session.formitizeFormUrl && (
                   <div className="border-t border-white/[0.06] pt-4">
                     <a href={session.formitizeFormUrl} target="_blank" rel="noopener noreferrer"
