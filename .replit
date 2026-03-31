@@ -39,6 +39,7 @@ FORMITIZE_IMPORT_KEY = "0a5b01da67b7739697bda0f6b7824a97"
 EMAIL_SMTP_HOST = "smtp.gmail.com"
 EMAIL_SMTP_PORT = "587"
 EMAIL_SMTP_USER = "operations@marishoma.com"
+WATI_API_URL = "https://live.wati.io/10123607"
 
 [nix]
 channel = "stable-25_05"
