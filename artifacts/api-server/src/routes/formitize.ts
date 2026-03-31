@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, agreementsTable, retailersTable, branchesTable, activityTable, customersTable } from "@workspace/db";
+import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable, customersTable } from "@workspace/db";
 import { eq, ilike } from "drizzle-orm";
 import crypto from "crypto";
 import multer from "multer";
@@ -407,6 +407,32 @@ function parseFormContext(formName: string): {
   return { product, formType };
 }
 
+// ─── Upsert a notification record for every inbound Formitize submission ──────
+async function upsertNotification(params: {
+  jobId: string | null;
+  formName: string;
+  taskType: string;
+  product: string;
+  customerName: string;
+  customerPhone?: string | null;
+  branchName?: string | null;
+  retailerName?: string | null;
+}) {
+  try {
+    await pool.query(
+      `INSERT INTO formitize_notifications
+         (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (formitize_job_id) DO NOTHING`,
+      [params.jobId, params.formName, params.taskType, params.product,
+       params.customerName, params.customerPhone ?? null,
+       params.branchName ?? null, params.retailerName ?? null]
+    );
+  } catch (err) {
+    console.error("[formitize:webhook] Failed to upsert notification:", err);
+  }
+}
+
 // ─── POST /api/formitize/webhook ──────────────────────────────────────────────
 router.post("/formitize/webhook", async (req, res) => {
   const webhookSecret = process.env.FORMITIZE_WEBHOOK_SECRET;
@@ -508,6 +534,8 @@ router.post("/formitize/webhook", async (req, res) => {
       loanProduct: product,
       referenceId: jobId ? parseInt(jobId) || null : null,
     });
+
+    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName });
 
     console.log(`[formitize:webhook] Stored as activity — ${rawFormName}`);
     res.status(200).json({ ok: true, stored: "activity", product, formType });
@@ -740,6 +768,17 @@ router.post("/formitize/webhook", async (req, res) => {
   const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
   const signingUrl = `${appUrl}/sign/${signingToken}`;
 
+  await upsertNotification({
+    jobId,
+    formName: rawFormName,
+    taskType: formType,
+    product,
+    customerName,
+    customerPhone: customerPhone ?? null,
+    branchName: resolvedBranchName || null,
+    retailerName: resolvedRetailerName || null,
+  });
+
   console.log(`[formitize:webhook] Created ${formType} #${agreement.id} — ${product} — ${customerName}`);
 
   res.status(201).json({
@@ -751,6 +790,64 @@ router.post("/formitize/webhook", async (req, res) => {
     ...(isAgreement ? { signingUrl } : {}),
     ...(resolvedRetailerName ? { retailer: resolvedRetailerName, branch: resolvedBranchName } : {}),
   });
+});
+
+// ─── GET /api/formitize/notifications ────────────────────────────────────────
+router.get("/formitize/notifications", async (req, res) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const { product, task_type, status } = req.query;
+  const params: any[] = [];
+  let where = "WHERE 1=1";
+  if (product && product !== "all") { params.push(product); where += ` AND product = $${params.length}`; }
+  if (task_type && task_type !== "all") { params.push(task_type); where += ` AND task_type = $${params.length}`; }
+  if (status && status !== "all") { params.push(status); where += ` AND status = $${params.length}`; }
+  const result = await pool.query(
+    `SELECT * FROM formitize_notifications ${where} ORDER BY created_at DESC LIMIT 500`,
+    params
+  );
+  res.json(result.rows);
+});
+
+// ─── GET /api/formitize/notifications/counts ──────────────────────────────────
+router.get("/formitize/notifications/counts", async (req, res) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const result = await pool.query(
+    `SELECT product, task_type, status, COUNT(*) AS count
+     FROM formitize_notifications
+     GROUP BY product, task_type, status`
+  );
+  const newTotal = await pool.query(
+    `SELECT COUNT(*) AS count FROM formitize_notifications WHERE status = 'new'`
+  );
+  res.json({ breakdown: result.rows, newTotal: parseInt(newTotal.rows[0].count) });
+});
+
+// ─── PUT /api/formitize/notifications/:id/status ──────────────────────────────
+router.put("/formitize/notifications/:id/status", async (req, res) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const { id } = req.params;
+  const { status } = req.body;
+  if (!["new", "actioned"].includes(status)) { res.status(400).json({ error: "Invalid status" }); return; }
+  await pool.query(
+    "UPDATE formitize_notifications SET status = $1, updated_at = NOW() WHERE id = $2",
+    [status, id]
+  );
+  res.json({ ok: true });
+});
+
+// ─── POST /api/formitize/notifications/mark-all ───────────────────────────────
+router.post("/formitize/notifications/mark-all", async (req, res) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const { product, task_type } = req.body as { product?: string; task_type?: string };
+  const params: any[] = [];
+  let where = "WHERE status = 'new'";
+  if (product) { params.push(product); where += ` AND product = $${params.length}`; }
+  if (task_type) { params.push(task_type); where += ` AND task_type = $${params.length}`; }
+  const result = await pool.query(
+    `UPDATE formitize_notifications SET status = 'actioned', updated_at = NOW() ${where}`,
+    params
+  );
+  res.json({ ok: true, updated: result.rowCount });
 });
 
 export default router;

@@ -24,7 +24,7 @@ Central command platform connecting three loan apps (HukuPlus - Broiler Feed Loa
 
 ### Two Zones
 
-1. **Internal Zone** (requires login): Dashboard, Retailers, Agreements, Team management
+1. **Internal Zone** (requires login): Dashboard, Retailers, Agreements, Team management, Notifications feed
 2. **Public Zone** (`/sign/:token`): Secure loan agreement signing gateway — no login required, three-factor identity verification (Retailer + Branch + Customer Name)
 
 ### Loan Products & App URLs

@@ -309,6 +309,33 @@ export async function runMigrations() {
       );
     `);
 
+    // ── Formitize Task Notifications ────────────────────────────────────────────
+    // One row per inbound Formitize form submission, deduplicated by job ID.
+    // Covers all 3 products × 5 form types.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS formitize_notifications (
+        id                  SERIAL PRIMARY KEY,
+        formitize_job_id    TEXT,
+        form_name           TEXT NOT NULL,
+        task_type           TEXT NOT NULL,
+        product             TEXT NOT NULL,
+        customer_name       TEXT,
+        customer_phone      TEXT,
+        branch_name         TEXT,
+        retailer_name       TEXT,
+        status              TEXT NOT NULL DEFAULT 'new',
+        notes               TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    // Unique index on formitize_job_id (excluding NULLs so nulls don't conflict)
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS formitize_notifications_job_id_idx
+        ON formitize_notifications (formitize_job_id)
+        WHERE formitize_job_id IS NOT NULL;
+    `);
+
     // ── In-App Messages (store portal notifications) ────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS in_app_messages (

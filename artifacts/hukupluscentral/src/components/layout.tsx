@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, ClipboardList } from "lucide-react";
+import { LayoutDashboard, Store, FileSignature, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, ClipboardList, Bell } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -15,6 +15,7 @@ const navItems = [
   { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Agreements", icon: FileSignature },
   { path: "/applications", label: "Requests", icon: ClipboardList },
+  { path: "/notifications", label: "Notifications", icon: Bell, badge: true },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
   { path: "/team", label: "Tefco Staff", icon: Users },
 ];
@@ -211,6 +212,18 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useStaffAuth();
   const { activeAppConfig } = useLoanApp();
 
+  const { data: notifCounts } = useQuery<{ newTotal: number }>({
+    queryKey: ["notification-counts"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/formitize/notifications/counts`, { credentials: "include" });
+      if (!r.ok) return { newTotal: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+  const unreadCount = notifCounts?.newTotal ?? 0;
+
   return (
     <div className="min-h-screen bg-background flex">
       <aside className="w-72 hidden lg:flex flex-col border-r border-white/5 bg-card/30 backdrop-blur-2xl">
@@ -243,6 +256,7 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 px-4 space-y-1">
           {navItems.map((item) => {
             const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
+            const badgeCount = item.badge ? unreadCount : 0;
             return (
               <Link key={item.path} href={item.path} className="block">
                 <div className={`
@@ -251,8 +265,13 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
                     ? `${activeAppConfig.bg} ${activeAppConfig.text} border ${activeAppConfig.border}`
                     : "text-muted-foreground hover:bg-white/5 hover:text-foreground border border-transparent"}
                 `}>
-                  <item.icon className={`w-4 h-4 ${isActive ? activeAppConfig.text : ""}`} />
-                  <span className="font-medium text-sm">{item.label}</span>
+                  <item.icon className={`w-4 h-4 flex-shrink-0 ${isActive ? activeAppConfig.text : ""}`} />
+                  <span className="font-medium text-sm flex-1">{item.label}</span>
+                  {badgeCount > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-[10px] font-bold text-black">
+                      {badgeCount > 99 ? "99+" : badgeCount}
+                    </span>
+                  )}
                 </div>
               </Link>
             );
