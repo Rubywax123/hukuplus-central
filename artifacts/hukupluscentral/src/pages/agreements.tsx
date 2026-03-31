@@ -3,18 +3,19 @@ import { useListAgreements, useCreateAgreement, useListRetailers, useListBranche
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label, Select } from "@/components/ui-extras";
 import {
   Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload,
-  FileText, Copy, Monitor, ScrollText, Filter, ChevronDown, Banknote,
+  FileText, Copy, Monitor, ScrollText, Banknote, Info,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const PRODUCT_COLOURS: Record<string, string> = {
-  HukuPlus:      "text-amber-400 bg-amber-500/10 border-amber-500/20",
-  ChikweretiOne: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-  Revolver:      "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-  Novafeeds:     "text-amber-400 bg-amber-500/10 border-amber-500/20",
+const STATUS_CONFIG: Record<string, { label: string; badge: "success"|"warning"|"neutral"|"danger" }> = {
+  signed:      { label: "Signed",       badge: "success" },
+  pending:     { label: "Pending Sign", badge: "warning" },
+  application: { label: "Application",  badge: "neutral" },
+  disbursed:   { label: "Disbursed",    badge: "success" },
+  expired:     { label: "Expired",      badge: "danger"  },
 };
 
 const FORMTYPE_LABELS: Record<string, string> = {
@@ -23,54 +24,55 @@ const FORMTYPE_LABELS: Record<string, string> = {
   reapplication: "Re-Application",
   drawdown:      "Drawdown",
   payment:       "Payment",
-  upload:        "Upload",
   approval:      "Approval",
   undertaking:   "Undertaking",
   unknown:       "",
 };
 
-const STATUS_CONFIG: Record<string, { label: string; colour: string; badge: "success"|"warning"|"neutral"|"danger" }> = {
-  signed:      { label: "Signed",      colour: "text-emerald-400", badge: "success" },
-  pending:     { label: "Pending",     colour: "text-yellow-400",  badge: "warning" },
-  application: { label: "Application", colour: "text-blue-400",    badge: "neutral" },
-  disbursed:   { label: "Disbursed",   colour: "text-purple-400",  badge: "success" },
-  expired:     { label: "Expired",     colour: "text-red-400",     badge: "danger"  },
-};
+function isNovafeeds(a: any) {
+  return (
+    a.loanProduct === "Novafeeds" ||
+    (a.retailerName && a.retailerName.toLowerCase().includes("novafeed"))
+  );
+}
 
 export default function AgreementsPage() {
   const [, navigate] = useLocation();
-  const { data: agreements, isLoading, refetch } = useListAgreements();
+  const { data: allAgreements, isLoading } = useListAgreements();
   const { data: retailers } = useListRetailers();
   const queryClient = useQueryClient();
   const createMutation = useCreateAgreement();
 
-  // ── Filters ──────────────────────────────────────────────────────────────
-  const [searchTerm,     setSearchTerm]     = useState("");
-  const [productFilter,  setProductFilter]  = useState("all");
-  const [statusFilter,   setStatusFilter]   = useState("all");
-  const [retailerFilter, setRetailerFilter] = useState("");
-  const [branchFilter,   setBranchFilter]   = useState("");
+  // Only show Novafeeds agreements
+  const agreements = useMemo(
+    () => (allAgreements ?? []).filter(isNovafeeds),
+    [allAgreements]
+  );
 
-  // branch list keyed to retailer filter
-  const { data: filterBranches } = useListBranches(Number(retailerFilter), {
-    query: { enabled: !!retailerFilter },
-  });
+  // ── Filters ──────────────────────────────────────────────────────────────
+  const [searchTerm,   setSearchTerm]   = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   // ── Bulk select ───────────────────────────────────────────────────────────
-  const [selected,     setSelected]     = useState<Set<number>>(new Set());
-  const [bulkLoading,  setBulkLoading]  = useState(false);
+  const [selected,    setSelected]    = useState<Set<number>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   // ── Create form ───────────────────────────────────────────────────────────
   const [isModalOpen,  setIsModalOpen]  = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [retailerId,   setRetailerId]   = useState("");
   const [branchId,     setBranchId]     = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [loanProduct,  setLoanProduct]  = useState("HukuPlus");
   const [loanAmount,   setLoanAmount]   = useState("");
   const [pdfUrl,       setPdfUrl]       = useState("");
 
-  const { data: createBranches } = useListBranches(Number(retailerId), { query: { enabled: !!retailerId } });
+  // Novafeeds retailer id from loaded retailers
+  const novaRetailer = useMemo(
+    () => retailers?.find(r => r.name.toLowerCase().includes("novafeed")),
+    [retailers]
+  );
+  const { data: novaBranches } = useListBranches(novaRetailer?.id ?? 0, {
+    query: { enabled: !!novaRetailer },
+  });
 
   // ── CSV import ────────────────────────────────────────────────────────────
   const [csvFile,      setCsvFile]      = useState<File | null>(null);
@@ -90,26 +92,17 @@ export default function AgreementsPage() {
 
   // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    return (agreements ?? []).filter(a => {
+    return agreements.filter(a => {
       if (searchTerm && !a.customerName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-      if (productFilter !== "all") {
-        const match = a.loanProduct === productFilter || (productFilter === "HukuPlus" && a.loanProduct === "Novafeeds");
-        if (!match) return false;
-      }
       if (statusFilter !== "all" && a.status !== statusFilter) return false;
-      if (retailerFilter && String(a.retailerId) !== retailerFilter) return false;
-      if (branchFilter && String(a.branchId) !== branchFilter) return false;
       return true;
     });
-  }, [agreements, searchTerm, productFilter, statusFilter, retailerFilter, branchFilter]);
+  }, [agreements, searchTerm, statusFilter]);
 
-  // ── Status summary counts (across ALL agreements, not just filtered) ──────
+  // ── Status counts ─────────────────────────────────────────────────────────
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: 0, signed: 0, pending: 0, application: 0, disbursed: 0, expired: 0 };
-    (agreements ?? []).forEach(a => {
-      c.all++;
-      if (c[a.status] !== undefined) c[a.status]++;
-    });
+    const c: Record<string, number> = { all: 0, signed: 0, pending: 0, disbursed: 0, expired: 0 };
+    agreements.forEach(a => { c.all++; if (c[a.status] !== undefined) c[a.status]++; });
     return c;
   }, [agreements]);
 
@@ -134,23 +127,25 @@ export default function AgreementsPage() {
       });
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
-    } finally {
-      setBulkLoading(false);
-    }
+    } finally { setBulkLoading(false); }
   };
 
   // ── Create ────────────────────────────────────────────────────────────────
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!novaRetailer) return;
     createMutation.mutate({ data: {
-      retailerId: Number(retailerId), branchId: Number(branchId),
-      customerName, loanProduct, loanAmount: Number(loanAmount),
+      retailerId: novaRetailer.id,
+      branchId: Number(branchId),
+      customerName,
+      loanProduct: "HukuPlus",
+      loanAmount: Number(loanAmount),
       formitizeFormUrl: pdfUrl.trim() || null,
     }}, {
       onSuccess: () => {
         setIsModalOpen(false);
         queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
-        setRetailerId(""); setBranchId(""); setCustomerName(""); setLoanAmount(""); setPdfUrl("");
+        setBranchId(""); setCustomerName(""); setLoanAmount(""); setPdfUrl("");
       }
     });
   };
@@ -177,27 +172,19 @@ export default function AgreementsPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const PRODUCTS = [
-    { id: "all",           label: "All Products" },
-    { id: "HukuPlus",      label: "HukuPlus"      },
-    { id: "ChikweretiOne", label: "ChikweretiOne"  },
-    { id: "Revolver",      label: "Revolver"       },
-  ];
-
   const STATUS_TABS = [
-    { id: "all",         label: "All"         },
-    { id: "application", label: "Applications" },
-    { id: "pending",     label: "Pending Sign" },
-    { id: "signed",      label: "Signed"       },
-    { id: "disbursed",   label: "Disbursed"    },
-    { id: "expired",     label: "Expired"      },
+    { id: "all",      label: "All"          },
+    { id: "pending",  label: "Pending Sign" },
+    { id: "signed",   label: "Signed"       },
+    { id: "disbursed",label: "Disbursed"    },
+    { id: "expired",  label: "Expired"      },
   ];
 
   return (
     <div className="pb-10">
       <PageHeader
-        title="Loan Agreements"
-        description="Monitor status, create signing gateways, and review executed contracts."
+        title="Novafeeds Kiosk"
+        description="HukuPlusCentral-managed signing agreements for Novafeeds stores. All other retailers are managed directly in Formitize."
         action={
           <div className="flex gap-2">
             <button
@@ -213,15 +200,23 @@ export default function AgreementsPage() {
         }
       />
 
+      {/* ── Info note ── */}
+      <div className="flex items-start gap-2.5 mb-5 px-4 py-3 rounded-xl bg-blue-500/5 border border-blue-500/15 text-sm text-blue-300/80">
+        <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-400" />
+        <p>
+          Profeeds and other retailer agreements are handled directly in Formitize and are not actioned here.
+          View a customer's full loan history across all retailers in the <a href={`${BASE.replace(/\/$/, "")}/customers`} className="underline text-blue-300 hover:text-white transition-colors">Customers</a> record.
+        </p>
+      </div>
+
       {/* ── Status Summary ── */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
         {[
-          { key: "all",         label: "Total",        colour: "text-white",         bg: "bg-white/5  border-white/10"  },
-          { key: "application", label: "Applications", colour: "text-blue-400",      bg: "bg-blue-500/5   border-blue-500/20"   },
-          { key: "pending",     label: "Awaiting Sign",colour: "text-yellow-400",    bg: "bg-yellow-500/5 border-yellow-500/20" },
-          { key: "signed",      label: "Signed",       colour: "text-emerald-400",   bg: "bg-emerald-500/5 border-emerald-500/20"},
-          { key: "disbursed",   label: "Disbursed",    colour: "text-purple-400",    bg: "bg-purple-500/5 border-purple-500/20" },
-          { key: "expired",     label: "Expired",      colour: "text-red-400",       bg: "bg-red-500/5    border-red-500/20"    },
+          { key: "all",      label: "Total",        colour: "text-white",          bg: "bg-white/5  border-white/10"           },
+          { key: "pending",  label: "Awaiting Sign", colour: "text-yellow-400",    bg: "bg-yellow-500/5 border-yellow-500/20"  },
+          { key: "signed",   label: "Signed",        colour: "text-emerald-400",   bg: "bg-emerald-500/5 border-emerald-500/20"},
+          { key: "disbursed",label: "Disbursed",     colour: "text-purple-400",    bg: "bg-purple-500/5 border-purple-500/20"  },
+          { key: "expired",  label: "Expired",       colour: "text-red-400",       bg: "bg-red-500/5    border-red-500/20"     },
         ].map(s => (
           <button
             key={s.key}
@@ -230,25 +225,6 @@ export default function AgreementsPage() {
           >
             <p className={`text-2xl font-bold ${s.colour}`}>{counts[s.key] ?? 0}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-          </button>
-        ))}
-      </div>
-
-      {/* ── Product tabs ── */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
-        {PRODUCTS.map(p => (
-          <button
-            key={p.id}
-            onClick={() => setProductFilter(p.id)}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-200 ${
-              productFilter === p.id
-                ? p.id === "all"
-                  ? "bg-white/10 border-white/20 text-white"
-                  : `border ${PRODUCT_COLOURS[p.id] ?? "text-white bg-white/10 border-white/20"}`
-                : "border-transparent text-muted-foreground hover:bg-white/5 hover:text-white"
-            }`}
-          >
-            {p.label}
           </button>
         ))}
       </div>
@@ -265,31 +241,6 @@ export default function AgreementsPage() {
               className="pl-9 py-2 bg-transparent border-transparent focus:border-white/10"
             />
           </div>
-
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
-            <select
-              value={retailerFilter}
-              onChange={e => { setRetailerFilter(e.target.value); setBranchFilter(""); }}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white/20"
-            >
-              <option value="">All Retailers</option>
-              {retailers?.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-
-            {retailerFilter && (
-              <select
-                value={branchFilter}
-                onChange={e => setBranchFilter(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white/20"
-              >
-                <option value="">All Branches</option>
-                {filterBranches?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            )}
-          </div>
-
-          {/* Status sub-tabs */}
           <div className="flex items-center gap-1 flex-wrap">
             {STATUS_TABS.map(s => (
               <button
@@ -334,10 +285,7 @@ export default function AgreementsPage() {
               >
                 <XCircle className="w-3.5 h-3.5" /> Mark Expired
               </button>
-              <button
-                onClick={() => setSelected(new Set())}
-                className="px-3 py-1.5 text-xs text-muted-foreground hover:text-white"
-              >
+              <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-white">
                 Clear
               </button>
             </div>
@@ -357,16 +305,16 @@ export default function AgreementsPage() {
                   />
                 </th>
                 <th className="p-4">Customer</th>
-                <th className="p-4">Product & Form</th>
+                <th className="p-4">Branch</th>
                 <th className="p-4">Amount</th>
-                <th className="p-4">Location</th>
+                <th className="p-4">Form Type</th>
                 <th className="p-4">Status</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {isLoading && (
-                <tr><td colSpan={7} className="p-8 text-center animate-pulse text-muted-foreground">Loading agreements...</td></tr>
+                <tr><td colSpan={7} className="p-8 text-center animate-pulse text-muted-foreground">Loading...</td></tr>
               )}
               {filtered.map((a) => (
                 <tr
@@ -388,25 +336,21 @@ export default function AgreementsPage() {
                     </p>
                   </td>
                   <td className="p-4">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${PRODUCT_COLOURS[a.loanProduct] ?? "text-muted-foreground bg-white/5 border-white/10"}`}>
-                        {a.loanProduct === "Novafeeds" ? "HukuPlus" : a.loanProduct}
-                      </span>
-                      {(a as any).formType && (a as any).formType !== "agreement" && (a as any).formType !== "unknown" && (
-                        <span className="text-xs text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
-                          {FORMTYPE_LABELS[(a as any).formType] ?? (a as any).formType}
-                        </span>
-                      )}
-                    </div>
+                    <p className="text-sm text-foreground">{a.branchName || <span className="text-muted-foreground">—</span>}</p>
                   </td>
                   <td className="p-4">
                     <p className="text-sm font-medium">
-                      {(a.loanAmount ?? 0) > 0 ? `USD ${a.loanAmount!.toLocaleString()}` : <span className="text-muted-foreground">—</span>}
+                      {(a.loanAmount ?? 0) > 0
+                        ? `USD ${a.loanAmount!.toLocaleString()}`
+                        : <span className="text-muted-foreground">—</span>}
                     </p>
                   </td>
                   <td className="p-4">
-                    <p className="text-sm text-foreground">{(a.retailerName as string) || <span className="text-muted-foreground">—</span>}</p>
-                    <p className="text-xs text-muted-foreground">{a.branchName || ""}</p>
+                    {(a as any).formType && (a as any).formType !== "unknown" ? (
+                      <span className="text-xs text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                        {FORMTYPE_LABELS[(a as any).formType] ?? (a as any).formType}
+                      </span>
+                    ) : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="p-4">
                     {(() => {
@@ -414,7 +358,6 @@ export default function AgreementsPage() {
                       if (!cfg) return <Badge status="neutral">{a.status}</Badge>;
                       const Icon = a.status === "signed" || a.status === "disbursed" ? CheckCircle2
                         : a.status === "pending" ? Clock
-                        : a.status === "application" ? FileText
                         : XCircle;
                       return (
                         <Badge status={cfg.badge}>
@@ -433,7 +376,7 @@ export default function AgreementsPage() {
                           <ScrollText className="w-3.5 h-3.5" /> Certificate
                         </button>
                       ) : a.status === "application" ? (
-                        <span className="text-xs text-muted-foreground italic px-3 py-1.5">Awaiting processing</span>
+                        <span className="text-xs text-muted-foreground italic px-3 py-1.5">Awaiting</span>
                       ) : (
                         <>
                           <a
@@ -451,7 +394,7 @@ export default function AgreementsPage() {
                           >
                             {copiedId === a.id
                               ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
-                              : <><Copy className="w-3.5 h-3.5" /></>
+                              : <Copy className="w-3.5 h-3.5" />
                             }
                           </button>
                         </>
@@ -463,7 +406,7 @@ export default function AgreementsPage() {
               {filtered.length === 0 && !isLoading && (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                    No agreements match the current filters.
+                    No Novafeeds kiosk agreements found.
                   </td>
                 </tr>
               )}
@@ -473,47 +416,28 @@ export default function AgreementsPage() {
 
         {filtered.length > 0 && (
           <div className="px-4 py-3 border-t border-white/5 bg-black/10 text-xs text-muted-foreground">
-            Showing {filtered.length} of {agreements?.length ?? 0} agreements
+            Showing {filtered.length} of {agreements.length} Novafeeds agreements
           </div>
         )}
       </GlassCard>
 
-      {/* ── Create Agreement Modal ── */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Issue Loan Agreement">
+      {/* ── Issue Agreement Modal ── */}
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Issue Novafeeds Kiosk Agreement">
         <form onSubmit={handleCreate} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Retailer</Label>
-              <Select required value={retailerId} onChange={e => setRetailerId(e.target.value)}>
-                <option value="">Select Retailer</option>
-                {retailers?.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <Label>Branch</Label>
-              <Select required disabled={!retailerId} value={branchId} onChange={e => setBranchId(e.target.value)}>
-                <option value="">Select Branch</option>
-                {createBranches?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </Select>
-            </div>
+          <div>
+            <Label>Branch</Label>
+            <Select required value={branchId} onChange={e => setBranchId(e.target.value)}>
+              <option value="">Select Novafeeds Branch</option>
+              {novaBranches?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
           </div>
           <div>
             <Label>Customer Full Name</Label>
             <Input required placeholder="Jane Doe" value={customerName} onChange={e => setCustomerName(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Loan Product</Label>
-              <Select required value={loanProduct} onChange={e => setLoanProduct(e.target.value)}>
-                <option value="HukuPlus">HukuPlus (Broiler Feed)</option>
-                <option value="Revolver">Revolver (Layer Feed)</option>
-                <option value="ChikweretiOne">ChikweretiOne (Payroll)</option>
-              </Select>
-            </div>
-            <div>
-              <Label>Amount (USD)</Label>
-              <Input type="number" required placeholder="500" min="1" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} />
-            </div>
+          <div>
+            <Label>Amount (USD)</Label>
+            <Input type="number" required placeholder="500" min="1" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} />
           </div>
           <div>
             <Label>Formitize PDF URL <span className="text-muted-foreground font-normal">(optional)</span></Label>
@@ -601,7 +525,6 @@ export default function AgreementsPage() {
                   <p className="text-xs text-red-300">Errors</p>
                 </div>
               </div>
-
               {importResult.agreements.length > 0 && (
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Imported</p>
@@ -618,24 +541,14 @@ export default function AgreementsPage() {
                   ))}
                 </div>
               )}
-
               {importResult.errors.length > 0 && (
-                <div className="space-y-2">
+                <div className="space-y-1 max-h-36 overflow-y-auto">
                   <p className="text-xs font-medium text-red-400 uppercase tracking-wider">Errors</p>
-                  <div className="space-y-1 max-h-36 overflow-y-auto">
-                    {importResult.errors.map((e, i) => (
-                      <p key={i} className="text-xs text-red-300/80 bg-red-500/5 rounded px-2 py-1">{e}</p>
-                    ))}
-                  </div>
-                  {importResult.detectedColumns && (
-                    <details className="text-xs text-muted-foreground">
-                      <summary className="cursor-pointer hover:text-white">Show detected columns ({importResult.detectedColumns.length})</summary>
-                      <p className="mt-1 bg-white/5 rounded px-2 py-1 font-mono break-all">{importResult.detectedColumns.join(", ")}</p>
-                    </details>
-                  )}
+                  {importResult.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-red-300/80 bg-red-500/5 rounded px-2 py-1">{e}</p>
+                  ))}
                 </div>
               )}
-
               <div className="flex justify-end gap-3 pt-2">
                 <button onClick={resetImport} className="px-4 py-2 text-sm text-muted-foreground hover:text-white">Import another</button>
                 <GradientButton onClick={() => setIsImportOpen(false)}>Done</GradientButton>

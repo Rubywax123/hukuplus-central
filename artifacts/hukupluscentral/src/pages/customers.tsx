@@ -498,29 +498,44 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
               </div>
             )}
 
-            {/* Agreements */}
+            {/* Loan History */}
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-                <FileSignature className="w-3.5 h-3.5" /> Agreement History ({agreements.length})
+                <FileSignature className="w-3.5 h-3.5" /> Loan History ({agreements.length})
               </p>
               {agreements.length === 0 ? (
-                <p className="text-sm text-muted-foreground italic">No agreements on record</p>
+                <p className="text-sm text-muted-foreground italic">No loan records on file</p>
               ) : (
                 <div className="space-y-2">
-                  {agreements.map(a => (
-                    <div key={a.id} className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-white">{a.loanProduct}</span>
-                        <span className={statusBadge(a.status)}>{a.status}</span>
+                  {agreements.map(a => {
+                    const isKiosk = a.loanProduct === "Novafeeds" ||
+                      (a.retailerName?.toLowerCase().includes("novafeed") ?? false);
+                    return (
+                      <div key={a.id} className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-white">
+                            {a.loanProduct === "Novafeeds" ? "HukuPlus" : a.loanProduct}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {isKiosk ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 border border-primary/20 text-primary font-medium">Kiosk</span>
+                            ) : (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-muted-foreground font-medium">Formitize</span>
+                            )}
+                            <span className={statusBadge(a.status)}>{a.status}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          <span>{formatUSD(a.loanAmount)}</span>
+                          {a.retailerName && <><span>&middot;</span><span>{a.retailerName}</span></>}
+                          {a.branchName && <><span>&middot;</span><span>{a.branchName}</span></>}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDate(a.createdAt)}{a.signedAt ? ` — Signed ${formatDate(a.signedAt)}` : ""}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>{formatUSD(a.loanAmount)}</span>
-                        {a.retailerName && <><span>&middot;</span><span>{a.retailerName}</span></>}
-                        {a.branchName && <><span>&middot;</span><span>{a.branchName}</span></>}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{formatDate(a.createdAt)}{a.signedAt ? ` — Signed ${formatDate(a.signedAt)}` : ""}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
