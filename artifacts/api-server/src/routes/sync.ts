@@ -86,9 +86,17 @@ export async function syncHukuPlusStores() {
       );
 
       if (!branchExists) {
-        await db.insert(branchesTable).values({ retailerId, name: bName, isActive: true });
+        await db.insert(branchesTable).values({ retailerId, name: bName, isActive: store.enabled ?? true });
         results.branchesCreated++;
       } else {
+        // Update isActive status if it has changed in HukuPlus
+        const matched = existingBranches.find(b => b.name.toLowerCase() === bName.toLowerCase());
+        if (matched && matched.isActive !== (store.enabled ?? true)) {
+          await db
+            .update(branchesTable)
+            .set({ isActive: store.enabled ?? true })
+            .where(eq(branchesTable.id, matched.id));
+        }
         results.branchesSkipped++;
       }
     } catch (err: any) {

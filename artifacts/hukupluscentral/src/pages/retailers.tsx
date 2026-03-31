@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useListRetailers, useCreateRetailer, useListBranches, useCreateBranch, useUpdateRetailer, useUpdateBranch, useDeleteBranch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label } from "@/components/ui-extras";
-import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle, RefreshCcw, Pencil, Trash2 } from "lucide-react";
+import { Plus, Building, MapPin, Users, ShieldCheck, Store, KeyRound, UserX, RefreshCw, ChevronDown, ChevronRight, Eye, EyeOff, Upload, CheckCircle, AlertCircle, RefreshCcw, Pencil, Trash2, Share2 } from "lucide-react";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { customFetch } from "@workspace/api-client-react";
@@ -757,8 +757,10 @@ export default function RetailersPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
   const [editingRetailer, setEditingRetailer] = useState<any | null>(null);
   const [syncResult, setSyncResult] = useState<{ retailersCreated: number; branchesCreated: number; branchesSkipped: number; totalFromHukuPlus: number } | null>(null);
+  const [pushResult, setPushResult] = useState<{ retailersCreated: number; branchesCreated: number; branchesSkipped: number } | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<Record<number, "branches" | "portal">>({}); 
 
@@ -789,6 +791,19 @@ export default function RetailersPage() {
     }
   };
 
+  const handleRevolverPush = async () => {
+    setIsPushing(true);
+    setPushResult(null);
+    try {
+      const result = await customFetch("/api/sync/revolver", { method: "POST" });
+      setPushResult(result);
+    } catch (err) {
+      console.error("Revolver push failed", err);
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
   const getTab = (id: number) => activeTab[id] ?? "branches";
   const setTab = (id: number, tab: "branches" | "portal") => setActiveTab(prev => ({ ...prev, [id]: tab }));
 
@@ -806,6 +821,14 @@ export default function RetailersPage() {
             >
               <RefreshCcw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
               {isSyncing ? "Syncing..." : "Sync from HukuPlus"}
+            </button>
+            <button
+              onClick={handleRevolverPush}
+              disabled={isPushing}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-sm font-medium text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+            >
+              <Share2 className={`w-4 h-4 ${isPushing ? "animate-pulse" : ""}`} />
+              {isPushing ? "Pushing..." : "Push to Revolver"}
             </button>
             <button
               onClick={() => setIsBulkModalOpen(true)}
@@ -833,6 +856,24 @@ export default function RetailersPage() {
               </p>
             </div>
             <button onClick={() => setSyncResult(null)} className="text-muted-foreground hover:text-white text-xs px-2">Dismiss</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {pushResult && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="mb-6 flex items-center gap-4 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20"
+          >
+            <CheckCircle className="w-5 h-5 text-blue-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-white">Push to Revolver complete</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {pushResult.retailersCreated} retailers added · {pushResult.branchesCreated} branches added · {pushResult.branchesSkipped} already in sync
+              </p>
+            </div>
+            <button onClick={() => setPushResult(null)} className="text-muted-foreground hover:text-white text-xs px-2">Dismiss</button>
           </motion.div>
         )}
       </AnimatePresence>

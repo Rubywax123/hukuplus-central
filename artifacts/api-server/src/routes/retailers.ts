@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, retailersTable, branchesTable } from "@workspace/db";
+import { syncRevolverStores } from "./sync";
 import {
   CreateRetailerBody,
   UpdateRetailerBody,
@@ -15,6 +16,12 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+function pushToRevolver() {
+  syncRevolverStores().catch(err =>
+    console.warn("[sync:revolver] background push failed:", err.message)
+  );
+}
 
 router.get("/retailers", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
@@ -41,6 +48,7 @@ router.post("/retailers", async (req, res): Promise<void> => {
     return;
   }
   const [retailer] = await db.insert(retailersTable).values(parsed.data).returning();
+  pushToRevolver();
   res.status(201).json({ ...retailer, branchCount: 0 });
 });
 
@@ -112,6 +120,7 @@ router.post("/retailers/bulk-import", async (req, res): Promise<void> => {
     }
   }
 
+  pushToRevolver();
   res.status(200).json(results);
 });
 
@@ -161,6 +170,7 @@ router.patch("/retailers/:retailerId", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Retailer not found" });
     return;
   }
+  pushToRevolver();
   res.json({ ...retailer, branchCount: null });
 });
 
@@ -201,6 +211,7 @@ router.post("/retailers/:retailerId/branches", async (req, res): Promise<void> =
     .insert(branchesTable)
     .values({ ...parsed.data, retailerId: params.data.retailerId })
     .returning();
+  pushToRevolver();
   res.status(201).json(branch);
 });
 
@@ -228,6 +239,7 @@ router.patch("/retailers/:retailerId/branches/:branchId", async (req, res): Prom
     res.status(404).json({ error: "Branch not found" });
     return;
   }
+  pushToRevolver();
   res.json(branch);
 });
 
@@ -242,6 +254,7 @@ router.delete("/retailers/:retailerId/branches/:branchId", async (req, res): Pro
     return;
   }
   await db.delete(branchesTable).where(eq(branchesTable.id, params.data.branchId));
+  pushToRevolver();
   res.sendStatus(204);
 });
 
