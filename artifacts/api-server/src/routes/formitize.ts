@@ -544,16 +544,19 @@ router.post("/formitize/webhook", async (req, res) => {
 
   // ── Agreement and Application forms — create a record ─────────────────────
   // "New Customer Application" forms use a different field layout:
-  //   formtext_1 = store/branch name, formtext_2 = customer name
-  // All other forms use the standard layout where formtext_1 = customer name.
+  //   formtext_1 = store/branch name
+  //   formtext_2 = store MANAGER name (NOT the customer)
+  //   formtext_6 = actual borrower/customer name
+  // All other forms use the standard layout where named semantic fields come first.
   const isNewCustomerForm = formName.includes("new customer");
 
   // Extract customer identity fields (broad search across all product field names)
   const customerName = isNewCustomerForm
-    ? (findField("formtext_2") || findField(
+    ? (findField(
+        "formtext_6",              // borrower/customer name slot in new-customer forms
         "formcrm_1", "borrowername", "clientname", "customername",
-        "fullname", "full name", "name", "formtext_1"
-      ))
+        "fullname", "full name", "name"
+      ) || findField("formtext_2")) // last resort: might fall to store manager name on older forms
     : findField(
         "formcrm_1", "borrowername", "clientname", "customername",
         "employeename", "employee name", "debtorname", "debtor name",

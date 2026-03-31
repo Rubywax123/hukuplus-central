@@ -376,6 +376,30 @@ export async function runMigrations() {
       WHERE customer_name = 'Mazowe Profarmer';
     `);
 
+    // ── Data correction: PHIRI YASSIN → FRANCIS CHIMISO ────────────────────────
+    // New Customer Application form: formtext_2 = store manager, formtext_6 = actual customer.
+    // The webhook incorrectly stored the store manager name as the customer name.
+    await client.query(`
+      UPDATE customers
+      SET full_name = 'FRANCIS CHIMISO'
+      WHERE full_name = 'PHIRI YASSIN';
+    `);
+    await client.query(`
+      UPDATE agreements
+      SET customer_name = 'FRANCIS CHIMISO'
+      WHERE customer_name = 'PHIRI YASSIN';
+    `);
+    await client.query(`
+      UPDATE activity
+      SET description = REPLACE(description, 'PHIRI YASSIN', 'FRANCIS CHIMISO')
+      WHERE description ILIKE '%phiri yassin%';
+    `);
+    await client.query(`
+      UPDATE formitize_notifications
+      SET customer_name = 'FRANCIS CHIMISO'
+      WHERE customer_name ILIKE '%phiri yassin%';
+    `);
+
     // ── Data correction: Archiford Sibanda — wrong retailer/branch (Novafeeds → Profeeds Lupane) ──
     // formtext_5 = "Lupane" and storeemail_1 = "lupane@profeeds.co.zw" confirm Profeeds Lupane.
     // Fix agreement, activity, and notification records.
