@@ -644,10 +644,15 @@ router.post("/formitize/webhook", async (req, res) => {
     // The store email (storeemail_1 / sendemail) can identify the retailer from its domain
     // (e.g. "lupane@profeeds.co.zw" → retailer "profeeds").
     // Search ALL retailers' branches for the correct match; fall back to Novafeeds if nothing found.
-    const storeBranchName = findField("formtext_5", "storebranch", "store branch", "branchname");
+    // formtext_3 is used by the re-application form for store name; formtext_5 for standard agreements
+    const storeBranchName = findField("formtext_5", "formtext_3", "storebranch", "store branch", "branchname");
 
-    // Extract retailer hint from store email domain
-    const storeEmailRaw = (fieldMap["storeemail_1"] || fieldMap["sendemail"] || "").trim();
+    // Extract retailer hint from store email — field name differs between form types:
+    // storeemail_1 / sendemail (standard), sendmail / formemail_1 (re-application)
+    const storeEmailRaw = (
+      fieldMap["storeemail_1"] || fieldMap["sendemail"] ||
+      fieldMap["sendmail"]     || fieldMap["formemail_1"] || ""
+    ).trim();
     const emailDomain = storeEmailRaw.includes("@") ? storeEmailRaw.split("@")[1] : "";
     const retailerHint = emailDomain.split(".")[0]?.toLowerCase() || ""; // e.g. "profeeds" from "lupane@profeeds.co.zw"
 

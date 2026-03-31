@@ -491,6 +491,42 @@ export async function runMigrations() {
         AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
     `);
 
+    // ── Data correction: Ever Nyangadza — re-application received with no store email/branch
+    // fields populated so retailer resolution fell back to Novafeeds; confirmed Profeeds Rusape ──
+    await client.query(`
+      UPDATE agreements
+      SET
+        retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1),
+        branch_id   = (
+          SELECT b.id FROM branches b
+          JOIN retailers r ON r.id = b.retailer_id
+          WHERE r.name ILIKE '%profeed%' AND b.name ILIKE '%rusape%'
+          LIMIT 1
+        )
+      WHERE customer_name ILIKE '%ever nyangadza%'
+        AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%novafeed%' LIMIT 1);
+    `);
+    await client.query(`
+      UPDATE activity
+      SET retailer_name = 'Profeeds',
+          branch_name   = 'Rusape',
+          description   = REPLACE(description, '@ Novafeeds', '@ Profeeds')
+      WHERE description ILIKE '%ever nyangadza%'
+        AND (retailer_name ILIKE '%novafeed%' OR description ILIKE '%novafeeds%');
+    `);
+    await client.query(`
+      UPDATE activity
+      SET retailer_name = 'Profeeds', branch_name = 'Rusape'
+      WHERE description ILIKE '%ever nyangadza%'
+        AND (retailer_name IS NULL OR retailer_name = '');
+    `);
+    await client.query(`
+      UPDATE formitize_notifications
+      SET retailer_name = 'Profeeds', branch_name = 'Rusape'
+      WHERE customer_name ILIKE '%ever nyangadza%'
+        AND (retailer_name ILIKE '%novafeed%' OR retailer_name IS NULL);
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
