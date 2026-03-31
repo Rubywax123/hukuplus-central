@@ -544,6 +544,40 @@ export async function runMigrations() {
         AND (loan_amount = 0 OR loan_amount IS NULL);
     `);
 
+    // ── Retailer and Branch mapping tables (cross-system ID tracking) ──
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS retailer_mappings (
+        id                   SERIAL PRIMARY KEY,
+        central_retailer_id  INTEGER NOT NULL UNIQUE REFERENCES retailers(id) ON DELETE CASCADE,
+        revolver_retailer_id INTEGER,
+        hukuplus_retailer_id INTEGER,
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS branch_mappings (
+        id                  SERIAL PRIMARY KEY,
+        central_branch_id   INTEGER NOT NULL UNIQUE REFERENCES branches(id) ON DELETE CASCADE,
+        revolver_branch_id  INTEGER,
+        hukuplus_store_id   INTEGER,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // Backfill mapping rows for all existing retailers and branches (with no external IDs yet)
+    await client.query(`
+      INSERT INTO retailer_mappings (central_retailer_id)
+      SELECT id FROM retailers
+      ON CONFLICT (central_retailer_id) DO NOTHING;
+    `);
+    await client.query(`
+      INSERT INTO branch_mappings (central_branch_id)
+      SELECT id FROM branches
+      ON CONFLICT (central_branch_id) DO NOTHING;
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

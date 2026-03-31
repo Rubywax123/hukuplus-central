@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, retailersTable, branchesTable } from "@workspace/db";
-import { syncRevolverStores } from "./sync";
+import { syncRevolverStores, pushRetailerRenameToRevolver, pushBranchRenameToRevolver } from "./sync";
 import {
   CreateRetailerBody,
   UpdateRetailerBody,
@@ -161,6 +161,7 @@ router.patch("/retailers/:retailerId", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  const [before] = await db.select().from(retailersTable).where(eq(retailersTable.id, params.data.retailerId));
   const [retailer] = await db
     .update(retailersTable)
     .set(parsed.data)
@@ -169,6 +170,10 @@ router.patch("/retailers/:retailerId", async (req, res): Promise<void> => {
   if (!retailer) {
     res.status(404).json({ error: "Retailer not found" });
     return;
+  }
+  // If name changed, immediately patch Revolver via the mapping; otherwise full push handles the rest
+  if (before && parsed.data.name && before.name !== parsed.data.name) {
+    pushRetailerRenameToRevolver(retailer.id, retailer.name).catch(() => {});
   }
   pushToRevolver();
   res.json({ ...retailer, branchCount: null });
@@ -230,6 +235,7 @@ router.patch("/retailers/:retailerId/branches/:branchId", async (req, res): Prom
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  const [before] = await db.select().from(branchesTable).where(eq(branchesTable.id, params.data.branchId));
   const [branch] = await db
     .update(branchesTable)
     .set(parsed.data)
@@ -238,6 +244,10 @@ router.patch("/retailers/:retailerId/branches/:branchId", async (req, res): Prom
   if (!branch) {
     res.status(404).json({ error: "Branch not found" });
     return;
+  }
+  // If name changed, immediately patch Revolver via the mapping
+  if (before && parsed.data.name && before.name !== parsed.data.name) {
+    pushBranchRenameToRevolver(branch.id, branch.name).catch(() => {});
   }
   pushToRevolver();
   res.json(branch);
