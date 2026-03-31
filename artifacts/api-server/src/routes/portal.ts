@@ -35,12 +35,16 @@ router.post("/portal/login", async (req, res) => {
     return;
   }
 
+  const [retailer] = await db.select({ name: retailersTable.name })
+    .from(retailersTable).where(eq(retailersTable.id, user.retailerId));
+
   const sid = await createPortalSession({
     portalUserId: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
     retailerId: user.retailerId,
+    retailerName: retailer?.name ?? "",
     branchId: user.branchId,
   });
 
@@ -51,6 +55,7 @@ router.post("/portal/login", async (req, res) => {
     email: user.email,
     role: user.role,
     retailerId: user.retailerId,
+    retailerName: retailer?.name ?? "",
     branchId: user.branchId,
     mustChangePassword: user.mustChangePassword,
   });
@@ -63,8 +68,16 @@ router.post("/portal/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/portal/me", requirePortalAuth, (req, res) => {
-  res.json(req.portalUser);
+router.get("/portal/me", requirePortalAuth, async (req, res) => {
+  const user = req.portalUser!;
+  // Always resolve retailerName live so old sessions without it still work
+  if (!user.retailerName) {
+    const [retailer] = await db.select({ name: retailersTable.name })
+      .from(retailersTable).where(eq(retailersTable.id, user.retailerId));
+    res.json({ ...user, retailerName: retailer?.name ?? "" });
+  } else {
+    res.json(user);
+  }
 });
 
 router.post("/portal/change-password", requirePortalAuth, async (req, res) => {
@@ -84,10 +97,24 @@ router.post("/portal/change-password", requirePortalAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Portal Agreements (filtered by role) ─────────────────────────────────────
+// ── Portal Agreements (Novafeeds kiosk only — ringfenced by retailer) ────────
 
 router.get("/portal/agreements", requirePortalAuth, async (req, res) => {
   const { retailerId, branchId, role } = req.portalUser!;
+  let retailerName = req.portalUser!.retailerName ?? "";
+
+  // Re-fetch retailerName for old sessions that predate the field
+  if (!retailerName) {
+    const [r] = await db.select({ name: retailersTable.name })
+      .from(retailersTable).where(eq(retailersTable.id, retailerId));
+    retailerName = r?.name ?? "";
+  }
+
+  // Ringfence: only Novafeeds portal users may access kiosk agreements
+  if (!retailerName.toLowerCase().includes("novafeed")) {
+    res.status(403).json({ error: "Kiosk agreements are restricted to Novafeeds portal users." });
+    return;
+  }
 
   let query = db
     .select({

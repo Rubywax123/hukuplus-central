@@ -15,6 +15,7 @@ export interface PortalSessionData {
   name: string;
   role: string;
   retailerId: number;
+  retailerName: string;
   branchId: number | null;
 }
 

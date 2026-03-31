@@ -38,6 +38,12 @@ router.get("/kiosk/:branchId", async (req, res): Promise<void> => {
     .from(retailersTable)
     .where(eq(retailersTable.id, branch.retailerId));
 
+  // Ringfence: kiosk is exclusively for Novafeeds branches
+  if (!retailer || !retailer.name.toLowerCase().includes("novafeed")) {
+    res.status(403).json({ error: "Kiosk access is restricted to Novafeeds branches." });
+    return;
+  }
+
   // Get the most recent pending agreement for this branch
   const [agreement] = await db
     .select()

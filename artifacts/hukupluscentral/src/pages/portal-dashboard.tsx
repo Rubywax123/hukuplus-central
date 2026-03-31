@@ -12,6 +12,7 @@ interface PortalUser {
   email: string;
   role: string;
   retailerId: number;
+  retailerName: string;
   branchId: number | null;
   mustChangePassword?: boolean;
 }
@@ -170,6 +171,28 @@ export default function PortalDashboardPage() {
   if (!me) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
       <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  const isNovafeeds = (me.retailerName ?? "").toLowerCase().includes("novafeed");
+
+  if (!isNovafeeds) return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md text-center bg-card/60 backdrop-blur-xl border border-white/10 rounded-2xl p-10">
+        <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+          <AlertCircle className="w-7 h-7 text-red-400" />
+        </div>
+        <h2 className="text-xl font-bold text-white mb-2">Access Restricted</h2>
+        <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
+          The Kiosk portal is exclusively available to Novafeeds store staff.
+          Your account ({me.retailerName || "unknown retailer"}) does not have access to this area.
+        </p>
+        <button onClick={handleLogout}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm text-white hover:bg-white/10 transition-colors">
+          <LogOut className="w-4 h-4" /> Sign out
+        </button>
+      </motion.div>
     </div>
   );
 
