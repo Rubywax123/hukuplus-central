@@ -15,6 +15,7 @@ import kioskRouter from "./kiosk";
 import customersRouter from "./customers";
 import xeroRouter from "./xero";
 import applicationsRouter from "./applications";
+import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(kioskRouter);
 router.use(customersRouter);
 router.use(xeroRouter);
 router.use(applicationsRouter);
+router.use(whatsappRouter);
 
 export default router;

@@ -3,6 +3,7 @@ export * from "./retailers";
 export * from "./branches";
 export * from "./retailerMappings";
 export * from "./branchMappings";
+export * from "./whatsappMessages";
 export * from "./customers";
 export * from "./agreements";
 export * from "./activity";

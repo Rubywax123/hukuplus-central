@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Bell, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Clock, User, Store,
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
-  Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle,
+  Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -823,10 +823,222 @@ function MessagesTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TAB 5 — WHATSAPP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface WaConversation {
+  waId: string;
+  senderName: string | null;
+  lastMessage: string | null;
+  direction: string;
+  lastAt: string;
+  unreadCount: number;
+}
+
+interface WaMessage {
+  id: number;
+  waId: string;
+  senderName: string | null;
+  messageText: string | null;
+  messageType: string;
+  direction: string;
+  createdAt: string;
+}
+
+function WhatsAppTab() {
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState<WaConversation | null>(null);
+  const [reply, setReply] = useState("");
+
+  const { data: convData, isLoading: loadingConvs } = useQuery<{
+    configured: boolean;
+    conversations: WaConversation[];
+  }>({
+    queryKey: ["wa-conversations"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/conversations`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const { data: messages = [], isLoading: loadingMsgs } = useQuery<WaMessage[]>({
+    queryKey: ["wa-messages", selected?.waId],
+    enabled: Boolean(selected),
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/conversations/${selected!.waId}/messages`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      qc.invalidateQueries({ queryKey: ["wa-conversations"] });
+      qc.invalidateQueries({ queryKey: ["wa-unread"] });
+      return r.json();
+    },
+    refetchInterval: 15_000,
+  });
+
+  const sendMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ waId: selected!.waId, messageText: reply }),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error ?? "Failed"); }
+      return r.json();
+    },
+    onSuccess: () => {
+      setReply("");
+      qc.invalidateQueries({ queryKey: ["wa-messages", selected?.waId] });
+      qc.invalidateQueries({ queryKey: ["wa-conversations"] });
+    },
+  });
+
+  if (loadingConvs) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+
+  if (!convData?.configured) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center space-y-4">
+        <div className="flex justify-center">
+          <div className="w-16 h-16 rounded-full bg-green-500/15 flex items-center justify-center">
+            <MessageCircle className="w-8 h-8 text-green-400" />
+          </div>
+        </div>
+        <div>
+          <h3 className="font-semibold text-foreground">WhatsApp Not Yet Connected</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+            Once your WATI account is approved, provide the API endpoint URL and API token and WhatsApp conversations will appear here.
+          </p>
+        </div>
+        <div className="inline-block rounded-lg bg-white/5 border border-white/10 px-4 py-3 text-left text-xs text-muted-foreground space-y-1">
+          <p><span className="text-foreground font-medium">Environment variable 1:</span> WATI_API_URL</p>
+          <p><span className="text-foreground font-medium">Environment variable 2:</span> WATI_API_TOKEN</p>
+        </div>
+      </div>
+    );
+  }
+
+  const conversations = convData.conversations ?? [];
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden" style={{ minHeight: 480 }}>
+      <div className="flex h-full" style={{ minHeight: 480 }}>
+
+        {/* Conversation list */}
+        <div className="w-64 shrink-0 border-r border-white/10 overflow-y-auto" style={{ maxHeight: 600 }}>
+          {conversations.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet</div>
+          ) : (
+            conversations.map(conv => (
+              <button
+                key={conv.waId}
+                onClick={() => setSelected(conv)}
+                className={cn(
+                  "w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors",
+                  selected?.waId === conv.waId && "bg-white/10"
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center shrink-0">
+                      <Phone className="w-3.5 h-3.5 text-green-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">{conv.senderName ?? conv.waId}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{conv.lastMessage ?? "—"}</p>
+                    </div>
+                  </div>
+                  {conv.unreadCount > 0 && (
+                    <span className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-green-500 text-[10px] font-bold text-white">
+                      {conv.unreadCount}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1 text-right">{ago(conv.lastAt)}</p>
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* Message thread */}
+        <div className="flex-1 flex flex-col" style={{ maxHeight: 600 }}>
+          {!selected ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+              <MessageCircle className="w-8 h-8 opacity-30" />
+              <span>Select a conversation</span>
+            </div>
+          ) : (
+            <>
+              {/* Header */}
+              <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-green-500/20 flex items-center justify-center">
+                  <Phone className="w-3 h-3 text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{selected.senderName ?? selected.waId}</p>
+                  <p className="text-[11px] text-muted-foreground">+{selected.waId}</p>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ maxHeight: 420 }}>
+                {loadingMsgs ? (
+                  <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+                ) : messages.length === 0 ? (
+                  <p className="text-center text-sm text-muted-foreground py-8">No messages yet</p>
+                ) : (
+                  messages.map(msg => (
+                    <div key={msg.id} className={cn("flex", msg.direction === "outbound" ? "justify-end" : "justify-start")}>
+                      <div className={cn(
+                        "max-w-[70%] px-3 py-2 rounded-2xl text-sm",
+                        msg.direction === "outbound"
+                          ? "bg-green-600 text-white rounded-br-sm"
+                          : "bg-white/10 text-foreground rounded-bl-sm"
+                      )}>
+                        <p>{msg.messageText ?? "[media]"}</p>
+                        <p className={cn("text-[10px] mt-0.5", msg.direction === "outbound" ? "text-green-200" : "text-muted-foreground")}>
+                          {fmt(msg.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Reply box */}
+              <div className="px-4 py-3 border-t border-white/10 flex gap-2">
+                <input
+                  value={reply}
+                  onChange={e => setReply(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && reply.trim()) sendMutation.mutate(); }}
+                  placeholder="Type a message…"
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/50"
+                />
+                <button
+                  onClick={() => reply.trim() && sendMutation.mutate()}
+                  disabled={!reply.trim() || sendMutation.isPending}
+                  className="px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded-lg text-white transition-colors"
+                >
+                  {sendMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {sendMutation.isError && (
+                <p className="px-4 pb-2 text-xs text-red-400">{String(sendMutation.error)}</p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "formitize" | "loans" | "drawdowns" | "messages";
+type Tab = "formitize" | "loans" | "drawdowns" | "messages" | "whatsapp";
 
 interface TabDef {
   id: Tab;
@@ -858,19 +1070,32 @@ export default function ActivityPage() {
     refetchInterval: 30_000,
   });
 
+  const { data: waUnread } = useQuery<{ count: number }>({
+    queryKey: ["wa-unread"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/unread-count`, { credentials: "include" });
+      if (!r.ok) return { count: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
   const formitizeBadge = counts?.newTotal ?? 0;
-  const drawdownBadge = ddCount?.count ?? 0;
+  const drawdownBadge  = ddCount?.count ?? 0;
+  const waBadge        = waUnread?.count ?? 0;
 
   const TABS: TabDef[] = [
     { id: "formitize",  label: "Formitize",       icon: <Bell className="w-4 h-4" /> },
     { id: "loans",      label: "Loan Requests",   icon: <Egg className="w-4 h-4" /> },
     { id: "drawdowns",  label: "Drawdowns",       icon: <ArrowDownCircle className="w-4 h-4" /> },
     { id: "messages",   label: "Store Messages",  icon: <MessageSquare className="w-4 h-4" /> },
+    { id: "whatsapp",   label: "WhatsApp",         icon: <MessageCircle className="w-4 h-4" /> },
   ];
 
   const getBadge = (id: Tab) => {
     if (id === "formitize") return formitizeBadge;
     if (id === "drawdowns") return drawdownBadge;
+    if (id === "whatsapp")  return waBadge;
     return 0;
   };
 
@@ -903,6 +1128,7 @@ export default function ActivityPage() {
       {tab === "loans"      && <LoansTab />}
       {tab === "drawdowns"  && <DrawdownsTab />}
       {tab === "messages"   && <MessagesTab />}
+      {tab === "whatsapp"   && <WhatsAppTab />}
     </div>
   );
 }

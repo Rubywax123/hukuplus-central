@@ -578,6 +578,26 @@ export async function runMigrations() {
       ON CONFLICT (central_branch_id) DO NOTHING;
     `);
 
+    // ── WhatsApp messages table ─────────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        id               SERIAL PRIMARY KEY,
+        conversation_id  TEXT NOT NULL,
+        wa_id            TEXT NOT NULL,
+        sender_name      TEXT,
+        message_text     TEXT,
+        message_type     TEXT NOT NULL DEFAULT 'text',
+        direction        TEXT NOT NULL,
+        wati_message_id  TEXT UNIQUE,
+        is_read          BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_wa_messages_wa_id ON whatsapp_messages(wa_id);
+      CREATE INDEX IF NOT EXISTS idx_wa_messages_created ON whatsapp_messages(created_at DESC);
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
