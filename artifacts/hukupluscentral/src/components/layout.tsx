@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, ClipboardList, Bell } from "lucide-react";
+import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, ClipboardList, Bell, MessageSquare } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -15,7 +15,8 @@ const navItems = [
   { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Kiosk", icon: Monitor },
   { path: "/applications", label: "Requests", icon: ClipboardList },
-  { path: "/notifications", label: "Notifications", icon: Bell, badge: true },
+  { path: "/notifications", label: "Notifications", icon: Bell, badge: "notifications" as const },
+  { path: "/comms", label: "Comms", icon: MessageSquare, badge: "comms" as const },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
   { path: "/team", label: "Tefco Staff", icon: Users },
 ];
@@ -224,6 +225,18 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
   });
   const unreadCount = notifCounts?.newTotal ?? 0;
 
+  const { data: drawdownPending } = useQuery<{ count: number }>({
+    queryKey: ["drawdown-pending-count"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/applications/drawdown/pending-count`, { credentials: "include" });
+      if (!r.ok) return { count: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+  const pendingDrawdowns = drawdownPending?.count ?? 0;
+
   return (
     <div className="min-h-screen bg-background flex">
       <aside className="w-72 hidden lg:flex flex-col border-r border-white/5 bg-card/30 backdrop-blur-2xl">
@@ -256,7 +269,7 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 px-4 space-y-1">
           {navItems.map((item) => {
             const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
-            const badgeCount = item.badge ? unreadCount : 0;
+            const badgeCount = item.badge === "notifications" ? unreadCount : item.badge === "comms" ? pendingDrawdowns : 0;
             return (
               <Link key={item.path} href={item.path} className="block">
                 <div className={`

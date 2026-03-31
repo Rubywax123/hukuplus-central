@@ -569,6 +569,58 @@ router.get("/applications/drawdown/store", requirePortalAuth, async (req: Reques
   }
 });
 
+// GET /applications/messages/admin (admin — all in-app messages with store info)
+router.get("/applications/messages/admin", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT m.*,
+              r.name as retailer_name,
+              b.name as branch_name
+       FROM in_app_messages m
+       LEFT JOIN retailers r ON r.id = m.retailer_id
+       LEFT JOIN branches b ON b.id = m.branch_id
+       ORDER BY m.created_at DESC
+       LIMIT 200`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("[applications] admin messages GET error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /applications/messages/admin (admin — send message to a store)
+router.post("/applications/messages/admin", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { retailer_id, branch_id, reference_type, reference_id, subject, body } = req.body;
+    if (!retailer_id || !subject || !body) {
+      return res.status(400).json({ error: "retailer_id, subject and body are required" });
+    }
+    const result = await pool.query(
+      `INSERT INTO in_app_messages (retailer_id, branch_id, reference_type, reference_id, subject, body)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [retailer_id, branch_id || null, reference_type || null, reference_id || null, subject, body]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("[applications] admin messages POST error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /applications/drawdown/pending-count (admin — badge count)
+router.get("/applications/drawdown/pending-count", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*) FROM drawdown_requests WHERE status = 'pending'`
+    );
+    res.json({ count: parseInt(result.rows[0].count) });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // GET /applications/retailers (public — for store picker in customer forms)
 router.get("/applications/retailers", async (req: Request, res: Response) => {
   try {

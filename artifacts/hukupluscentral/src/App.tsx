@@ -19,6 +19,7 @@ import ExecutionCertificatePage from "@/pages/execution-certificate";
 import CustomersPage from "@/pages/customers";
 import ApplicationsPage from "@/pages/applications";
 import NotificationsPage from "@/pages/notifications";
+import CommsPage from "@/pages/comms";
 import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
 import ApplyRevolverPage from "@/pages/apply-revolver";
 import NotFound from "@/pages/not-found";
@@ -72,6 +73,7 @@ function Router() {
             <Route path="/customers" component={CustomersPage} />
             <Route path="/applications" component={ApplicationsPage} />
             <Route path="/notifications" component={NotificationsPage} />
+            <Route path="/comms" component={CommsPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />
           </Switch>
