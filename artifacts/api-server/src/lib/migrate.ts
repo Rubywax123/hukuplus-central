@@ -619,6 +619,11 @@ export async function runMigrations() {
     // ── Customer link on formitize_notifications ────────────────────────────
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id);`);
 
+    // ── Ensure partial unique index on formitize_job_id (required for ON CONFLICT) ──
+    // A partial index (WHERE NOT NULL) is the safest form for nullable job_id columns.
+    // Uses a distinct name so it is always created regardless of the old non-partial index.
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS formitize_notifications_job_id_notnull_idx ON formitize_notifications (formitize_job_id) WHERE formitize_job_id IS NOT NULL;`);
+
     // ── Financial fields on agreements ──────────────────────────────────────
     await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS facility_fee_amount NUMERIC(12,2);`);
     await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS interest_amount NUMERIC(12,2);`);

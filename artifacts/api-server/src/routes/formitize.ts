@@ -441,17 +441,26 @@ async function upsertNotification(params: {
     }
 
     if (params.jobId) {
-      await pool.query(
+      // ON CONFLICT DO NOTHING — the unique index on formitize_job_id prevents duplicates.
+      // customer_id is included in the initial INSERT so it's captured on first arrival.
+      const res = await pool.query(
         `INSERT INTO formitize_notifications
            (formitize_job_id, form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         ON CONFLICT (formitize_job_id) DO UPDATE SET customer_id = COALESCE(formitize_notifications.customer_id, EXCLUDED.customer_id)`,
+         ON CONFLICT (formitize_job_id) WHERE formitize_job_id IS NOT NULL DO NOTHING`,
         [params.jobId, params.formName, params.taskType, params.product,
          params.customerName, params.customerId ?? null,
          params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
          params.paymentAmount ?? null, isDuplicateWarning]
       );
+      // If the row already existed (conflict skipped), backfill customer_id if it was missing
+      if (res.rowCount === 0 && params.customerId) {
+        await pool.query(
+          `UPDATE formitize_notifications SET customer_id = $1 WHERE formitize_job_id = $2 AND customer_id IS NULL`,
+          [params.customerId, params.jobId]
+        );
+      }
     } else {
       await pool.query(
         `INSERT INTO formitize_notifications
@@ -591,6 +600,29 @@ router.post("/formitize/webhook", async (req, res) => {
       }
     }
 
+    // Best-effort customer ID lookup so the "View Profile" link works on activity notifications
+    let activityCustomerId: number | null = null;
+    if (customerName && customerName !== rawFormName) {
+      try {
+        // Search by name (case-insensitive), then by phone if available
+        const nameHits = await db.select({ id: customersTable.id })
+          .from(customersTable).where(ilike(customersTable.fullName, customerName));
+        if (nameHits.length === 1) activityCustomerId = nameHits[0].id;
+        if (!activityCustomerId) {
+          const actPhone = findField(
+            "applicanttelephone", "applicantphone", "applicantmobile",
+            "mobile", "cell", "cellphone", "contactnumber", "formtel_2", "formtel_1"
+          );
+          if (actPhone) {
+            const normActPhone = actPhone.replace(/\D/g, "");
+            const phoneHit = await db.select({ id: customersTable.id })
+              .from(customersTable).where(ilike(customersTable.phone, `%${normActPhone.slice(-9)}%`));
+            if (phoneHit.length === 1) activityCustomerId = phoneHit[0].id;
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
     await db.insert(activityTable).values({
       type: `formitize_${formType}`,
       description: `${rawFormName} received for ${customerName}`,
@@ -598,7 +630,7 @@ router.post("/formitize/webhook", async (req, res) => {
       referenceId: jobId ? parseInt(jobId) || null : null,
     });
 
-    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, paymentAmount });
+    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount });
 
     console.log(`[formitize:webhook] Stored as activity — ${rawFormName}`);
     res.status(200).json({ ok: true, stored: "activity", product, formType });
