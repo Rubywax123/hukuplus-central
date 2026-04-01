@@ -809,6 +809,29 @@ router.post("/formitize/webhook", async (req, res) => {
     }
   }
 
+  // ── Extract extended customer profile fields ──────────────────────────────
+  const isNaVal = (v: string | null | undefined) =>
+    !v || ["na", "n/a", "none", "nil", "-", "not applicable"].includes(v.toLowerCase().trim());
+
+  const strOrNull = (v: string | undefined) => (!v || isNaVal(v)) ? null : v;
+
+  const gender         = strOrNull(findField("gender"));
+  const dateOfBirth    = strOrNull(findField("dateofbirth", "date of birth", "dob"));
+  const maritalStatus  = strOrNull(findField("maritalstatus", "marital status"));
+  const isEmployed     = strOrNull(findField("areyouemployed", "employed", "earnsalary"));
+  const employerName   = strOrNull(findField("nameofemployer", "employer", "employername", "placeofwork"));
+  const salesRepName   = strOrNull(findField("nameofsalesrepresentative", "salesrepresentative", "salesrep", "salesrepname"));
+  const retailerRef    = strOrNull(findField("retailerreferencenumber", "retailerreference", "referencenumber", "retailerref"));
+  const marketType     = strOrNull(findField("wheredoesthecustomersell", "sellchickens", "markettype", "sellbirds"));
+
+  // Next-of-Kin — use 'nextofkin' as a prefix to avoid collision with borrower's 'fullname'
+  const nokName         = strOrNull(findField("nextofkinfullname", "nextofkinname", "nokname", "nokfullname", "kinname"));
+  const nokRelationship = strOrNull(findField("relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
+  const nokNationalId   = strOrNull(findField("nextofkinid", "nextofkinpassport", "nokid", "nokpassport", "kinid"));
+  const nokPhone        = strOrNull(findField("nextofkinmobile", "nokmobile", "nokphone", "kinmobile", "nextofkinphone"));
+  const nokEmail        = strOrNull(findField("nextofkinemail", "nokemail", "kinemail"));
+  const nokAddress      = strOrNull(findField("nextofkinaddress", "nokaddress", "kinaddress"));
+
   let customerId: number | null = null;
   if (formitizeCrmId) {
     const [hit] = await db.select({ id: customersTable.id })
@@ -820,40 +843,130 @@ router.post("/formitize/webhook", async (req, res) => {
       .from(customersTable).where(eq(customersTable.phone, normPhone));
     if (hit) customerId = hit.id;
   }
+  if (!customerId && nationalIdRaw) {
+    const [hit] = await db.select({ id: customersTable.id })
+      .from(customersTable).where(eq(customersTable.nationalId, nationalIdRaw));
+    if (hit) customerId = hit.id;
+  }
   if (!customerId) {
     const allByName = await db.select({ id: customersTable.id })
       .from(customersTable).where(ilike(customersTable.fullName, customerName));
     if (allByName.length === 1) customerId = allByName[0].id;
   }
+
+  const extendedFields = {
+    ...(normPhone        ? { phone:             normPhone        } : {}),
+    ...(nationalIdRaw    ? { nationalId:         nationalIdRaw    } : {}),
+    ...(customerEmail    ? { email:              customerEmail    } : {}),
+    ...(customerAddress  ? { address:            customerAddress  } : {}),
+    ...(formitizeCrmId   ? { formitizeCrmId:     formitizeCrmId   } : {}),
+    ...(gender           ? { gender                               } : {}),
+    ...(dateOfBirth      ? { dateOfBirth                         } : {}),
+    ...(maritalStatus    ? { maritalStatus                        } : {}),
+    ...(isEmployed       ? { isEmployed                          } : {}),
+    ...(employerName     ? { employerName                        } : {}),
+    ...(salesRepName     ? { salesRepName                        } : {}),
+    ...(retailerRef      ? { retailerReference: retailerRef       } : {}),
+    ...(marketType       ? { marketType                          } : {}),
+    ...(nokName          ? { nokName                             } : {}),
+    ...(nokRelationship  ? { nokRelationship                     } : {}),
+    ...(nokNationalId    ? { nokNationalId                       } : {}),
+    ...(nokPhone         ? { nokPhone                            } : {}),
+    ...(nokEmail         ? { nokEmail                            } : {}),
+    ...(nokAddress       ? { nokAddress                          } : {}),
+    ...(product          ? { loanProduct: product                 } : {}),
+    rawApplicationData: fieldMap as any,
+  };
+
   if (!customerId) {
     const [newCustomer] = await db.insert(customersTable).values({
       fullName: customerName,
-      ...(normPhone       ? { phone:          normPhone       } : {}),
-      ...(nationalIdRaw   ? { nationalId:     nationalIdRaw   } : {}),
-      ...(customerEmail   ? { email:          customerEmail   } : {}),
-      ...(customerAddress ? { address:        customerAddress } : {}),
-      ...(formitizeCrmId  ? { formitizeCrmId: formitizeCrmId  } : {}),
+      ...extendedFields,
     }).returning({ id: customersTable.id });
     customerId = newCustomer.id;
     console.log(`[formitize:webhook] Created customer #${customerId} for "${customerName}"`);
   } else {
-    // Enrich existing customer record with any new details from this form
-    const updates: Record<string, string> = {};
-    if (normPhone)       updates.phone        = normPhone;
-    if (nationalIdRaw)   updates.national_id  = nationalIdRaw;
-    if (customerEmail)   updates.email        = customerEmail;
-    if (customerAddress) updates.address      = customerAddress;
-    if (Object.keys(updates).length > 0) {
-      const setClauses = Object.entries(updates)
-        .map(([k], i) => `${k} = COALESCE(${k}, $${i + 2})`)
-        .join(", ");
-      const values = [customerId, ...Object.values(updates)];
+    // Enrich existing customer record — COALESCE so we never overwrite real data with nulls
+    const colMap: Record<string, string> = {
+      phone: normPhone || "", national_id: nationalIdRaw || "", email: customerEmail || "",
+      address: customerAddress || "", formitize_crm_id: formitizeCrmId || "",
+      gender: gender || "", date_of_birth: dateOfBirth || "", marital_status: maritalStatus || "",
+      is_employed: isEmployed || "", employer_name: employerName || "",
+      sales_rep_name: salesRepName || "", retailer_reference: retailerRef || "",
+      market_type: marketType || "", nok_name: nokName || "", nok_relationship: nokRelationship || "",
+      nok_national_id: nokNationalId || "", nok_phone: nokPhone || "", nok_email: nokEmail || "",
+      nok_address: nokAddress || "", loan_product: product || "",
+    };
+    const entries = Object.entries(colMap).filter(([, v]) => v !== "");
+    if (entries.length > 0) {
+      const setClauses = entries.map(([k], i) => `${k} = COALESCE(${k}, $${i + 2})`).join(", ");
       await pool.query(
-        `UPDATE customers SET ${setClauses} WHERE id = $1`,
-        values
+        `UPDATE customers SET ${setClauses}, raw_application_data = COALESCE(raw_application_data, $${entries.length + 2}::jsonb), updated_at = NOW() WHERE id = $1`,
+        [customerId, ...entries.map(([, v]) => v), JSON.stringify(fieldMap)]
       );
     }
-    console.log(`[formitize:webhook] Linked to customer #${customerId} for "${customerName}"`);
+    console.log(`[formitize:webhook] Enriched customer #${customerId} for "${customerName}"`);
+  }
+
+  // ── Attempt Xero contact auto-link (best-effort, non-blocking) ─────────────
+  // Only try if the customer doesn't already have a Xero contact linked
+  try {
+    const existing = await db.select({ xeroContactId: customersTable.xeroContactId })
+      .from(customersTable).where(eq(customersTable.id, customerId!));
+    if (existing[0] && !existing[0].xeroContactId) {
+      const tokenRow = await pool.query("SELECT access_token, refresh_token, tenant_id, expires_at FROM xero_tokens WHERE id = 1");
+      const tok = tokenRow.rows[0];
+      if (tok) {
+        let accessToken = tok.access_token;
+        const tenantId = tok.tenant_id;
+        // Refresh if needed
+        if (new Date(tok.expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
+          const rr = await fetch("https://identity.xero.com/connect/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "refresh_token", refresh_token: tok.refresh_token,
+              client_id: process.env.XERO_CLIENT_ID!, client_secret: process.env.XERO_CLIENT_SECRET!,
+            }),
+          });
+          if (rr.ok) {
+            const rd = await rr.json();
+            accessToken = rd.access_token;
+            await pool.query(
+              `UPDATE xero_tokens SET access_token=$1, refresh_token=$2, expires_at=$3, updated_at=NOW() WHERE id=1`,
+              [rd.access_token, rd.refresh_token ?? tok.refresh_token, new Date(Date.now() + rd.expires_in * 1000)]
+            );
+          }
+        }
+        // Search Xero for this contact by name
+        const searchName = encodeURIComponent(customerName);
+        const xr = await fetch(
+          `https://api.xero.com/api.xro/2.0/Contacts?searchTerm=${searchName}&includeArchived=false`,
+          { headers: { Authorization: `Bearer ${accessToken}`, "Xero-tenant-id": tenantId, Accept: "application/json" } }
+        );
+        if (xr.ok) {
+          const xd = await xr.json();
+          const contacts: any[] = xd?.Contacts ?? [];
+          // Match by name (case-insensitive exact), then optionally by phone/email
+          const nameLower = customerName.toLowerCase();
+          let match = contacts.find((c: any) => c.Name?.toLowerCase() === nameLower);
+          if (!match && contacts.length === 1) match = contacts[0]; // only one result, trust it
+          if (match?.ContactID) {
+            await pool.query(
+              "UPDATE customers SET xero_contact_id = $1, updated_at = NOW() WHERE id = $2",
+              [match.ContactID, customerId]
+            );
+            console.log(`[formitize:webhook] Auto-linked customer #${customerId} → Xero ${match.ContactID}`);
+          } else if (contacts.length > 1) {
+            console.log(`[formitize:webhook] Multiple Xero contacts for "${customerName}" — manual link needed`);
+          } else {
+            console.log(`[formitize:webhook] No Xero contact found for "${customerName}"`);
+          }
+        }
+      }
+    }
+  } catch (xeroErr: any) {
+    console.warn(`[formitize:webhook] Xero auto-link failed (non-fatal):`, xeroErr.message);
   }
 
   // ── Create agreement record ────────────────────────────────────────────────

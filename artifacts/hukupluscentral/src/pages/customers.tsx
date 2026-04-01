@@ -16,6 +16,22 @@ interface Customer {
   notes: string | null;
   formitizeCrmId: string | null;
   xeroContactId: string | null;
+  // Extended profile fields from application form
+  gender: string | null;
+  dateOfBirth: string | null;
+  maritalStatus: string | null;
+  isEmployed: string | null;
+  employerName: string | null;
+  salesRepName: string | null;
+  retailerReference: string | null;
+  marketType: string | null;
+  loanProduct: string | null;
+  nokName: string | null;
+  nokRelationship: string | null;
+  nokNationalId: string | null;
+  nokPhone: string | null;
+  nokEmail: string | null;
+  nokAddress: string | null;
   createdAt: string;
   updatedAt: string;
   agreementCount: number;
@@ -478,6 +494,123 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
               )}
             </div>
 
+            {/* Personal Details — auto-populated from application form */}
+            {(c.gender || c.dateOfBirth || c.maritalStatus || c.isEmployed || c.employerName) && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Personal Details</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  {c.gender && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Gender</p>
+                      <p className="text-sm text-white">{c.gender}</p>
+                    </div>
+                  )}
+                  {c.dateOfBirth && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Date of Birth</p>
+                      <p className="text-sm text-white">{c.dateOfBirth}</p>
+                    </div>
+                  )}
+                  {c.maritalStatus && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Marital Status</p>
+                      <p className="text-sm text-white">{c.maritalStatus}</p>
+                    </div>
+                  )}
+                  {c.isEmployed && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Employed</p>
+                      <p className="text-sm text-white">{c.isEmployed}</p>
+                    </div>
+                  )}
+                  {c.employerName && (
+                    <div className="col-span-2">
+                      <p className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Employer</p>
+                      <p className="text-sm text-white">{c.employerName}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Next of Kin */}
+            {(c.nokName || c.nokRelationship || c.nokPhone || c.nokNationalId || c.nokEmail || c.nokAddress) && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Next of Kin</p>
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
+                  {c.nokName && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Name</span>
+                      <span className="text-sm text-white font-medium">{c.nokName}</span>
+                    </div>
+                  )}
+                  {c.nokRelationship && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Relationship</span>
+                      <span className="text-sm text-white">{c.nokRelationship}</span>
+                    </div>
+                  )}
+                  {c.nokNationalId && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">ID / Passport</span>
+                      <span className="text-sm text-white font-mono">{c.nokNationalId}</span>
+                    </div>
+                  )}
+                  {c.nokPhone && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Mobile</span>
+                      <span className="text-sm text-white">{c.nokPhone}</span>
+                    </div>
+                  )}
+                  {c.nokEmail && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Email</span>
+                      <span className="text-sm text-white">{c.nokEmail}</span>
+                    </div>
+                  )}
+                  {c.nokAddress && (
+                    <div>
+                      <span className="text-xs text-muted-foreground block mb-0.5">Address</span>
+                      <span className="text-sm text-white">{c.nokAddress}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Application Info */}
+            {(c.salesRepName || c.retailerReference || c.marketType || c.loanProduct) && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Application Info</p>
+                <div className="space-y-2">
+                  {c.loanProduct && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Product</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 border border-primary/20 text-primary font-medium">{c.loanProduct}</span>
+                    </div>
+                  )}
+                  {c.salesRepName && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Sales Rep</span>
+                      <span className="text-sm text-white">{c.salesRepName}</span>
+                    </div>
+                  )}
+                  {c.retailerReference && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Retailer Ref</span>
+                      <span className="text-sm text-white font-mono">{c.retailerReference}</span>
+                    </div>
+                  )}
+                  {c.marketType && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Market Type</span>
+                      <span className="text-sm text-white">{c.marketType}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {c.formitizeCrmId && (
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Formitize CRM ID</p>
@@ -808,8 +941,20 @@ export default function CustomersPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [enrichOpen, setEnrichOpen] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{ enriched: number; total: number } | null>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
   const queryClient = useQueryClient();
+
+  const backfillMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/customers/backfill-from-form-data`, {
+        method: "POST", credentials: "include",
+      }).then(r => r.json()),
+    onSuccess: (data) => {
+      setBackfillResult({ enriched: data.enriched, total: data.total });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+    },
+  });
 
   const handleSearch = useCallback((v: string) => {
     setSearch(v);
@@ -862,9 +1007,33 @@ export default function CustomersPage() {
               <UploadCloud className="w-3.5 h-3.5" />
               Enrich from CSV
             </button>
+            <button
+              onClick={() => { setBackfillResult(null); backfillMutation.mutate(); }}
+              disabled={backfillMutation.isPending}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+              title="Extract personal details, next-of-kin and application info from stored application form data"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${backfillMutation.isPending ? "animate-spin" : ""}`} />
+              {backfillMutation.isPending ? "Enriching…" : "Enrich from Forms"}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Backfill result banner */}
+      {backfillResult && (
+        <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-sm text-emerald-400 font-medium">
+              Enriched {backfillResult.enriched} of {backfillResult.total} customer records with extended profile data from application forms.
+            </span>
+          </div>
+          <button onClick={() => setBackfillResult(null)} className="p-1 rounded hover:bg-white/10 text-muted-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Completeness legend */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">

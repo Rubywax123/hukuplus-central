@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, ilike, or, desc, sql } from "drizzle-orm";
-import { db, customersTable, agreementsTable, branchesTable, retailersTable } from "@workspace/db";
+import { db, pool, customersTable, agreementsTable, branchesTable, retailersTable } from "@workspace/db";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
 
@@ -122,20 +122,40 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  const { fullName, phone, email, nationalId, address, notes, xeroContactId } = req.body;
+  const {
+    fullName, phone, email, nationalId, address, notes, xeroContactId,
+    gender, dateOfBirth, maritalStatus, isEmployed, employerName,
+    salesRepName, retailerReference, marketType, loanProduct,
+    nokName, nokRelationship, nokNationalId, nokPhone, nokEmail, nokAddress,
+  } = req.body;
 
   const normPhone = phone ? (normalisePhone(phone) ?? phone) : undefined;
 
   const [updated] = await db
     .update(customersTable)
     .set({
-      ...(fullName    !== undefined && { fullName }),
-      ...(normPhone   !== undefined && { phone: normPhone }),
-      ...(email       !== undefined && { email }),
-      ...(nationalId  !== undefined && { nationalId }),
-      ...(address     !== undefined && { address }),
-      ...(notes       !== undefined && { notes }),
-      ...(xeroContactId !== undefined && { xeroContactId }),
+      ...(fullName           !== undefined && { fullName }),
+      ...(normPhone          !== undefined && { phone: normPhone }),
+      ...(email              !== undefined && { email }),
+      ...(nationalId         !== undefined && { nationalId }),
+      ...(address            !== undefined && { address }),
+      ...(notes              !== undefined && { notes }),
+      ...(xeroContactId      !== undefined && { xeroContactId }),
+      ...(gender             !== undefined && { gender }),
+      ...(dateOfBirth        !== undefined && { dateOfBirth }),
+      ...(maritalStatus      !== undefined && { maritalStatus }),
+      ...(isEmployed         !== undefined && { isEmployed }),
+      ...(employerName       !== undefined && { employerName }),
+      ...(salesRepName       !== undefined && { salesRepName }),
+      ...(retailerReference  !== undefined && { retailerReference }),
+      ...(marketType         !== undefined && { marketType }),
+      ...(loanProduct        !== undefined && { loanProduct }),
+      ...(nokName            !== undefined && { nokName }),
+      ...(nokRelationship    !== undefined && { nokRelationship }),
+      ...(nokNationalId      !== undefined && { nokNationalId }),
+      ...(nokPhone           !== undefined && { nokPhone }),
+      ...(nokEmail           !== undefined && { nokEmail }),
+      ...(nokAddress         !== undefined && { nokAddress }),
       updatedAt: new Date(),
     })
     .where(eq(customersTable.id, id))
@@ -143,6 +163,90 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
 
   if (!updated) { res.status(404).json({ error: "Customer not found" }); return; }
   res.json(updated);
+});
+
+// ── Backfill extended fields from agreements form_data ────────────────────────
+// POST /api/customers/backfill-from-form-data
+// Reads form_data JSONB from all agreements that have a customer_id and extracts
+// the extended profile fields, using COALESCE so existing data is never overwritten.
+router.post("/customers/backfill-from-form-data", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const normalise = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
+  const isNaVal = (v: string | null | undefined) =>
+    !v || ["na", "n/a", "none", "nil", "-", "not applicable"].includes(v.toLowerCase().trim());
+
+  function findInMap(fieldMap: Record<string, string>, ...needles: string[]): string | null {
+    for (const needle of needles) {
+      const normNeedle = normalise(needle);
+      for (const [label, value] of Object.entries(fieldMap)) {
+        if (normalise(label).includes(normNeedle) && value && !isNaVal(value)) return value;
+      }
+    }
+    return null;
+  }
+
+  // Get all agreements with form_data and a linked customer
+  const agreements = await db.execute(sql`
+    SELECT id, customer_id, loan_product, form_data
+    FROM agreements
+    WHERE customer_id IS NOT NULL
+      AND form_data IS NOT NULL
+      AND form_data != '{}'::jsonb
+    ORDER BY created_at DESC
+  `);
+
+  let processed = 0;
+  let skipped = 0;
+  let enriched = 0;
+
+  for (const row of (agreements as any).rows ?? []) {
+    const customerId = row.customer_id as number;
+    const formData = row.form_data as Record<string, string> | null;
+    if (!formData || typeof formData !== "object") { skipped++; continue; }
+
+    const fm = formData as Record<string, string>;
+    const find = (...needles: string[]) => findInMap(fm, ...needles);
+
+    const updates: Record<string, string> = {};
+    const trySet = (col: string, val: string | null) => { if (val && !isNaVal(val)) updates[col] = val; };
+
+    trySet("gender",             find("gender"));
+    trySet("date_of_birth",      find("dateofbirth", "date of birth", "dob"));
+    trySet("marital_status",     find("maritalstatus", "marital status"));
+    trySet("is_employed",        find("areyouemployed", "employed", "earnsalary"));
+    trySet("employer_name",      find("nameofemployer", "employer", "employername", "placeofwork"));
+    trySet("sales_rep_name",     find("nameofsalesrepresentative", "salesrepresentative", "salesrep"));
+    trySet("retailer_reference", find("retailerreferencenumber", "retailerreference", "retailerref"));
+    trySet("market_type",        find("wheredoesthecustomersell", "sellchickens", "markettype"));
+    trySet("nok_name",           find("nextofkinfullname", "nextofkinname", "nokname", "nokfullname", "kinname"));
+    trySet("nok_relationship",   find("relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
+    trySet("nok_national_id",    find("nextofkinid", "nokid", "nokpassport", "kinid"));
+    trySet("nok_phone",          find("nextofkinmobile", "nokmobile", "nokphone", "kinmobile"));
+    trySet("nok_email",          find("nextofkinemail", "nokemail", "kinemail"));
+    trySet("nok_address",        find("nextofkinaddress", "nokaddress", "kinaddress"));
+    if (row.loan_product) updates["loan_product"] = row.loan_product as string;
+
+    if (Object.keys(updates).length === 0) { skipped++; continue; }
+
+    const entries = Object.entries(updates);
+    const setClauses = entries.map(([k], i) => `${k} = COALESCE(${k}, $${i + 2})`).join(", ");
+    const values = [customerId, ...entries.map(([, v]) => v), JSON.stringify(fm)];
+    await pool.query(
+      `UPDATE customers SET ${setClauses}, raw_application_data = COALESCE(raw_application_data, $${entries.length + 2}::jsonb), updated_at = NOW() WHERE id = $1`,
+      values
+    );
+
+    enriched++;
+    processed++;
+  }
+
+  res.json({
+    ok: true,
+    total: ((agreements as any).rows ?? []).length,
+    enriched,
+    skipped,
+  });
 });
 
 // ── CSV Enrichment — POST /api/customers/enrich-csv ──────────────────────────

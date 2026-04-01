@@ -586,6 +586,24 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processing_error TEXT;`);
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;`);
 
+    // ── Extended customer profile fields (from application form) ──────────
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS gender TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS date_of_birth TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS marital_status TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS employer_name TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_employed TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_name TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_relationship TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_national_id TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_phone TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_email TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_address TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS sales_rep_name TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS retailer_reference TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS market_type TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS loan_product TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS raw_application_data JSONB;`);
+
     // ── Retailer Xero bank account codes ──────────────────────────────────
     await client.query(`ALTER TABLE retailers ADD COLUMN IF NOT EXISTS xero_bank_account_code TEXT;`);
     await client.query(`UPDATE retailers SET xero_bank_account_code = '101' WHERE name ILIKE '%profeeds%' AND xero_bank_account_code IS NULL;`);

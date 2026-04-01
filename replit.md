@@ -144,6 +144,13 @@ A separate login system at `/portal/login` for retail partners (not Tefco staff)
 - `POST /api/formitize/webhook` — auto-creates agreement from Formitize form submission
 - Secured by `FORMITIZE_WEBHOOK_SECRET` env var (optional)
 - Maps: retailer_name, branch_name, customer_name, customer_phone, loan_product, loan_amount, job_id, form_url
+- **Customer enrichment on arrival**: On application/agreement webhook, also extracts and stores on the customer record:
+  - Personal: gender, date_of_birth, marital_status, is_employed, employer_name
+  - Next-of-Kin: nok_name, nok_relationship, nok_national_id, nok_phone, nok_email, nok_address
+  - Application meta: sales_rep_name, retailer_reference, market_type, loan_product
+  - Raw application JSONB stored for future extraction
+- **Xero auto-link**: After creating a new customer, searches Xero contacts by name and links if unique match found
+- **National ID dedup**: Also matches existing customers by national_id (added as 3rd dedup step)
 
 ### DB Schema
 - `portal_users` — id, name, email, passwordHash, retailerId, branchId, role, isActive, mustChangePassword

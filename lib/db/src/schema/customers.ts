@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -12,6 +12,31 @@ export const customersTable = pgTable("customers", {
   xeroContactId: text("xero_contact_id"),
   address: text("address"),
   notes: text("notes"),
+
+  // Extended personal details — populated from application form
+  gender: text("gender"),
+  dateOfBirth: text("date_of_birth"),
+  maritalStatus: text("marital_status"),
+  employerName: text("employer_name"),
+  isEmployed: text("is_employed"),
+
+  // Next-of-kin details
+  nokName: text("nok_name"),
+  nokRelationship: text("nok_relationship"),
+  nokNationalId: text("nok_national_id"),
+  nokPhone: text("nok_phone"),
+  nokEmail: text("nok_email"),
+  nokAddress: text("nok_address"),
+
+  // Application meta
+  salesRepName: text("sales_rep_name"),
+  retailerReference: text("retailer_reference"),
+  marketType: text("market_type"),
+  loanProduct: text("loan_product"),
+
+  // Last raw application payload stored for reference / future extraction
+  rawApplicationData: jsonb("raw_application_data"),
+
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
