@@ -616,6 +616,15 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS disbursed_at TIMESTAMPTZ;`);
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS disbursement_amount NUMERIC(12,2);`);
 
+    // ── Customer link on formitize_notifications ────────────────────────────
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id);`);
+
+    // ── Financial fields on agreements ──────────────────────────────────────
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS facility_fee_amount NUMERIC(12,2);`);
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS interest_amount NUMERIC(12,2);`);
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS monthly_instalment NUMERIC(12,2);`);
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS loan_tenor_months INTEGER;`);
+
     // ── WhatsApp messages table ─────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_messages (

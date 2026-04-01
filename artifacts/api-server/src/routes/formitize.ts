@@ -414,6 +414,7 @@ async function upsertNotification(params: {
   taskType: string;
   product: string;
   customerName: string;
+  customerId?: number | null;
   customerPhone?: string | null;
   branchName?: string | null;
   retailerName?: string | null;
@@ -442,21 +443,23 @@ async function upsertNotification(params: {
     if (params.jobId) {
       await pool.query(
         `INSERT INTO formitize_notifications
-           (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (formitize_job_id) DO NOTHING`,
+           (formitize_job_id, form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (formitize_job_id) DO UPDATE SET customer_id = COALESCE(formitize_notifications.customer_id, EXCLUDED.customer_id)`,
         [params.jobId, params.formName, params.taskType, params.product,
-         params.customerName, params.customerPhone ?? null,
+         params.customerName, params.customerId ?? null,
+         params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
          params.paymentAmount ?? null, isDuplicateWarning]
       );
     } else {
       await pool.query(
         `INSERT INTO formitize_notifications
-           (form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+           (form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [params.formName, params.taskType, params.product,
-         params.customerName, params.customerPhone ?? null,
+         params.customerName, params.customerId ?? null,
+         params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
          params.paymentAmount ?? null, isDuplicateWarning]
       );
@@ -1021,6 +1024,34 @@ router.post("/formitize/webhook", async (req, res) => {
     console.warn(`[formitize:webhook] Xero auto-link failed (non-fatal):`, xeroErr.message);
   }
 
+  // ── Extract financial figures from application form ────────────────────────
+  // These are typically in the "For Office Use Only" section of ChikweretiOne / Revolver.
+  // We parse them as floats after stripping currency symbols.
+  function parseCurrency(raw: string | undefined): number | null {
+    if (!raw) return null;
+    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+    return isNaN(n) || n <= 0 ? null : n;
+  }
+  const facilityFeeAmount = parseCurrency(findField(
+    "facilityfeeamount", "facility fee amount", "facilityfee", "facility fee",
+    "arrangementfee", "arrangement fee"
+  ));
+  const interestAmount = parseCurrency(findField(
+    "totalinterestpayable", "total interest payable", "totalinterest",
+    "interest amount", "interestamount", "total interest"
+  ));
+  const monthlyInstalment = parseCurrency(findField(
+    "monthlyinstalmentamount", "monthly instalment amount", "monthlyinstalment",
+    "monthly instalment", "instalment amount", "instalmentamount",
+    "monthlyrepayment", "monthly repayment"
+  ));
+  const loanTenorRaw = findField(
+    "loantenor", "loan tenor", "loanterm", "loan term",
+    "tenor", "termonths", "repaymentperiod",
+    "formNumber_1"
+  );
+  const loanTenorMonths = loanTenorRaw ? (parseInt(loanTenorRaw, 10) || null) : null;
+
   // ── Create agreement record ────────────────────────────────────────────────
   const isAgreement = formType === "agreement";
   const signingToken = crypto.randomBytes(32).toString("hex");
@@ -1044,6 +1075,10 @@ router.post("/formitize/webhook", async (req, res) => {
     ...(disbursementDate ? { disbursementDate } : {}),
     ...(repaymentDate ? { repaymentDate } : {}),
     ...(repaymentAmount !== null && !isNaN(repaymentAmount) ? { repaymentAmount } : {}),
+    ...(facilityFeeAmount !== null ? { facilityFeeAmount: String(facilityFeeAmount) } : {}),
+    ...(interestAmount !== null ? { interestAmount: String(interestAmount) } : {}),
+    ...(monthlyInstalment !== null ? { monthlyInstalment: String(monthlyInstalment) } : {}),
+    ...(loanTenorMonths !== null ? { loanTenorMonths } : {}),
     formData: fieldMap as any,
   }).returning();
 
@@ -1065,6 +1100,7 @@ router.post("/formitize/webhook", async (req, res) => {
     taskType: formType,
     product,
     customerName,
+    customerId: customerId ?? null,
     customerPhone: customerPhone ?? null,
     branchName: resolvedBranchName || null,
     retailerName: resolvedRetailerName || null,

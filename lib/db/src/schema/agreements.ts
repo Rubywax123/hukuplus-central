@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, real, json } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, real, json, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { retailersTable } from "./retailers";
@@ -29,6 +29,10 @@ export const agreementsTable = pgTable("agreements", {
   repaymentDate: text("repayment_date"),
   repaymentAmount: real("repayment_amount"),
   formData: json("form_data").$type<Record<string, string>>(),
+  facilityFeeAmount: numeric("facility_fee_amount", { precision: 12, scale: 2 }),
+  interestAmount: numeric("interest_amount", { precision: 12, scale: 2 }),
+  monthlyInstalment: numeric("monthly_instalment", { precision: 12, scale: 2 }),
+  loanTenorMonths: integer("loan_tenor_months"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });

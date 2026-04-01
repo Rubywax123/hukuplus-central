@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -41,6 +42,13 @@ interface Agreement {
   id: number;
   loanProduct: string;
   loanAmount: number | null;
+  facilityFeeAmount: string | null;
+  interestAmount: string | null;
+  monthlyInstalment: string | null;
+  loanTenorMonths: number | null;
+  disbursementDate: string | null;
+  repaymentDate: string | null;
+  repaymentAmount: number | null;
   status: string;
   createdAt: string;
   signedAt: string | null;
@@ -644,7 +652,7 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
                     const isKiosk = a.loanProduct === "Novafeeds" ||
                       (a.retailerName?.toLowerCase().includes("novafeed") ?? false);
                     return (
-                      <div key={a.id} className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
+                      <div key={a.id} className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm font-semibold text-white">
                             {a.loanProduct === "Novafeeds" ? "HukuPlus" : a.loanProduct}
@@ -658,11 +666,55 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
                             <span className={statusBadge(a.status)}>{a.status}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                          <span>{formatUSD(a.loanAmount)}</span>
-                          {a.retailerName && <><span>&middot;</span><span>{a.retailerName}</span></>}
-                          {a.branchName && <><span>&middot;</span><span>{a.branchName}</span></>}
+                        {(a.retailerName || a.branchName) && (
+                          <p className="text-xs text-muted-foreground">
+                            {[a.retailerName, a.branchName].filter(Boolean).join(" — ")}
+                          </p>
+                        )}
+                        {/* Financial summary row */}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Loan Amount</span>
+                            <span className="text-white font-medium">{formatUSD(a.loanAmount)}</span>
+                          </div>
+                          {a.facilityFeeAmount && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Facility Fee</span>
+                              <span className="text-white font-medium">{formatUSD(parseFloat(a.facilityFeeAmount))}</span>
+                            </div>
+                          )}
+                          {a.interestAmount && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Total Interest</span>
+                              <span className="text-white font-medium">{formatUSD(parseFloat(a.interestAmount))}</span>
+                            </div>
+                          )}
+                          {a.monthlyInstalment && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Monthly Instalment</span>
+                              <span className="text-white font-medium">{formatUSD(parseFloat(a.monthlyInstalment))}</span>
+                            </div>
+                          )}
+                          {a.repaymentAmount && !a.monthlyInstalment && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Repayment</span>
+                              <span className="text-white font-medium">{formatUSD(a.repaymentAmount)}</span>
+                            </div>
+                          )}
+                          {a.loanTenorMonths && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Tenor</span>
+                              <span className="text-white font-medium">{a.loanTenorMonths} months</span>
+                            </div>
+                          )}
                         </div>
+                        {/* Dates */}
+                        {(a.disbursementDate || a.repaymentDate) && (
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                            {a.disbursementDate && <span>Disbursed: <span className="text-white/70">{a.disbursementDate}</span></span>}
+                            {a.repaymentDate && <span>Due: <span className="text-white/70">{a.repaymentDate}</span></span>}
+                          </div>
+                        )}
                         <p className="text-xs text-muted-foreground">
                           {formatDate(a.createdAt)}{a.signedAt ? ` — Signed ${formatDate(a.signedAt)}` : ""}
                         </p>
@@ -944,6 +996,20 @@ export default function CustomersPage() {
   const [backfillResult, setBackfillResult] = useState<{ enriched: number; total: number } | null>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
   const queryClient = useQueryClient();
+
+  // Auto-open a customer profile when navigated here with ?customerId=XXX
+  const searchStr = useSearch();
+  useEffect(() => {
+    if (!searchStr) return;
+    const params = new URLSearchParams(searchStr);
+    const id = params.get("customerId");
+    if (id) {
+      const parsed = parseInt(id, 10);
+      if (!isNaN(parsed)) setSelectedId(parsed);
+      // Clean URL without reloading so the param doesn't persist on refresh
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchStr]);
 
   const backfillMutation = useMutation({
     mutationFn: () =>

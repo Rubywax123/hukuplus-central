@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import {
   Bell, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Clock, User, Store,
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
-  DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock,
+  DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -80,6 +81,7 @@ interface FNotification {
   form_name: string;
   task_type: string;
   product: string;
+  customer_id: number | null;
   customer_name: string | null;
   customer_phone: string | null;
   branch_name: string | null;
@@ -110,13 +112,14 @@ const FILE_DOC_TYPES = [
   { value: "Other",         label: "Other"          },
 ];
 
-function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM }: {
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
   onProcessPayment?: () => void;
   onProcessDisbursement?: () => void;
   onFileCRM?: (note: string) => void;
+  onViewProfile?: () => void;
 }) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
@@ -178,6 +181,16 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
         )}
       </div>
       <div className="flex-shrink-0 flex flex-col gap-1.5 items-end">
+        {n.customer_id && onViewProfile && (
+          <button
+            onClick={onViewProfile}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-500/15 border border-violet-500/30 text-violet-300 hover:bg-violet-500/25 transition-all"
+            title="Open customer profile"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            View Profile
+          </button>
+        )}
         {n.task_type === "payment" && onProcessPayment && isNew && (
           <button
             onClick={onProcessPayment}
@@ -272,6 +285,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
 
 function FormitizeTab() {
   const qc = useQueryClient();
+  const [, navigate] = useLocation();
   const [activeProduct, setActiveProduct] = useState<string>("All");
   const [activeType, setActiveType] = useState<string>("all");
   const [showActioned, setShowActioned] = useState(false);
@@ -414,6 +428,7 @@ function FormitizeTab() {
                 onProcessPayment={n.task_type === "payment" ? () => setPaymentNotification(n) : undefined}
                 onProcessDisbursement={DISBURSEMENT_TYPES.has(n.task_type) ? () => setDisbursementNotification(n) : undefined}
                 onFileCRM={DISBURSEMENT_TYPES.has(n.task_type) ? (note) => markOneMutation.mutate({ id: n.id, status: "actioned", notes: note }) : undefined}
+                onViewProfile={n.customer_id ? () => navigate(`/customers?customerId=${n.customer_id}`) : undefined}
               />
             ))}
           </AnimatePresence>
