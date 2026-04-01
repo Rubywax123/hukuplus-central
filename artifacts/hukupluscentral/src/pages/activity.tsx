@@ -1109,12 +1109,19 @@ function DisbursementModal({ notification, onClose, onDone }: {
     queryKey: ["disburse-match", notification.customer_name],
     queryFn: async () => {
       if (!notification.customer_name) return [];
-      const r = await fetch(
-        `${BASE}/api/payments/match-customer?name=${encodeURIComponent(notification.customer_name)}`,
-        { credentials: "include" }
-      );
+      const r = await fetch(`${BASE}/api/payments/match-customer`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerName: notification.customer_name,
+          branchName: notification.branch_name ?? undefined,
+          retailerName: notification.retailer_name ?? undefined,
+        }),
+      });
       if (!r.ok) throw new Error("Failed");
-      return r.json();
+      const d = await r.json();
+      return Array.isArray(d) ? d : (d.candidates ?? []);
     },
     enabled: step === "matching",
   });
@@ -1129,8 +1136,8 @@ function DisbursementModal({ notification, onClose, onDone }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           notificationId: notification.id,
-          xeroContactId: selected.xero_contact_id,
-          customerName: selected.full_name,
+          xeroContactId: selected.xeroContactId,
+          customerName: selected.fullName,
           loanAmount: parseFloat(loanAmount),
           disbursementDate,
           bankAccountCode: bankCode,
@@ -1197,10 +1204,10 @@ function DisbursementModal({ notification, onClose, onDone }: {
                 ) : (
                   <div className="space-y-2">
                     {candidates.map(c => (
-                      <button key={c.id}
-                        onClick={() => setSelected(s => s?.id === c.id ? null : c)}
+                      <button key={c.customerId ?? c.xeroContactId}
+                        onClick={() => setSelected(s => s?.customerId === c.customerId && s?.xeroContactId === c.xeroContactId ? null : c)}
                         className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
-                          selected?.id === c.id
+                          selected?.customerId === c.customerId && selected?.xeroContactId === c.xeroContactId
                             ? "border-emerald-500/50 bg-emerald-500/10"
                             : "border-white/10 bg-white/5 hover:bg-white/8"
                         }`}
@@ -1209,15 +1216,15 @@ function DisbursementModal({ notification, onClose, onDone }: {
                           <User className="w-4 h-4 text-white/60" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-white">{c.full_name}</p>
-                          <p className="text-xs text-white/40 mt-0.5">{c.phone || "—"} · ID: {c.national_id || "—"}</p>
-                          {c.xero_contact_id ? (
+                          <p className="text-sm font-medium text-white">{c.fullName}</p>
+                          <p className="text-xs text-white/40 mt-0.5">{c.phone || "—"} · ID: {c.nationalId || "—"}</p>
+                          {c.xeroContactId ? (
                             <p className="text-xs text-emerald-400/70 mt-0.5 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Xero linked</p>
                           ) : (
                             <p className="text-xs text-red-400/70 mt-0.5 flex items-center gap-1"><XCircle className="w-3 h-3" />No Xero contact — cannot disburse</p>
                           )}
                         </div>
-                        {selected?.id === c.id && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" />}
+                        {selected?.customerId === c.customerId && selected?.xeroContactId === c.xeroContactId && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" />}
                       </button>
                     ))}
                   </div>
@@ -1244,7 +1251,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
               <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                 <User className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-white">{selected.full_name}</p>
+                  <p className="text-sm font-medium text-white">{selected.fullName}</p>
                   <p className="text-xs text-white/40">{selected.phone || "—"}</p>
                 </div>
               </div>
@@ -1293,7 +1300,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
                   type="text"
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  placeholder={`Loan disbursement — ${selected.full_name}`}
+                  placeholder={`Loan disbursement — ${selected.fullName}`}
                   className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </div>
