@@ -270,10 +270,25 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
 
   const client = await pool.connect();
   try {
-    // Mark Formitize notification as actioned
+    if (errors.length > 0 && applied.length === 0) {
+      // Total failure — leave notification as "new" so admin can retry; record the error
+      await client.query(
+        `UPDATE formitize_notifications
+         SET processing_error = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [errors.join(" | ").slice(0, 1000), notificationId]
+      );
+      res.status(502).json({ error: "All Xero payments failed", details: errors });
+      return;
+    }
+
+    // At least some payments applied — mark as actioned and record timestamp
+    const errorSummary = errors.length > 0 ? errors.join(" | ").slice(0, 1000) : null;
     await client.query(
-      `UPDATE formitize_notifications SET status = 'actioned', updated_at = NOW() WHERE id = $1`,
-      [notificationId]
+      `UPDATE formitize_notifications
+       SET status = 'actioned', processed_at = NOW(), processing_error = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [errorSummary, notificationId]
     );
 
     // Optionally mark the customer's active loan agreement as complete
@@ -287,11 +302,6 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     }
   } finally {
     client.release();
-  }
-
-  if (errors.length > 0 && applied.length === 0) {
-    res.status(502).json({ error: "All Xero payments failed", details: errors });
-    return;
   }
 
   res.json({ ok: true, applied, errors });

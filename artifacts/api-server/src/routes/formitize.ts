@@ -420,26 +420,45 @@ async function upsertNotification(params: {
   paymentAmount?: number | null;
 }) {
   try {
+    // Detect near-duplicate payments: same customer + amount + product within 72h
+    let isDuplicateWarning = false;
+    if (params.taskType === "payment" && params.customerName && params.paymentAmount) {
+      const dupeCheck = await pool.query(
+        `SELECT id FROM formitize_notifications
+         WHERE task_type = 'payment'
+           AND product = $1
+           AND LOWER(TRIM(customer_name)) = LOWER(TRIM($2))
+           AND payment_amount = $3
+           AND created_at > NOW() - INTERVAL '72 hours'
+         LIMIT 1`,
+        [params.product, params.customerName, params.paymentAmount]
+      );
+      if (dupeCheck.rows.length > 0) {
+        isDuplicateWarning = true;
+        console.warn(`[formitize:webhook] Potential duplicate payment detected for ${params.customerName} — $${params.paymentAmount}`);
+      }
+    }
+
     if (params.jobId) {
       await pool.query(
         `INSERT INTO formitize_notifications
-           (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (formitize_job_id) DO NOTHING`,
         [params.jobId, params.formName, params.taskType, params.product,
          params.customerName, params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
-         params.paymentAmount ?? null]
+         params.paymentAmount ?? null, isDuplicateWarning]
       );
     } else {
       await pool.query(
         `INSERT INTO formitize_notifications
-           (form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+           (form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [params.formName, params.taskType, params.product,
          params.customerName, params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
-         params.paymentAmount ?? null]
+         params.paymentAmount ?? null, isDuplicateWarning]
       );
     }
   } catch (err) {

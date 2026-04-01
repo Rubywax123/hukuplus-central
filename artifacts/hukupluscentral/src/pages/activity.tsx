@@ -40,6 +40,23 @@ const TASK_TYPES = [
   { value: "undertaking",   label: "Undertakings" },
 ] as const;
 
+// Task types that require explicit action — sorted to the top and visually highlighted
+const ACTIONABLE_TYPES = new Set(["payment", "drawdown", "approval", "undertaking"]);
+
+function sortNotifications(ns: FNotification[]): FNotification[] {
+  return [...ns].sort((a, b) => {
+    const aAction = ACTIONABLE_TYPES.has(a.task_type) ? 0 : 1;
+    const bAction = ACTIONABLE_TYPES.has(b.task_type) ? 0 : 1;
+    const aNew = a.status === "new" ? 0 : 1;
+    const bNew = b.status === "new" ? 0 : 1;
+    // Primary: new actionable → new informational → actioned
+    const priority = (aNew * 2 + aAction) - (bNew * 2 + bAction);
+    if (priority !== 0) return priority;
+    // Secondary: most recent first
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+}
+
 const PRODUCT_COLORS: Record<string, { bg: string; text: string; dot: string; border: string }> = {
   HukuPlus:      { bg: "bg-amber-500/10",  text: "text-amber-300",  dot: "bg-amber-400",  border: "border-amber-500/20" },
   Revolver:      { bg: "bg-blue-500/10",   text: "text-blue-300",   dot: "bg-blue-400",   border: "border-blue-500/20"  },
@@ -68,6 +85,9 @@ interface FNotification {
   branch_name: string | null;
   retailer_name: string | null;
   payment_amount: number | null;
+  is_duplicate_warning: boolean;
+  processing_error: string | null;
+  processed_at: string | null;
   status: "new" | "actioned";
   notes: string | null;
   created_at: string;
@@ -87,6 +107,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
   const colors = PRODUCT_COLORS[n.product] ?? PRODUCT_COLORS["HukuPlus"];
   const typeBadge = TYPE_BADGE[n.task_type] ?? { bg: "bg-white/10", text: "text-white/60" };
   const isNew = n.status === "new";
+  const isActionable = ACTIONABLE_TYPES.has(n.task_type);
   const typeLabel = TASK_TYPES.find(x => x.value === n.task_type)?.label ?? n.task_type;
 
   return (
@@ -97,7 +118,11 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
       exit={{ opacity: 0, scale: 0.97 }}
       transition={{ duration: 0.18 }}
       className={`flex items-start gap-4 p-4 rounded-xl border transition-colors ${
-        isNew ? "bg-white/5 border-white/10 hover:bg-white/8" : "bg-white/[0.02] border-white/5 opacity-60 hover:opacity-80"
+        isNew && isActionable
+          ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70 hover:bg-amber-500/[0.07]"
+          : isNew
+          ? "bg-white/5 border-white/10 hover:bg-white/8"
+          : "bg-white/[0.02] border-white/5 opacity-60 hover:opacity-80"
       }`}
     >
       <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${colors.bg} border ${colors.border}`}>
@@ -107,7 +132,10 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
         <div className="flex items-center gap-2 flex-wrap mb-1">
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} border ${colors.border}`}>{n.product}</span>
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${typeBadge.bg} ${typeBadge.text}`}>{typeLabel}</span>
-          {isNew && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20">NEW</span>}
+          {isNew && isActionable && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/30">⚡ ACTION REQUIRED</span>}
+          {isNew && !isActionable && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-white/50">NEW</span>}
+          {n.is_duplicate_warning && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">⚠ POSSIBLE DUPLICATE</span>}
+          {n.processing_error && isNew && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300 border border-orange-500/25">RETRY NEEDED</span>}
         </div>
         <p className="text-sm font-medium text-white truncate">{n.form_name}</p>
         <div className="flex items-center gap-3 mt-1.5 text-xs text-white/50 flex-wrap">
@@ -117,6 +145,9 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
         </div>
         {n.customer_phone && <p className="text-xs text-white/30 mt-1">{n.customer_phone}</p>}
         {n.payment_amount && <p className="text-xs text-amber-300/70 mt-1 font-medium">Payment: ${Number(n.payment_amount).toFixed(2)}</p>}
+        {n.processing_error && isNew && (
+          <p className="text-xs text-orange-300/70 mt-1 font-medium truncate">Last error: {n.processing_error}</p>
+        )}
       </div>
       <div className="flex-shrink-0 flex flex-col gap-1.5 items-end">
         {n.task_type === "payment" && onProcessPayment && isNew && (
@@ -281,7 +312,7 @@ function FormitizeTab() {
       ) : (
         <div className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
-            {notifications.map(n => (
+            {sortNotifications(notifications).map(n => (
               <NotificationCard key={n.id} n={n}
                 onAction={() => markOneMutation.mutate({ id: n.id, status: n.status === "new" ? "actioned" : "new" })}
                 loading={markOneMutation.isPending}
@@ -1013,6 +1044,30 @@ function PaymentModal({ notification, onClose, onDone }: {
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Duplicate warning banner */}
+        {notification.is_duplicate_warning && (
+          <div className="mx-6 mt-4 flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/25">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-red-300">Possible duplicate payment</p>
+              <p className="text-xs text-red-300/70 mt-0.5">
+                Another payment notification for <strong>{notification.customer_name}</strong> with the same amount was received within the last 72 hours. Check if this has already been processed in Xero before continuing.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Previous processing error banner */}
+        {notification.processing_error && (
+          <div className="mx-6 mt-3 flex items-start gap-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/25">
+            <AlertCircle className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-orange-300">Previous attempt failed</p>
+              <p className="text-xs text-orange-300/70 mt-0.5">{notification.processing_error}</p>
+            </div>
+          </div>
+        )}
 
         <div className="p-6 max-h-[70vh] overflow-y-auto">
 

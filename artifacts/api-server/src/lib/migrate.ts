@@ -581,6 +581,11 @@ export async function runMigrations() {
     // ── payment_amount column on formitize_notifications ───────────────────
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2);`);
 
+    // ── duplicate warning + processing error on formitize_notifications ─────
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS is_duplicate_warning BOOLEAN NOT NULL DEFAULT false;`);
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processing_error TEXT;`);
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;`);
+
     // ── WhatsApp messages table ─────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_messages (
