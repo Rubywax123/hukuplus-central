@@ -650,6 +650,10 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_wa_messages_created ON whatsapp_messages(created_at DESC);
     `);
 
+    // ── Signed documents on agreements ─────────────────────────────────────
+    // Stores an array of {url, name} objects uploaded via the document upload form.
+    await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS signed_documents JSONB DEFAULT '[]'::jsonb;`);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
