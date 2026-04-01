@@ -419,6 +419,7 @@ async function upsertNotification(params: {
   branchName?: string | null;
   retailerName?: string | null;
   paymentAmount?: number | null;
+  status?: "new" | "actioned";
 }) {
   try {
     // Detect near-duplicate payments: same customer + amount + product within 72h
@@ -440,19 +441,21 @@ async function upsertNotification(params: {
       }
     }
 
+    const initialStatus = params.status ?? "new";
+
     if (params.jobId) {
       // ON CONFLICT DO NOTHING — the unique index on formitize_job_id prevents duplicates.
       // customer_id is included in the initial INSERT so it's captured on first arrival.
       const res = await pool.query(
         `INSERT INTO formitize_notifications
-           (formitize_job_id, form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           (formitize_job_id, form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (formitize_job_id) WHERE formitize_job_id IS NOT NULL DO NOTHING`,
         [params.jobId, params.formName, params.taskType, params.product,
          params.customerName, params.customerId ?? null,
          params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
-         params.paymentAmount ?? null, isDuplicateWarning]
+         params.paymentAmount ?? null, isDuplicateWarning, initialStatus]
       );
       // If the row already existed (conflict skipped), backfill customer_id if it was missing
       if (res.rowCount === 0 && params.customerId) {
@@ -464,13 +467,13 @@ async function upsertNotification(params: {
     } else {
       await pool.query(
         `INSERT INTO formitize_notifications
-           (form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           (form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [params.formName, params.taskType, params.product,
          params.customerName, params.customerId ?? null,
          params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
-         params.paymentAmount ?? null, isDuplicateWarning]
+         params.paymentAmount ?? null, isDuplicateWarning, initialStatus]
       );
     }
   } catch (err) {
@@ -630,9 +633,11 @@ router.post("/formitize/webhook", async (req, res) => {
       referenceId: jobId ? parseInt(jobId) || null : null,
     });
 
-    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount });
+    // Document uploads auto-complete — they're receipts, not tasks requiring action.
+    const notifStatus = formType === "upload" ? "actioned" : "new";
+    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount, status: notifStatus });
 
-    console.log(`[formitize:webhook] Stored as activity — ${rawFormName}`);
+    console.log(`[formitize:webhook] Stored as activity (status=${notifStatus}) — ${rawFormName}`);
     res.status(200).json({ ok: true, stored: "activity", product, formType });
     return;
   }
