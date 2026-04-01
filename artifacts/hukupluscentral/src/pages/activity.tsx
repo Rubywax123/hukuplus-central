@@ -1069,6 +1069,7 @@ interface DisbursementResult {
   amount: number;
   bankAccountCode: string;
   date: string;
+  formitizeTaskUrl: string | null;
 }
 
 function DisbursementModal({ notification, onClose, onDone }: {
@@ -1351,6 +1352,21 @@ function DisbursementModal({ notification, onClose, onDone }: {
                   <p className="text-xs text-muted-foreground">Xero Transaction ID</p>
                   <p className="text-xs text-white font-mono break-all">{result.xeroTransactionId}</p>
                   <p className="text-xs text-muted-foreground mt-1.5">Account 621 debited · ready for manual reconciliation</p>
+                </div>
+              )}
+              {result.formitizeTaskUrl && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-left space-y-2">
+                  <p className="text-xs text-amber-300/80 font-medium">Next step — complete in Formitize</p>
+                  <p className="text-xs text-white/50">Tick boxes 4–6 (Loan Agreement Signed, Sales Invoice Received, Bank Account Debited) and re-submit the agreement.</p>
+                  <a
+                    href={result.formitizeTaskUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium hover:bg-amber-500/25 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Open Formitize Task
+                  </a>
                 </div>
               )}
               <button onClick={onDone} className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-sm font-medium hover:bg-emerald-500/25 transition-colors">

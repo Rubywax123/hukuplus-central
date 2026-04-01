@@ -139,8 +139,10 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
   const xeroTxId = createdTx?.BankTransactionID ?? null;
   const xeroRef = createdTx?.Reference ?? null;
 
-  // Mark notification as actioned and store disbursement details
+  // Mark notification as actioned and store disbursement details.
+  // Also look up the customer's loan agreement Formitize job ID for the deep-link button.
   const client = await pool.connect();
+  let formitizeJobId: string | null = null;
   try {
     await client.query(
       `UPDATE formitize_notifications
@@ -152,11 +154,31 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
        WHERE id = $3`,
       [amount, xeroTxId, notificationId]
     );
+
+    // Fetch the customer_id from the notification then find their latest agreement's Formitize job ID
+    const notifRow = await client.query<{ customer_id: number | null }>(
+      `SELECT customer_id FROM formitize_notifications WHERE id = $1`, [notificationId]
+    );
+    const customerId = notifRow.rows[0]?.customer_id;
+    if (customerId) {
+      const agRow = await client.query<{ formitize_job_id: string | null }>(
+        `SELECT formitize_job_id FROM agreements
+         WHERE customer_id = $1 AND formitize_job_id IS NOT NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [customerId]
+      );
+      formitizeJobId = agRow.rows[0]?.formitize_job_id ?? null;
+    }
   } finally {
     client.release();
   }
 
-  console.log(`[disbursements] Disbursed $${amount} for notification ${notificationId} → Xero TX ${xeroTxId}`);
+  // Construct a Formitize deep-link URL for the loan agreement task
+  const formitizeTaskUrl = formitizeJobId
+    ? `https://service.formitize.com/#/tasks/${formitizeJobId}`
+    : null;
+
+  console.log(`[disbursements] Disbursed $${amount} for notification ${notificationId} → Xero TX ${xeroTxId}${formitizeJobId ? ` | Formitize task ${formitizeJobId}` : ""}`);
 
   res.json({
     success: true,
@@ -165,6 +187,7 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
     amount,
     bankAccountCode,
     date: txDate,
+    formitizeTaskUrl,
   });
 });
 

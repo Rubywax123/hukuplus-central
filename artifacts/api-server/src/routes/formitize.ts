@@ -1198,6 +1198,57 @@ router.put("/formitize/notifications/:id/status", requireStaffAuth, requireSuper
   res.json({ ok: true });
 });
 
+// ─── Formitize API helper ─────────────────────────────────────────────────────
+// Tries both known base URLs for Formitize accounts.
+const FORMITIZE_BASES = [
+  "https://service.formitize.com/api/v1",
+  "https://app.formitize.com/api/v2",
+];
+
+async function formitizeGet(path: string): Promise<{ ok: boolean; base: string; data: any }> {
+  const apiKey = process.env.FORMITIZE_API_KEY;
+  if (!apiKey) return { ok: false, base: "", data: { error: "FORMITIZE_API_KEY not set" } };
+  for (const base of FORMITIZE_BASES) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      });
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 500) }; }
+      if (res.status < 500) return { ok: res.ok, base, data };
+    } catch { /* try next */ }
+  }
+  return { ok: false, base: "", data: { error: "All base URLs failed" } };
+}
+
+// ─── GET /api/formitize/explore ───────────────────────────────────────────────
+// Admin endpoint — discovers live Formitize form templates and field structure.
+// Pass ?templateId=NNN to inspect a specific template's fields.
+// Pass ?submittedFormId=NNN to inspect a submitted form's data.
+router.get("/formitize/explore", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
+  const { templateId, submittedFormId } = req.query as Record<string, string>;
+  const results: Record<string, any> = {};
+
+  if (submittedFormId) {
+    const r = await formitizeGet(`/forms/${submittedFormId}`);
+    results.submittedForm = { base: r.base, ok: r.ok, data: r.data };
+  } else if (templateId) {
+    const r = await formitizeGet(`/forms/templates/${templateId}`);
+    results.template = { base: r.base, ok: r.ok, data: r.data };
+  } else {
+    // List templates + recent submitted forms
+    const [tmpl, recent] = await Promise.all([
+      formitizeGet("/forms/templates"),
+      formitizeGet("/forms?limit=5"),
+    ]);
+    results.templates = { base: tmpl.base, ok: tmpl.ok, data: tmpl.data };
+    results.recentForms = { base: recent.base, ok: recent.ok, data: recent.data };
+  }
+
+  res.json(results);
+});
+
 // ─── POST /api/formitize/notifications/mark-all ───────────────────────────────
 router.post("/formitize/notifications/mark-all", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { product, task_type } = req.body as { product?: string; task_type?: string };
