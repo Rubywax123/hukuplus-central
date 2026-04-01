@@ -52,6 +52,7 @@ interface Agreement {
   status: string;
   createdAt: string;
   signedAt: string | null;
+  signedDocuments: Array<{ url: string; name: string }> | null;
   branchName: string | null;
   retailerName: string | null;
 }
@@ -718,6 +719,33 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
                         <p className="text-xs text-muted-foreground">
                           {formatDate(a.createdAt)}{a.signedAt ? ` — Signed ${formatDate(a.signedAt)}` : ""}
                         </p>
+                        {/* Signed documents */}
+                        {a.signedDocuments && a.signedDocuments.length > 0 && (
+                          <div className="pt-1 border-t border-white/5 space-y-1">
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Signed Documents</p>
+                            {a.signedDocuments.map((doc, i) => {
+                              const ext = doc.name.split(".").pop()?.toLowerCase() ?? "";
+                              const isPdf = ext === "pdf";
+                              const label = isPdf ? doc.name : `Photo ${i + 1}`;
+                              return (
+                                <a
+                                  key={i}
+                                  href={doc.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
+                                >
+                                  {isPdf ? (
+                                    <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H4zm6 1v5h5M7 13h6M7 16h4"/></svg>
+                                  ) : (
+                                    <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                                  )}
+                                  <span className="truncate">{label}</span>
+                                </a>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

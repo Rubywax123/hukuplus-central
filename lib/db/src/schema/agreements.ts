@@ -29,6 +29,7 @@ export const agreementsTable = pgTable("agreements", {
   repaymentDate: text("repayment_date"),
   repaymentAmount: real("repayment_amount"),
   formData: json("form_data").$type<Record<string, string>>(),
+  signedDocuments: json("signed_documents").$type<Array<{ url: string; name: string }>>().default([]),
   facilityFeeAmount: numeric("facility_fee_amount", { precision: 12, scale: 2 }),
   interestAmount: numeric("interest_amount", { precision: 12, scale: 2 }),
   monthlyInstalment: numeric("monthly_instalment", { precision: 12, scale: 2 }),

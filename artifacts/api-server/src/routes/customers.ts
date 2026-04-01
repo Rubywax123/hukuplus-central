@@ -110,6 +110,7 @@ router.get("/customers/:id", async (req, res): Promise<void> => {
       status: agreementsTable.status,
       createdAt: agreementsTable.createdAt,
       signedAt: agreementsTable.signedAt,
+      signedDocuments: agreementsTable.signedDocuments,
       branchName: branchesTable.name,
       retailerName: retailersTable.name,
     })

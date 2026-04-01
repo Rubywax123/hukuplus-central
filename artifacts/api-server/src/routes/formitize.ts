@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable, customersTable } from "@workspace/db";
-import { eq, ilike } from "drizzle-orm";
+import { eq, ilike, desc } from "drizzle-orm";
 import crypto from "crypto";
 import multer from "multer";
 import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
@@ -632,6 +632,43 @@ router.post("/formitize/webhook", async (req, res) => {
       loanProduct: product,
       referenceId: jobId ? parseInt(jobId) || null : null,
     });
+
+    // Document uploads: extract file URLs (numeric keys) and save to customer's latest agreement
+    if (formType === "upload" && activityCustomerId) {
+      try {
+        // Numeric keys like "0", "1", "2"... are file attachment URLs
+        const docs: Array<{ url: string; name: string }> = [];
+        for (const [key, val] of Object.entries(fieldMap)) {
+          if (/^\d+$/.test(key) && typeof val === "string" && val.startsWith("http")) {
+            // Derive a display name from the URL filename
+            const urlName = val.split("/").pop()?.split("?")[0] || `file_${key}`;
+            docs.push({ url: val, name: urlName });
+          }
+        }
+        if (docs.length > 0) {
+          // Find the customer's most recent agreement
+          const [latestAgreement] = await db
+            .select({ id: agreementsTable.id, existing: agreementsTable.signedDocuments })
+            .from(agreementsTable)
+            .where(eq(agreementsTable.customerId, activityCustomerId))
+            .orderBy(desc(agreementsTable.createdAt))
+            .limit(1);
+          if (latestAgreement) {
+            const existing: Array<{ url: string; name: string }> = (latestAgreement.existing as any) ?? [];
+            const merged = [
+              ...existing,
+              ...docs.filter(d => !existing.some((e: { url: string }) => e.url === d.url)),
+            ];
+            await db.update(agreementsTable)
+              .set({ signedDocuments: merged })
+              .where(eq(agreementsTable.id, latestAgreement.id));
+            console.log(`[formitize:webhook] Saved ${docs.length} signed doc(s) to agreement #${latestAgreement.id}`);
+          }
+        }
+      } catch (err) {
+        console.error("[formitize:webhook] Failed to save signed documents:", err);
+      }
+    }
 
     // Document uploads auto-complete — they're receipts, not tasks requiring action.
     const notifStatus = formType === "upload" ? "actioned" : "new";
