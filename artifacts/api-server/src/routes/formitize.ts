@@ -949,12 +949,19 @@ router.get("/formitize/notifications/counts", requireStaffAuth, requireSuperAdmi
 // ─── PUT /api/formitize/notifications/:id/status ──────────────────────────────
 router.put("/formitize/notifications/:id/status", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, notes } = req.body;
   if (!["new", "actioned"].includes(status)) { res.status(400).json({ error: "Invalid status" }); return; }
-  await pool.query(
-    "UPDATE formitize_notifications SET status = $1, updated_at = NOW() WHERE id = $2",
-    [status, id]
-  );
+  if (notes !== undefined) {
+    await pool.query(
+      "UPDATE formitize_notifications SET status = $1, notes = $2, updated_at = NOW() WHERE id = $3",
+      [status, notes, id]
+    );
+  } else {
+    await pool.query(
+      "UPDATE formitize_notifications SET status = $1, updated_at = NOW() WHERE id = $2",
+      [status, id]
+    );
+  }
   res.json({ ok: true });
 });
 

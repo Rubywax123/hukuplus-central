@@ -103,13 +103,23 @@ interface CountsResponse {
 
 const DISBURSEMENT_TYPES = new Set(["upload", "drawdown"]);
 
-function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement }: {
+const FILE_DOC_TYPES = [
+  { value: "Invoice",       label: "Invoice"        },
+  { value: "ID Document",   label: "ID Document"    },
+  { value: "Missing Docs",  label: "Missing Docs"   },
+  { value: "Other",         label: "Other"          },
+];
+
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
   onProcessPayment?: () => void;
   onProcessDisbursement?: () => void;
+  onFileCRM?: (note: string) => void;
 }) {
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [selectedDocType, setSelectedDocType] = useState("");
   const colors = PRODUCT_COLORS[n.product] ?? PRODUCT_COLORS["HukuPlus"];
   const typeBadge = TYPE_BADGE[n.task_type] ?? { bg: "bg-white/10", text: "text-white/60" };
   const isNew = n.status === "new";
@@ -123,7 +133,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={{ duration: 0.18 }}
-      className={`flex items-start gap-4 p-4 rounded-xl border transition-colors ${
+      className={`flex flex-col p-4 rounded-xl border transition-colors ${
         isNew && isActionable
           ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70 hover:bg-amber-500/[0.07]"
           : isNew
@@ -131,6 +141,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
           : "bg-white/[0.02] border-white/5 opacity-60 hover:opacity-80"
       }`}
     >
+    <div className="flex items-start gap-4">
       <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${colors.bg} border ${colors.border}`}>
         <div className={`w-2.5 h-2.5 rounded-full ${colors.dot}`} />
       </div>
@@ -157,6 +168,11 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
         {n.xero_bank_transaction_id && (
           <p className="text-xs text-white/30 mt-0.5">Xero TX: {n.xero_bank_transaction_id}</p>
         )}
+        {n.notes && !isNew && (
+          <p className="text-xs text-sky-300/60 mt-1 flex items-center gap-1">
+            <FileText className="w-3 h-3" />{n.notes}
+          </p>
+        )}
         {n.processing_error && isNew && (
           <p className="text-xs text-orange-300/70 mt-1 font-medium truncate">Last error: {n.processing_error}</p>
         )}
@@ -171,30 +187,85 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
             Process Payment
           </button>
         )}
-        {DISBURSEMENT_TYPES.has(n.task_type) && onProcessDisbursement && isNew && (
-          <button
-            onClick={onProcessDisbursement}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all"
-          >
-            <ArrowDownCircle className="w-3.5 h-3.5" />
-            Disburse
-          </button>
+        {DISBURSEMENT_TYPES.has(n.task_type) && isNew && (
+          <>
+            {onProcessDisbursement && (
+              <button
+                onClick={onProcessDisbursement}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all"
+              >
+                <ArrowDownCircle className="w-3.5 h-3.5" />
+                Disburse
+              </button>
+            )}
+            {onFileCRM && !showFilePicker && (
+              <button
+                onClick={() => { setShowFilePicker(true); setSelectedDocType(""); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/15 border border-sky-500/30 text-sky-300 hover:bg-sky-500/25 transition-all"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                File to CRM
+              </button>
+            )}
+          </>
         )}
         <button
           onClick={onAction}
           disabled={loading}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-40 ${
             isNew
-              ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20"
+              ? "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
               : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
           }`}
         >
           <CheckCheck className="w-3.5 h-3.5" />
-          {n.task_type === "payment" && isNew ? "Skip (manual)"
-            : DISBURSEMENT_TYPES.has(n.task_type) && isNew ? "Skip (manual)"
-            : isNew ? "Mark actioned" : "Reopen"}
+          {isNew ? "Skip (manual)" : "Reopen"}
         </button>
       </div>
+    </div>
+
+      {/* Inline file-to-CRM picker — expands below the main row */}
+      {showFilePicker && onFileCRM && (
+        <div className="w-full mt-3 pt-3 border-t border-white/10">
+          <p className="text-xs text-muted-foreground mb-2 font-medium">What type of document is this?</p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {FILE_DOC_TYPES.map(dt => (
+              <button
+                key={dt.value}
+                onClick={() => setSelectedDocType(dt.value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  selectedDocType === dt.value
+                    ? "bg-sky-500/25 border-sky-500/50 text-sky-200"
+                    : "bg-white/5 border-white/15 text-white/50 hover:text-white/70 hover:bg-white/8"
+                }`}
+              >
+                {dt.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setShowFilePicker(false); setSelectedDocType(""); }}
+              className="px-3 py-1.5 rounded-lg text-xs text-white/40 hover:text-white/60 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={!selectedDocType}
+              onClick={() => {
+                if (selectedDocType) {
+                  onFileCRM(`Filed to CRM: ${selectedDocType}`);
+                  setShowFilePicker(false);
+                }
+              }}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 border border-sky-500/35 text-sky-300 hover:bg-sky-500/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Confirm — File {selectedDocType || "…"}
+            </button>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -234,10 +305,10 @@ function FormitizeTab() {
   });
 
   const markOneMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+    mutationFn: async ({ id, status, notes }: { id: number; status: string; notes?: string }) => {
       const r = await fetch(`${BASE}/api/formitize/notifications/${id}/status`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...(notes !== undefined ? { notes } : {}) }),
       });
       if (!r.ok) throw new Error("Failed");
     },
@@ -342,6 +413,7 @@ function FormitizeTab() {
                 loading={markOneMutation.isPending}
                 onProcessPayment={n.task_type === "payment" ? () => setPaymentNotification(n) : undefined}
                 onProcessDisbursement={DISBURSEMENT_TYPES.has(n.task_type) ? () => setDisbursementNotification(n) : undefined}
+                onFileCRM={DISBURSEMENT_TYPES.has(n.task_type) ? (note) => markOneMutation.mutate({ id: n.id, status: "actioned", notes: note }) : undefined}
               />
             ))}
           </AnimatePresence>
