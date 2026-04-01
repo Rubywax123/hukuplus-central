@@ -586,6 +586,18 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processing_error TEXT;`);
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;`);
 
+    // ── Retailer Xero bank account codes ──────────────────────────────────
+    await client.query(`ALTER TABLE retailers ADD COLUMN IF NOT EXISTS xero_bank_account_code TEXT;`);
+    await client.query(`UPDATE retailers SET xero_bank_account_code = '101' WHERE name ILIKE '%profeeds%' AND xero_bank_account_code IS NULL;`);
+    await client.query(`UPDATE retailers SET xero_bank_account_code = '102' WHERE name ILIKE '%novafeeds%' AND xero_bank_account_code IS NULL;`);
+    await client.query(`UPDATE retailers SET xero_bank_account_code = '104' WHERE name ILIKE '%gain%' AND xero_bank_account_code IS NULL;`);
+    await client.query(`UPDATE retailers SET xero_bank_account_code = '108' WHERE name ILIKE '%feedmix%' AND xero_bank_account_code IS NULL;`);
+
+    // ── Disbursement tracking on formitize_notifications ───────────────────
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS xero_bank_transaction_id TEXT;`);
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS disbursed_at TIMESTAMPTZ;`);
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS disbursement_amount NUMERIC(12,2);`);
+
     // ── WhatsApp messages table ─────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_messages (

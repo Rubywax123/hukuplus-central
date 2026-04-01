@@ -85,6 +85,9 @@ interface FNotification {
   branch_name: string | null;
   retailer_name: string | null;
   payment_amount: number | null;
+  disbursement_amount: number | null;
+  xero_bank_transaction_id: string | null;
+  disbursed_at: string | null;
   is_duplicate_warning: boolean;
   processing_error: string | null;
   processed_at: string | null;
@@ -98,11 +101,14 @@ interface CountsResponse {
   newTotal: number;
 }
 
-function NotificationCard({ n, onAction, loading, onProcessPayment }: {
+const DISBURSEMENT_TYPES = new Set(["upload", "drawdown"]);
+
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
   onProcessPayment?: () => void;
+  onProcessDisbursement?: () => void;
 }) {
   const colors = PRODUCT_COLORS[n.product] ?? PRODUCT_COLORS["HukuPlus"];
   const typeBadge = TYPE_BADGE[n.task_type] ?? { bg: "bg-white/10", text: "text-white/60" };
@@ -145,6 +151,12 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
         </div>
         {n.customer_phone && <p className="text-xs text-white/30 mt-1">{n.customer_phone}</p>}
         {n.payment_amount && <p className="text-xs text-amber-300/70 mt-1 font-medium">Payment: ${Number(n.payment_amount).toFixed(2)}</p>}
+        {n.disbursement_amount && n.disbursed_at && (
+          <p className="text-xs text-emerald-300/70 mt-1 font-medium">Disbursed: ${Number(n.disbursement_amount).toFixed(2)} · {fmt(n.disbursed_at)}</p>
+        )}
+        {n.xero_bank_transaction_id && (
+          <p className="text-xs text-white/30 mt-0.5">Xero TX: {n.xero_bank_transaction_id}</p>
+        )}
         {n.processing_error && isNew && (
           <p className="text-xs text-orange-300/70 mt-1 font-medium truncate">Last error: {n.processing_error}</p>
         )}
@@ -159,6 +171,15 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
             Process Payment
           </button>
         )}
+        {DISBURSEMENT_TYPES.has(n.task_type) && onProcessDisbursement && isNew && (
+          <button
+            onClick={onProcessDisbursement}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all"
+          >
+            <ArrowDownCircle className="w-3.5 h-3.5" />
+            Disburse
+          </button>
+        )}
         <button
           onClick={onAction}
           disabled={loading}
@@ -169,7 +190,9 @@ function NotificationCard({ n, onAction, loading, onProcessPayment }: {
           }`}
         >
           <CheckCheck className="w-3.5 h-3.5" />
-          {n.task_type === "payment" && isNew ? "Skip (manual)" : isNew ? "Mark actioned" : "Reopen"}
+          {n.task_type === "payment" && isNew ? "Skip (manual)"
+            : DISBURSEMENT_TYPES.has(n.task_type) && isNew ? "Skip (manual)"
+            : isNew ? "Mark actioned" : "Reopen"}
         </button>
       </div>
     </motion.div>
@@ -182,6 +205,7 @@ function FormitizeTab() {
   const [activeType, setActiveType] = useState<string>("all");
   const [showActioned, setShowActioned] = useState(false);
   const [paymentNotification, setPaymentNotification] = useState<FNotification | null>(null);
+  const [disbursementNotification, setDisbursementNotification] = useState<FNotification | null>(null);
 
   const statusFilter = showActioned ? "all" : "new";
 
@@ -317,6 +341,7 @@ function FormitizeTab() {
                 onAction={() => markOneMutation.mutate({ id: n.id, status: n.status === "new" ? "actioned" : "new" })}
                 loading={markOneMutation.isPending}
                 onProcessPayment={n.task_type === "payment" ? () => setPaymentNotification(n) : undefined}
+                onProcessDisbursement={DISBURSEMENT_TYPES.has(n.task_type) ? () => setDisbursementNotification(n) : undefined}
               />
             ))}
           </AnimatePresence>
@@ -331,6 +356,19 @@ function FormitizeTab() {
           onClose={() => setPaymentNotification(null)}
           onDone={() => {
             setPaymentNotification(null);
+            qc.invalidateQueries({ queryKey: ["notifications"] });
+            qc.invalidateQueries({ queryKey: ["notification-counts"] });
+          }}
+        />
+      )}
+    </AnimatePresence>
+    <AnimatePresence>
+      {disbursementNotification && (
+        <DisbursementModal
+          notification={disbursementNotification}
+          onClose={() => setDisbursementNotification(null)}
+          onDone={() => {
+            setDisbursementNotification(null);
             qc.invalidateQueries({ queryKey: ["notifications"] });
             qc.invalidateQueries({ queryKey: ["notification-counts"] });
           }}
@@ -926,6 +964,331 @@ interface BankAccount {
   code: string;
   name: string;
   currencyCode: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DISBURSEMENT MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface BankAccount {
+  code: string;
+  name: string;
+  retailerMatch: string | null;
+}
+
+interface DisbursementResult {
+  xeroTransactionId: string | null;
+  xeroReference: string | null;
+  amount: number;
+  bankAccountCode: string;
+  date: string;
+}
+
+function DisbursementModal({ notification, onClose, onDone }: {
+  notification: FNotification;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [step, setStep] = useState<"matching" | "confirm" | "done" | "error">("matching");
+  const [selected, setSelected] = useState<PaymentCandidate | null>(null);
+  const [loanAmount, setLoanAmount] = useState("");
+  const [disbursementDate, setDisbursementDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [bankCode, setBankCode] = useState("");
+  const [description, setDescription] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState<DisbursementResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const { data: bankAccounts = [] } = useQuery<BankAccount[]>({
+    queryKey: ["disbursement-bank-accounts"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/disbursements/bank-accounts`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed to load bank accounts");
+      const d = await r.json();
+      return d.bankAccounts;
+    },
+  });
+
+  // Auto-select bank account when accounts load
+  useEffect(() => {
+    if (bankAccounts.length > 0 && !bankCode && notification.retailer_name) {
+      const lower = notification.retailer_name.toLowerCase();
+      const match = bankAccounts.find(b => b.retailerMatch && lower.includes(b.retailerMatch));
+      if (match) setBankCode(match.code);
+    }
+  }, [bankAccounts, notification.retailer_name, bankCode]);
+
+  const { data: candidates = [], isLoading: matchLoading } = useQuery<PaymentCandidate[]>({
+    queryKey: ["disburse-match", notification.customer_name],
+    queryFn: async () => {
+      if (!notification.customer_name) return [];
+      const r = await fetch(
+        `${BASE}/api/payments/match-customer?name=${encodeURIComponent(notification.customer_name)}`,
+        { credentials: "include" }
+      );
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    enabled: step === "matching",
+  });
+
+  const handleProcess = async () => {
+    if (!selected || !bankCode || !loanAmount) return;
+    setProcessing(true);
+    try {
+      const r = await fetch(`${BASE}/api/disbursements/process`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          notificationId: notification.id,
+          xeroContactId: selected.xero_contact_id,
+          customerName: selected.full_name,
+          loanAmount: parseFloat(loanAmount),
+          disbursementDate,
+          bankAccountCode: bankCode,
+          description: description || undefined,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setErrorMsg(data.error ?? "Unknown error"); setStep("error"); return; }
+      setResult(data);
+      setStep("done");
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Network error");
+      setStep("error");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const bankName = bankAccounts.find(b => b.code === bankCode)?.name ?? bankCode;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }}
+        className="w-full max-w-lg bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Process Disbursement</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {notification.customer_name} — {notification.retailer_name}{notification.branch_name ? ` / ${notification.branch_name}` : ""}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-6">
+
+          {/* STEP 1 — CUSTOMER MATCHING */}
+          {step === "matching" && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Step 1 of 2 — Confirm customer</p>
+                {matchLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Searching for "{notification.customer_name}"…
+                  </div>
+                ) : candidates.length === 0 ? (
+                  <div className="p-4 rounded-lg bg-white/5 border border-white/10 text-sm text-white/50 text-center">
+                    No matching customer found for "{notification.customer_name}".<br />
+                    <span className="text-xs">You can only process disbursements for customers with a linked Xero contact.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {candidates.map(c => (
+                      <button key={c.id}
+                        onClick={() => setSelected(s => s?.id === c.id ? null : c)}
+                        className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                          selected?.id === c.id
+                            ? "border-emerald-500/50 bg-emerald-500/10"
+                            : "border-white/10 bg-white/5 hover:bg-white/8"
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
+                          <User className="w-4 h-4 text-white/60" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-white">{c.full_name}</p>
+                          <p className="text-xs text-white/40 mt-0.5">{c.phone || "—"} · ID: {c.national_id || "—"}</p>
+                          {c.xero_contact_id ? (
+                            <p className="text-xs text-emerald-400/70 mt-0.5 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Xero linked</p>
+                          ) : (
+                            <p className="text-xs text-red-400/70 mt-0.5 flex items-center gap-1"><XCircle className="w-3 h-3" />No Xero contact — cannot disburse</p>
+                          )}
+                        </div>
+                        {selected?.id === c.id && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-white/50 hover:text-white/70 transition-colors">Cancel</button>
+                <button
+                  onClick={() => setStep("confirm")}
+                  disabled={!selected || !selected.xero_contact_id}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next — Confirm Details
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2 — CONFIRM DETAILS */}
+          {step === "confirm" && selected && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Step 2 of 2 — Disbursement details</p>
+
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                <User className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-white">{selected.full_name}</p>
+                  <p className="text-xs text-white/40">{selected.phone || "—"}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium block mb-1.5">Loan Amount (USD)</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={loanAmount}
+                    onChange={e => setLoanAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium block mb-1.5">Disbursement Date</label>
+                  <input
+                    type="date"
+                    value={disbursementDate}
+                    onChange={e => setDisbursementDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground font-medium block mb-1.5">Bank Account</label>
+                <select
+                  value={bankCode}
+                  onChange={e => setBankCode(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                >
+                  <option value="">— Select bank account —</option>
+                  {bankAccounts.map(b => (
+                    <option key={b.code} value={b.code}>{b.name} ({b.code})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground font-medium block mb-1.5">Description (optional)</label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder={`Loan disbursement — ${selected.full_name}`}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+              </div>
+
+              {/* Accounting summary */}
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">Xero entry preview</p>
+                <div className="flex justify-between text-xs text-white/70">
+                  <span>Type</span><span className="font-medium text-white">Spend Money</span>
+                </div>
+                <div className="flex justify-between text-xs text-white/70">
+                  <span>Bank Account</span><span className="font-medium text-white">{bankName} ({bankCode || "—"})</span>
+                </div>
+                <div className="flex justify-between text-xs text-white/70">
+                  <span>Account Code</span><span className="font-medium text-white">621 — Loans Disbursed</span>
+                </div>
+                <div className="flex justify-between text-xs text-white/70">
+                  <span>Amount</span>
+                  <span className="font-semibold text-emerald-300">{loanAmount ? `$${parseFloat(loanAmount).toFixed(2)}` : "—"}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between gap-2 pt-1">
+                <button onClick={() => setStep("matching")} className="px-4 py-2 rounded-lg text-sm text-white/50 hover:text-white/70 transition-colors">← Back</button>
+                <button
+                  onClick={handleProcess}
+                  disabled={processing || !bankCode || !loanAmount || parseFloat(loanAmount) <= 0}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {processing ? <><Loader2 className="w-4 h-4 animate-spin" />Processing…</> : <><ArrowDownCircle className="w-4 h-4" />Disburse in Xero</>}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3 — DONE */}
+          {step === "done" && result && (
+            <div className="space-y-4 text-center py-4">
+              <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-white">Disbursement recorded</p>
+                <p className="text-sm text-muted-foreground mt-1">${result.amount.toFixed(2)} posted to Xero via {bankAccounts.find(b => b.code === result.bankAccountCode)?.name ?? result.bankAccountCode}</p>
+              </div>
+              {result.xeroTransactionId && (
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-left space-y-1">
+                  <p className="text-xs text-muted-foreground">Xero Transaction ID</p>
+                  <p className="text-xs text-white font-mono break-all">{result.xeroTransactionId}</p>
+                  <p className="text-xs text-muted-foreground mt-1.5">Account 621 debited · ready for manual reconciliation</p>
+                </div>
+              )}
+              <button onClick={onDone} className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-sm font-medium hover:bg-emerald-500/25 transition-colors">
+                Done
+              </button>
+            </div>
+          )}
+
+          {/* STEP 4 — ERROR */}
+          {step === "error" && (
+            <div className="space-y-4 text-center py-4">
+              <div className="w-14 h-14 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto">
+                <XCircle className="w-7 h-7 text-red-400" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-white">Disbursement failed</p>
+                <p className="text-sm text-muted-foreground mt-1">The Xero transaction was not created. No changes were made.</p>
+              </div>
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-left">
+                <p className="text-xs text-red-300">{errorMsg}</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setStep("confirm")} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm hover:bg-white/8 transition-colors">← Try again</button>
+                <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm hover:bg-white/8 transition-colors">Close</button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </motion.div>
+    </motion.div>
+  );
 }
 
 function PaymentModal({ notification, onClose, onDone }: {
