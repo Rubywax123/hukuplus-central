@@ -417,28 +417,29 @@ async function upsertNotification(params: {
   customerPhone?: string | null;
   branchName?: string | null;
   retailerName?: string | null;
+  paymentAmount?: number | null;
 }) {
   try {
     if (params.jobId) {
-      // Known job ID — use upsert to deduplicate
       await pool.query(
         `INSERT INTO formitize_notifications
-           (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (formitize_job_id, form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (formitize_job_id) DO NOTHING`,
         [params.jobId, params.formName, params.taskType, params.product,
          params.customerName, params.customerPhone ?? null,
-         params.branchName ?? null, params.retailerName ?? null]
+         params.branchName ?? null, params.retailerName ?? null,
+         params.paymentAmount ?? null]
       );
     } else {
-      // No job ID (e.g. jobID=0 from Formitize) — plain insert, no conflict clause
       await pool.query(
         `INSERT INTO formitize_notifications
-           (form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+           (form_name, task_type, product, customer_name, customer_phone, branch_name, retailer_name, payment_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [params.formName, params.taskType, params.product,
          params.customerName, params.customerPhone ?? null,
-         params.branchName ?? null, params.retailerName ?? null]
+         params.branchName ?? null, params.retailerName ?? null,
+         params.paymentAmount ?? null]
       );
     }
   } catch (err) {
@@ -541,6 +542,19 @@ router.post("/formitize/webhook", async (req, res) => {
       "applicantname", "fullname", "name", "formtext_1", "formtext_2"
     ) || rawFormName;
 
+    // Extract payment amount for payment-type notifications
+    let paymentAmount: number | null = null;
+    if (formType === "payment") {
+      const amtRaw = findField(
+        "amount", "payment amount", "paid amount", "total paid", "totalamount",
+        "paymentamount", "paidamount", "amountpaid", "amount paid", "receipt amount"
+      );
+      if (amtRaw) {
+        const parsed = parseFloat(amtRaw.replace(/[^0-9.]/g, ""));
+        if (!isNaN(parsed) && parsed > 0) paymentAmount = parsed;
+      }
+    }
+
     await db.insert(activityTable).values({
       type: `formitize_${formType}`,
       description: `${rawFormName} received for ${customerName}`,
@@ -548,7 +562,7 @@ router.post("/formitize/webhook", async (req, res) => {
       referenceId: jobId ? parseInt(jobId) || null : null,
     });
 
-    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName });
+    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, paymentAmount });
 
     console.log(`[formitize:webhook] Stored as activity — ${rawFormName}`);
     res.status(200).json({ ok: true, stored: "activity", product, formType });

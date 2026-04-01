@@ -578,6 +578,9 @@ export async function runMigrations() {
       ON CONFLICT (central_branch_id) DO NOTHING;
     `);
 
+    // ── payment_amount column on formitize_notifications ───────────────────
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2);`);
+
     // ── WhatsApp messages table ─────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_messages (
