@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
+import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
 
 const router = Router();
 
@@ -50,8 +51,7 @@ function xeroHeaders(auth: { accessToken: string; tenantId: string }) {
 
 // ─── GET /api/payments/bank-accounts ─────────────────────────────────────────
 
-router.get("/payments/bank-accounts", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.get("/payments/bank-accounts", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
 
   const auth = await getValidAccessToken();
   if (!auth) { res.status(503).json({ error: "Xero not connected" }); return; }
@@ -77,8 +77,7 @@ router.get("/payments/bank-accounts", async (req, res): Promise<void> => {
 // ─── POST /api/payments/match-customer ───────────────────────────────────────
 // Find matching customers for a payment notification and fetch their Xero invoices
 
-router.post("/payments/match-customer", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.post("/payments/match-customer", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
 
   const { customerName, branchName, retailerName } = req.body as {
     customerName: string;
@@ -213,8 +212,7 @@ router.post("/payments/match-customer", async (req, res): Promise<void> => {
 
 // ─── POST /api/payments/process ──────────────────────────────────────────────
 
-router.post("/payments/process", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
 
   const {
     notificationId,

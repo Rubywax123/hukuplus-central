@@ -1,6 +1,7 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Request, Response } from "express";
 import { pool } from "@workspace/db";
 import crypto from "crypto";
+import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
 
 const router = Router();
 
@@ -8,15 +9,6 @@ const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID!;
 const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET!;
 const REDIRECT_URI = "https://huku-plus-central.replit.app/api/xero/callback";
 const SCOPES = "openid profile email accounting.contacts accounting.transactions offline_access";
-
-// ─── Auth middleware ──────────────────────────────────────────────────────────
-
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!(req.session as any)?.staffUser) {
-    return res.status(401).json({ error: "Not authenticated" });
-  }
-  next();
-}
 
 // ─── Token storage helpers ────────────────────────────────────────────────────
 
@@ -101,8 +93,8 @@ async function getValidAccessToken(): Promise<{ accessToken: string; tenantId: s
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-// GET /xero/auth — initiate OAuth (no auth required — Xero itself handles identity)
-router.get("/xero/auth", (req: Request, res: Response) => {
+// GET /xero/auth — initiate OAuth (admin only)
+router.get("/xero/auth", requireStaffAuth, requireSuperAdmin, (req: Request, res: Response) => {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: XERO_CLIENT_ID,
@@ -180,7 +172,7 @@ router.get("/xero/callback", async (req: Request, res: Response) => {
 });
 
 // GET /xero/status
-router.get("/xero/status", async (req: Request, res: Response) => {
+router.get("/xero/status", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const tokens = await getXeroTokens();
     if (!tokens) return res.json({ connected: false });
@@ -196,7 +188,7 @@ router.get("/xero/status", async (req: Request, res: Response) => {
 });
 
 // POST /xero/disconnect
-router.post("/xero/disconnect", requireAuth, async (req: Request, res: Response) => {
+router.post("/xero/disconnect", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query("DELETE FROM xero_tokens");
@@ -207,7 +199,7 @@ router.post("/xero/disconnect", requireAuth, async (req: Request, res: Response)
 });
 
 // GET /xero/contacts/search?q=...
-router.get("/xero/contacts/search", requireAuth, async (req: Request, res: Response) => {
+router.get("/xero/contacts/search", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   const q = ((req.query.q as string) || "").trim();
   if (!q || q.length < 2) return res.json([]);
 
@@ -248,7 +240,7 @@ router.get("/xero/contacts/search", requireAuth, async (req: Request, res: Respo
 });
 
 // GET /xero/customer/:customerId/data
-router.get("/xero/customer/:customerId/data", requireAuth, async (req: Request, res: Response) => {
+router.get("/xero/customer/:customerId/data", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   const client = await pool.connect();
   let xeroContactId: string | null = null;
   try {

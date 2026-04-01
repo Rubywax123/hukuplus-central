@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
+import { useStaffAuth } from "@/hooks/useStaffAuth";
 import {
   Bell, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Clock, User, Store,
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
-  DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight,
+  DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -1444,8 +1445,20 @@ interface TabDef {
   badgeKey?: string;
 }
 
+const ADMIN_TABS: Tab[] = ["formitize", "loans", "drawdowns", "messages"];
+
 export default function ActivityPage() {
-  const [tab, setTab] = useState<Tab>("formitize");
+  const { user } = useStaffAuth();
+  const isAdmin = user?.role === "super_admin";
+
+  const [tab, setTab] = useState<Tab>(() => isAdmin ? "formitize" : "whatsapp");
+
+  // If user role loads and they're not an admin but on an admin-only tab, redirect to whatsapp
+  useEffect(() => {
+    if (user && !isAdmin && ADMIN_TABS.includes(tab)) {
+      setTab("whatsapp");
+    }
+  }, [user, isAdmin, tab]);
 
   const { data: counts } = useQuery<CountsResponse>({
     queryKey: ["notification-counts"],
@@ -1454,6 +1467,7 @@ export default function ActivityPage() {
       if (!r.ok) return { breakdown: [], newTotal: 0 };
       return r.json();
     },
+    enabled: isAdmin,
     refetchInterval: 30_000,
   });
 
@@ -1464,6 +1478,7 @@ export default function ActivityPage() {
       if (!r.ok) return { count: 0 };
       return r.json();
     },
+    enabled: isAdmin,
     refetchInterval: 30_000,
   });
 
@@ -1481,13 +1496,15 @@ export default function ActivityPage() {
   const drawdownBadge  = ddCount?.count ?? 0;
   const waBadge        = waUnread?.count ?? 0;
 
-  const TABS: TabDef[] = [
+  const ALL_TABS: TabDef[] = [
     { id: "formitize",  label: "Formitize",       icon: <Bell className="w-4 h-4" /> },
     { id: "loans",      label: "Loan Requests",   icon: <Egg className="w-4 h-4" /> },
     { id: "drawdowns",  label: "Drawdowns",       icon: <ArrowDownCircle className="w-4 h-4" /> },
     { id: "messages",   label: "Store Messages",  icon: <MessageSquare className="w-4 h-4" /> },
     { id: "whatsapp",   label: "WhatsApp",         icon: <MessageCircle className="w-4 h-4" /> },
   ];
+
+  const TABS = isAdmin ? ALL_TABS : ALL_TABS.filter(t => !ADMIN_TABS.includes(t.id));
 
   const getBadge = (id: Tab) => {
     if (id === "formitize") return formitizeBadge;
@@ -1500,7 +1517,11 @@ export default function ActivityPage() {
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Activity</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">All inbound events, requests, and store communications in one place</p>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {isAdmin
+            ? "All inbound events, requests, and store communications in one place"
+            : "Store communications and WhatsApp — additional sections are admin-only"}
+        </p>
       </div>
 
       <div className="flex gap-1 bg-white/5 rounded-xl p-1 flex-wrap">
@@ -1521,11 +1542,25 @@ export default function ActivityPage() {
         })}
       </div>
 
-      {tab === "formitize"  && <FormitizeTab />}
-      {tab === "loans"      && <LoansTab />}
-      {tab === "drawdowns"  && <DrawdownsTab />}
-      {tab === "messages"   && <MessagesTab />}
-      {tab === "whatsapp"   && <WhatsAppTab />}
+      {ADMIN_TABS.includes(tab) && !isAdmin ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
+          <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+            <Lock className="w-6 h-6 text-muted-foreground" />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-foreground">Admin access required</p>
+            <p className="text-sm text-muted-foreground mt-1">This section is restricted to the principal administrator.</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {tab === "formitize"  && <FormitizeTab />}
+          {tab === "loans"      && <LoansTab />}
+          {tab === "drawdowns"  && <DrawdownsTab />}
+          {tab === "messages"   && <MessagesTab />}
+          {tab === "whatsapp"   && <WhatsAppTab />}
+        </>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable
 import { eq, ilike } from "drizzle-orm";
 import crypto from "crypto";
 import multer from "multer";
+import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -70,8 +71,7 @@ function isTemplateName(s: string): boolean {
 }
 
 // ─── POST /api/formitize/import-csv ──────────────────────────────────────────
-router.post("/formitize/import-csv", upload.single("file"), async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.post("/formitize/import-csv", requireStaffAuth, requireSuperAdmin, upload.single("file"), async (req, res): Promise<void> => {
   if (!req.file) { res.status(400).json({ error: "No CSV file uploaded" }); return; }
 
   const text = req.file.buffer.toString("utf-8");
@@ -900,8 +900,7 @@ router.post("/formitize/webhook", async (req, res) => {
 });
 
 // ─── GET /api/formitize/notifications ────────────────────────────────────────
-router.get("/formitize/notifications", async (req, res) => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.get("/formitize/notifications", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { product, task_type, status } = req.query;
   const params: any[] = [];
   let where = "WHERE 1=1";
@@ -916,8 +915,7 @@ router.get("/formitize/notifications", async (req, res) => {
 });
 
 // ─── GET /api/formitize/notifications/counts ──────────────────────────────────
-router.get("/formitize/notifications/counts", async (req, res) => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.get("/formitize/notifications/counts", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const result = await pool.query(
     `SELECT product, task_type, status, COUNT(*) AS count
      FROM formitize_notifications
@@ -930,8 +928,7 @@ router.get("/formitize/notifications/counts", async (req, res) => {
 });
 
 // ─── PUT /api/formitize/notifications/:id/status ──────────────────────────────
-router.put("/formitize/notifications/:id/status", async (req, res) => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.put("/formitize/notifications/:id/status", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   if (!["new", "actioned"].includes(status)) { res.status(400).json({ error: "Invalid status" }); return; }
@@ -943,8 +940,7 @@ router.put("/formitize/notifications/:id/status", async (req, res) => {
 });
 
 // ─── POST /api/formitize/notifications/mark-all ───────────────────────────────
-router.post("/formitize/notifications/mark-all", async (req, res) => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+router.post("/formitize/notifications/mark-all", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { product, task_type } = req.body as { product?: string; task_type?: string };
   const params: any[] = [];
   let where = "WHERE status = 'new'";
