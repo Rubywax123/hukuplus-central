@@ -1234,7 +1234,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
                 <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-white/50 hover:text-white/70 transition-colors">Cancel</button>
                 <button
                   onClick={() => setStep("confirm")}
-                  disabled={!selected || !selected.xero_contact_id}
+                  disabled={!selected || !selected.xeroContactId}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Next — Confirm Details
