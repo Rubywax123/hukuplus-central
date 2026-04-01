@@ -506,14 +506,25 @@ router.post("/formitize/webhook", async (req, res) => {
       }
 
       const nodeKeys = Object.keys(node);
+      // Simplified format: { fieldId: { "0": "value" } }
       if (nodeKeys.length === 1 && nodeKeys[0] === "0" && typeof node["0"] === "string" && node["0"].trim()) {
         fieldMap[key.toLowerCase()] = node["0"].trim();
         continue;
       }
 
+      // Full format: { fieldId: { value: "...", name/label: "...", ... } }
       if (node.value !== undefined && node.value !== null && typeof node.value !== "object" && String(node.value).trim()) {
+        const val = String(node.value).trim();
+        const internalKey = key.toLowerCase();
         const resolvedKey = (node.name || node.label || key).toString().toLowerCase();
-        fieldMap[resolvedKey] = String(node.value).trim();
+
+        // Always store under internal field ID — this is always unique and never collides
+        fieldMap[internalKey] = val;
+        // Store under human-readable label only if not already set (first-occurrence-wins
+        // prevents "Cellphone Number" in the NOK section from overwriting the customer's)
+        if (resolvedKey !== internalKey && !fieldMap[resolvedKey]) {
+          fieldMap[resolvedKey] = val;
+        }
       }
 
       if (node.children && typeof node.children === "object") extractFields(node.children);
@@ -633,12 +644,14 @@ router.post("/formitize/webhook", async (req, res) => {
     "formtel_1"   // fallback: store phone (or only phone on some forms)
   ) || null;
 
-  // National ID — formtext_4 is Revolver's "Applicant ID" slot; formtext_7 is new-customer slot
+  // National ID — label-based first, then form-specific internal IDs as fallback.
+  // formtext_4 deliberately NOT listed here: in ChikweretiOne it's the customer's cellphone.
+  // Revolver's "Applicant ID" is caught by the "applicantid" label needle.
   const nationalIdRaw = findField(
     "applicantid", "applicant id",
     "nationalid", "national_id", "idnumber", "id number", "national id",
     "employeeid", "employee id", "debtornid", "nid",
-    "formtext_4", "formtext_7"
+    "formtext_7"  // HukuPlus new-customer form slot
   ) || null;
 
   // Email — "Applicant Email" (formEmail_2) must come BEFORE generic "email"/"formemail_1"
@@ -831,22 +844,44 @@ router.post("/formitize/webhook", async (req, res) => {
 
   const strOrNull = (v: string | undefined) => (!v || isNaVal(v)) ? null : v;
 
-  const gender         = strOrNull(findField("gender"));
-  const dateOfBirth    = strOrNull(findField("dateofbirth", "date of birth", "dob"));
+  const gender         = strOrNull(findField("applicantgender", "gender"));
+  const dateOfBirth    = strOrNull(findField("applicantdateofbirth", "dateofbirth", "date of birth", "dob"));
   const maritalStatus  = strOrNull(findField("maritalstatus", "marital status"));
   const isEmployed     = strOrNull(findField("areyouemployed", "employed", "earnsalary"));
-  const employerName   = strOrNull(findField("nameofemployer", "employer", "employername", "placeofwork"));
+  // "employercompany" catches ChikweretiOne's "Employer Company" field specifically
+  const employerName   = strOrNull(findField("employercompany", "nameofemployer", "employername", "employer", "placeofwork"));
   const salesRepName   = strOrNull(findField("nameofsalesrepresentative", "salesrepresentative", "salesrep", "salesrepname"));
   const retailerRef    = strOrNull(findField("retailerreferencenumber", "retailerreference", "referencenumber", "retailerref"));
   const marketType     = strOrNull(findField("wheredoesthecustomersell", "sellchickens", "markettype", "sellbirds"));
 
-  // Next-of-Kin — use 'nextofkin' as a prefix to avoid collision with borrower's 'fullname'
-  const nokName         = strOrNull(findField("nextofkinfullname", "nextofkinname", "nokname", "nokfullname", "kinname"));
-  const nokRelationship = strOrNull(findField("relationshiptoborrower", "relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
-  const nokNationalId   = strOrNull(findField("nextofkinid", "nextofkinpassport", "nokid", "nokpassport", "kinid"));
-  // "nextofkintelephone" catches Revolver's "Next-of-Kin Telephone Number" field
-  const nokPhone        = strOrNull(findField("nextofkintelephone", "nextofkinmobile", "nokmobile", "nokphone", "kinmobile", "nextofkinphone"));
-  const nokEmail        = strOrNull(findField("nextofkinemail", "nokemail", "kinemail"));
+  // Next-of-Kin — now that extractFields stores under internal field IDs too, we can use
+  // formtext_5 (NOK name, same slot in Revolver + ChikweretiOne),
+  // formtext_6 (NOK ID/Passport, same slot in Revolver + ChikweretiOne),
+  // formtext_8 (NOK cellphone in ChikweretiOne, unique to that form).
+  // Label-based needles (nextofkinname, etc.) are tried first; internal IDs are fallbacks.
+  const nokName         = strOrNull(findField(
+    "nextofkinfullname", "nextofkinname", "nextofkinnamesurname",
+    "nokname", "nokfullname", "kinname",
+    "formtext_5"  // Revolver + ChikweretiOne NOK name slot
+  ));
+  const nokRelationship = strOrNull(findField(
+    "relationshiptoborrower", "relationshiptoaccount",
+    "nokrelationship", "relationship", "kinrelationship",
+    "formtext_7"  // ChikweretiOne: plain text field for relationship
+  ));
+  const nokNationalId   = strOrNull(findField(
+    "nextofkinid", "nextofkinpassport", "nokid", "nokpassport", "kinid",
+    "formtext_6"  // Revolver + ChikweretiOne NOK ID slot
+  ));
+  // "nextofkintelephone" catches Revolver's "Next-of-Kin Telephone Number";
+  // "formtext_8" catches ChikweretiOne's NOK "Cellphone Number" by internal ID
+  // (label-based search would return customer's cellphone due to first-wins).
+  const nokPhone        = strOrNull(findField(
+    "nextofkintelephone", "nextofkinmobile",
+    "nokmobile", "nokphone", "kinmobile", "nextofkinphone",
+    "formtext_8"  // ChikweretiOne NOK cellphone (internal ID — unique to NOK section)
+  ));
+  const nokEmail        = strOrNull(findField("nextofkinemail", "nokemail", "kinemail", "nextofkinemail"));
   const nokAddress      = strOrNull(findField("nextofkinaddress", "nokaddress", "kinaddress"));
 
   let customerId: number | null = null;

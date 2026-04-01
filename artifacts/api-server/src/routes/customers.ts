@@ -211,18 +211,18 @@ router.post("/customers/backfill-from-form-data", async (req, res): Promise<void
     const updates: Record<string, string> = {};
     const trySet = (col: string, val: string | null) => { if (val && !isNaVal(val)) updates[col] = val; };
 
-    trySet("gender",             find("gender"));
-    trySet("date_of_birth",      find("dateofbirth", "date of birth", "dob"));
+    trySet("gender",             find("applicantgender", "gender"));
+    trySet("date_of_birth",      find("applicantdateofbirth", "dateofbirth", "date of birth", "dob"));
     trySet("marital_status",     find("maritalstatus", "marital status"));
     trySet("is_employed",        find("areyouemployed", "employed", "earnsalary"));
-    trySet("employer_name",      find("nameofemployer", "employer", "employername", "placeofwork"));
+    trySet("employer_name",      find("employercompany", "nameofemployer", "employername", "employer", "placeofwork"));
     trySet("sales_rep_name",     find("nameofsalesrepresentative", "salesrepresentative", "salesrep"));
     trySet("retailer_reference", find("retailerreferencenumber", "retailerreference", "retailerref"));
     trySet("market_type",        find("wheredoesthecustomersell", "sellchickens", "markettype"));
-    trySet("nok_name",           find("nextofkinfullname", "nextofkinname", "nokname", "nokfullname", "kinname"));
-    trySet("nok_relationship",   find("relationshiptoborrower", "relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
-    trySet("nok_national_id",    find("nextofkinid", "nokid", "nokpassport", "kinid"));
-    trySet("nok_phone",          find("nextofkintelephone", "nextofkinmobile", "nokmobile", "nokphone", "kinmobile"));
+    trySet("nok_name",           find("nextofkinfullname", "nextofkinname", "nextofkinnamesurname", "nokname", "nokfullname", "kinname", "formtext_5"));
+    trySet("nok_relationship",   find("relationshiptoborrower", "relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship", "formtext_7"));
+    trySet("nok_national_id",    find("nextofkinid", "nokid", "nokpassport", "kinid", "formtext_6"));
+    trySet("nok_phone",          find("nextofkintelephone", "nextofkinmobile", "nokmobile", "nokphone", "kinmobile", "formtext_8"));
     trySet("nok_email",          find("nextofkinemail", "nokemail", "kinemail"));
     trySet("nok_address",        find("nextofkinaddress", "nokaddress", "kinaddress"));
     if (row.loan_product) updates["loan_product"] = row.loan_product as string;
