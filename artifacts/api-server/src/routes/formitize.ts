@@ -558,7 +558,10 @@ router.post("/formitize/webhook", async (req, res) => {
   if (activityOnly.includes(formType)) {
     const customerName = findField(
       "formcrm_1", "borrowername", "clientname", "customername", "employeename",
-      "applicantname", "fullname", "name", "formtext_1", "formtext_2"
+      "applicantname", "applicant name",
+      "fullname", "name",
+      "formtext_3",  // Revolver activity forms: applicant name slot
+      "formtext_1", "formtext_2"
     ) || rawFormName;
 
     // Extract payment amount for payment-type notifications
@@ -618,29 +621,42 @@ router.post("/formitize/webhook", async (req, res) => {
     return;
   }
 
+  // Phone — "Applicant Telephone Number" (Revolver: formTel_2) must come BEFORE generic
+  // "phonenumber" because "Store Telephone Number" (formTel_1) also contains "phonenumber"
+  // and would otherwise shadow the applicant's number.
   const customerPhone = findField(
-    "borrowermobile", "employeemobile", "mobile", "phone",
-    "cell", "cellphone", "contact number", "contactnumber", "phonenumber",
-    "formtel_1", "formtel_2"
+    "applicanttelephone", "applicantphone", "applicantmobile",
+    "borrowermobile", "employeemobile", "mobile",
+    "cell", "cellphone", "contact number", "contactnumber",
+    "formtel_2",  // Revolver applicant phone (before formtel_1 which is store phone)
+    "phone", "phonenumber",
+    "formtel_1"   // fallback: store phone (or only phone on some forms)
   ) || null;
 
-  // National ID — checked against common field names; formtext_7 is the "new customer" form slot
+  // National ID — formtext_4 is Revolver's "Applicant ID" slot; formtext_7 is new-customer slot
   const nationalIdRaw = findField(
+    "applicantid", "applicant id",
     "nationalid", "national_id", "idnumber", "id number", "national id",
-    "employeeid", "employee id", "debtornid", "nid", "formtext_7"
+    "employeeid", "employee id", "debtornid", "nid",
+    "formtext_4", "formtext_7"
   ) || null;
 
-  // Email — filter out placeholder "na" / "n/a" values
+  // Email — "Applicant Email" (formEmail_2) must come BEFORE generic "email"/"formemail_1"
+  // because "Store Email" (formEmail_1) also matches "email" and would shadow the applicant.
   const isNa = (v: string | undefined) =>
     !v || ["na", "n/a", "none", "nil", "-"].includes(v.toLowerCase().trim());
   const customerEmailRaw = findField(
-    "email", "emailaddress", "email address", "borroweremail",
-    "employeeemail", "formemail_1", "formemail_2"
+    "applicantemail", "applicant email",
+    "borroweremail", "employeeemail",
+    "formemail_2",  // Revolver applicant email (before formemail_1 which is store email)
+    "email", "emailaddress", "email address",
+    "formemail_1"   // fallback: store email
   );
   const customerEmail = isNa(customerEmailRaw) ? null : (customerEmailRaw || null);
 
-  // Address — formlocation_1 is the "new customer" form slot; also check generic labels
+  // Address — "Applicant Address" (Revolver) first, then generic; formlocation_1 = new-customer
   const customerAddressRaw = findField(
+    "applicantaddress", "applicant address",
     "address", "homeaddress", "home address", "residentialaddress",
     "residential address", "formlocation_1"
   );
@@ -826,9 +842,10 @@ router.post("/formitize/webhook", async (req, res) => {
 
   // Next-of-Kin — use 'nextofkin' as a prefix to avoid collision with borrower's 'fullname'
   const nokName         = strOrNull(findField("nextofkinfullname", "nextofkinname", "nokname", "nokfullname", "kinname"));
-  const nokRelationship = strOrNull(findField("relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
+  const nokRelationship = strOrNull(findField("relationshiptoborrower", "relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
   const nokNationalId   = strOrNull(findField("nextofkinid", "nextofkinpassport", "nokid", "nokpassport", "kinid"));
-  const nokPhone        = strOrNull(findField("nextofkinmobile", "nokmobile", "nokphone", "kinmobile", "nextofkinphone"));
+  // "nextofkintelephone" catches Revolver's "Next-of-Kin Telephone Number" field
+  const nokPhone        = strOrNull(findField("nextofkintelephone", "nextofkinmobile", "nokmobile", "nokphone", "kinmobile", "nextofkinphone"));
   const nokEmail        = strOrNull(findField("nextofkinemail", "nokemail", "kinemail"));
   const nokAddress      = strOrNull(findField("nextofkinaddress", "nokaddress", "kinaddress"));
 

@@ -220,9 +220,9 @@ router.post("/customers/backfill-from-form-data", async (req, res): Promise<void
     trySet("retailer_reference", find("retailerreferencenumber", "retailerreference", "retailerref"));
     trySet("market_type",        find("wheredoesthecustomersell", "sellchickens", "markettype"));
     trySet("nok_name",           find("nextofkinfullname", "nextofkinname", "nokname", "nokfullname", "kinname"));
-    trySet("nok_relationship",   find("relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
+    trySet("nok_relationship",   find("relationshiptoborrower", "relationshiptoaccount", "nokrelationship", "relationship", "kinrelationship"));
     trySet("nok_national_id",    find("nextofkinid", "nokid", "nokpassport", "kinid"));
-    trySet("nok_phone",          find("nextofkinmobile", "nokmobile", "nokphone", "kinmobile"));
+    trySet("nok_phone",          find("nextofkintelephone", "nextofkinmobile", "nokmobile", "nokphone", "kinmobile"));
     trySet("nok_email",          find("nextofkinemail", "nokemail", "kinemail"));
     trySet("nok_address",        find("nextofkinaddress", "nokaddress", "kinaddress"));
     if (row.loan_product) updates["loan_product"] = row.loan_product as string;
