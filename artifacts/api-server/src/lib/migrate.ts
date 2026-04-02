@@ -657,6 +657,40 @@ export async function runMigrations() {
     // Stores an array of {url, name} objects uploaded via the document upload form.
     await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS signed_documents JSONB DEFAULT '[]'::jsonb;`);
 
+    // ── Backfill formitize_notifications from agreements (applications/reapplications) ──
+    // Agreements (application/reapplication form types) were captured before upsertNotification
+    // was added to the agreement webhook path, so the notifications feed was missing them.
+    await client.query(`
+      INSERT INTO formitize_notifications
+        (formitize_job_id, form_name, task_type, product, customer_name, customer_id,
+         customer_phone, branch_name, retailer_name, status, created_at)
+      SELECT
+        a.formitize_job_id,
+        CASE a.form_type
+          WHEN 'application'   THEN 'NEW CUSTOMER APPLICATION'
+          WHEN 'reapplication' THEN 'HUKUPLUS RE-APPLICATION'
+          ELSE UPPER(a.form_type)
+        END,
+        a.form_type,
+        a.loan_product,
+        a.customer_name,
+        a.customer_id,
+        a.customer_phone,
+        b.name,
+        r.name,
+        CASE WHEN a.status = 'application' THEN 'new' ELSE 'actioned' END,
+        a.created_at
+      FROM agreements a
+      LEFT JOIN branches  b ON b.id = a.branch_id
+      LEFT JOIN retailers r ON r.id = a.retailer_id
+      WHERE a.form_type IN ('application', 'reapplication')
+        AND a.formitize_job_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM formitize_notifications fn
+          WHERE fn.formitize_job_id = a.formitize_job_id
+        );
+    `);
+
     // ── One-time data fix: Angeline Shoko payment receipt (job 23498021) ───
     // formcurrency_1 was not extracted by webhook handler — fix payment_amount,
     // branch_name and retailer_name from the known Formitize payload.
