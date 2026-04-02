@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity } from "lucide-react";
+import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -204,6 +204,67 @@ function XeroStatusWidget() {
   );
 }
 
+// ─── Formitize Status Widget ──────────────────────────────────────────────────
+
+function FormitizeStatusWidget() {
+  const [copied, setCopied] = useState(false);
+
+  const { data } = useQuery<{ connected: boolean; lastWebhook: string | null; webhookUrl: string }>({
+    queryKey: ["formitize-status"],
+    queryFn: () => fetch(`${BASE}/api/formitize/status`, { credentials: "include" }).then(r => r.json()),
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  if (!data) return null;
+
+  function copyUrl() {
+    navigator.clipboard.writeText(data!.webhookUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function timeAgo(ts: string) {
+    const diff = Date.now() - new Date(ts).getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days === 0) return "today";
+    if (days === 1) return "yesterday";
+    return `${days}d ago`;
+  }
+
+  return (
+    <div className="px-4 mb-1">
+      {data.connected ? (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-emerald-400">Formitize Connected</p>
+            {data.lastWebhook && (
+              <p className="text-[10px] text-muted-foreground">Last webhook: {timeAgo(data.lastWebhook)}</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-amber-400">Formitize webhooks not set up</p>
+              <p className="text-[10px] text-muted-foreground">Add this URL to each Formitize form</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 bg-black/20 rounded-lg px-2 py-1">
+            <p className="text-[9px] text-muted-foreground flex-1 truncate font-mono">{data.webhookUrl}</p>
+            <button onClick={copyUrl} className="shrink-0 text-muted-foreground hover:text-white transition-colors" title="Copy URL">
+              {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Internal Layout ──────────────────────────────────────────────────────────
 
 export function InternalLayout({ children }: { children: React.ReactNode }) {
@@ -290,6 +351,7 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <XeroStatusWidget />
+        <FormitizeStatusWidget />
 
         <div className="p-6 border-t border-white/5">
           <div className="flex items-center gap-3 px-2 mb-4">

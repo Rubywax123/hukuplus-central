@@ -382,6 +382,31 @@ router.get("/formitize/one-click", async (req, res): Promise<void> => {
   res.redirect(`${appUrl}/kiosk/${branch.id}`);
 });
 
+// ─── GET /formitize/status ────────────────────────────────────────────────────
+router.get("/formitize/status", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
+  const webhookUrl = `${process.env.APP_URL ?? "https://huku-plus-central.replit.app"}/api/formitize/webhook`;
+
+  // Find the most recent webhook activity (any formitize_ type in the activity log)
+  const result = await pool.query(
+    `SELECT timestamp FROM activity WHERE type LIKE 'formitize_%' OR type LIKE 'agreement_%' OR type = 'application_received'
+     ORDER BY timestamp DESC LIMIT 1`
+  );
+  const lastRow = result.rows[0];
+  const lastWebhook: string | null = lastRow?.timestamp ?? null;
+
+  // "Connected" = a webhook arrived in the last 14 days
+  const connected = lastWebhook
+    ? (Date.now() - new Date(lastWebhook).getTime()) < 14 * 24 * 60 * 60 * 1000
+    : false;
+
+  res.json({
+    connected,
+    lastWebhook,
+    webhookUrl,
+    apiKeyConfigured: Boolean(process.env.FORMITIZE_API_KEY),
+  });
+});
+
 // ─── Form context detection ────────────────────────────────────────────────────
 function parseFormContext(formName: string): {
   product: "HukuPlus" | "ChikweretiOne" | "Revolver";
