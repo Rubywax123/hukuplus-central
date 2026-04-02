@@ -201,7 +201,7 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
     // ── Fetch known customers keyed by xero_contact_id ───────────────────
     const contactRows = await client.query(
       `SELECT id, xero_contact_id, full_name, phone, national_id, date_of_birth,
-              sales_rep_name, retailer_reference
+              extension_officer, retailer_reference
        FROM customers
        WHERE xero_contact_id IS NOT NULL AND xero_contact_id != ''`
     );
@@ -279,7 +279,7 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       const phone: string = matchedCustomer?.phone ?? "";
       const dateOfBirth: string | null = matchedCustomer?.date_of_birth ?? null;
       const nationalId: string | null = matchedCustomer?.national_id ?? null;
-      const salesRep: string | null = matchedCustomer?.sales_rep_name ?? null;
+      const salesRep: string | null = matchedCustomer?.extension_officer ?? null;
       const customerId: number | null = matchedCustomer?.id ?? null;
 
       // ── Resolve branch / retailer from tracking options ────────────────

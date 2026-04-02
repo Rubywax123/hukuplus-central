@@ -600,6 +600,7 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_phone TEXT;`);
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_email TEXT;`);
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS nok_address TEXT;`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS extension_officer TEXT;`);
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS sales_rep_name TEXT;`);
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS retailer_reference TEXT;`);
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS market_type TEXT;`);

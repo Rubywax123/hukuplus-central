@@ -143,7 +143,7 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
   const {
     fullName, phone, email, nationalId, address, notes, xeroContactId,
     gender, dateOfBirth, maritalStatus, isEmployed, employerName,
-    salesRepName, retailerReference, marketType, loanProduct,
+    extensionOfficer, salesRepName, retailerReference, marketType, loanProduct,
     nokName, nokRelationship, nokNationalId, nokPhone, nokEmail, nokAddress,
   } = req.body;
 
@@ -164,6 +164,7 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
       ...(maritalStatus      !== undefined && { maritalStatus }),
       ...(isEmployed         !== undefined && { isEmployed }),
       ...(employerName       !== undefined && { employerName }),
+      ...(extensionOfficer   !== undefined && { extensionOfficer }),
       ...(salesRepName       !== undefined && { salesRepName }),
       ...(retailerReference  !== undefined && { retailerReference }),
       ...(marketType         !== undefined && { marketType }),
@@ -234,7 +235,8 @@ router.post("/customers/backfill-from-form-data", async (req, res): Promise<void
     trySet("marital_status",     find("maritalstatus", "marital status"));
     trySet("is_employed",        find("areyouemployed", "employed", "earnsalary"));
     trySet("employer_name",      find("employercompany", "nameofemployer", "employername", "employer", "placeofwork"));
-    trySet("sales_rep_name",     find("nameofsalesrepresentative", "salesrepresentative", "salesrep"));
+    trySet("extension_officer",  find("nameofsalesrepresentative", "salesrepresentative", "salesrep",
+                                      "extensionofficer", "extension officer", "fieldofficer"));
     trySet("retailer_reference", find("retailerreferencenumber", "retailerreference", "retailerref"));
     trySet("market_type",        find("wheredoesthecustomersell", "sellchickens", "markettype"));
     trySet("nok_name",           find("nextofkinfullname", "nextofkinname", "nextofkinnamesurname", "nokname", "nokfullname", "kinname", "formtext_5"));

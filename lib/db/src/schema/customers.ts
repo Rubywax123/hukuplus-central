@@ -29,6 +29,9 @@ export const customersTable = pgTable("customers", {
   nokAddress: text("nok_address"),
 
   // Application meta
+  // extensionOfficer = the store employee/manager who dealt with the customer at the branch
+  extensionOfficer: text("extension_officer"),
+  // salesRepName = reserved for a Marishoma internal sales rep assigned to the customer (future use)
   salesRepName: text("sales_rep_name"),
   retailerReference: text("retailer_reference"),
   marketType: text("market_type"),

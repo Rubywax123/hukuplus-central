@@ -977,11 +977,13 @@ router.post("/formitize/webhook", async (req, res) => {
   const isEmployed     = strOrNull(findField("areyouemployed", "employed", "earnsalary"));
   // "employercompany" catches ChikweretiOne's "Employer Company" field specifically
   const employerName   = strOrNull(findField("employercompany", "nameofemployer", "employername", "employer", "placeofwork"));
-  // For HukuPlus Loan Agreements, the branch staff member who processed the loan is in
-  // formtext_3 / formtext_4 (e.g. "Tatenda Nyamutowa" at Rusape). For all other forms,
-  // use the standard named sales-rep fields.
-  const salesRepName   = strOrNull(
-    findField("nameofsalesrepresentative", "salesrepresentative", "salesrep", "salesrepname") ||
+  // Extension Officer = the store employee/manager who dealt with the customer at the branch.
+  // For HukuPlus Loan Agreements: formtext_3/4 holds the branch staff member's name.
+  // For all other forms: use standard named fields ("nameofsalesrepresentative" etc.).
+  // NOTE: "Sales Rep" is reserved for a future Marishoma internal rep role — not captured here.
+  const extensionOfficerName = strOrNull(
+    findField("nameofsalesrepresentative", "salesrepresentative", "salesrep", "salesrepname",
+              "extensionofficer", "extension officer", "fieldofficer", "field officer") ||
     (isHukuPlusAgreement ? (findField("formtext_3") || findField("formtext_4")) : "")
   );
   const retailerRef    = strOrNull(findField("retailerreferencenumber", "retailerreference", "referencenumber", "retailerref"));
@@ -1050,7 +1052,7 @@ router.post("/formitize/webhook", async (req, res) => {
     ...(maritalStatus    ? { maritalStatus                        } : {}),
     ...(isEmployed       ? { isEmployed                          } : {}),
     ...(employerName     ? { employerName                        } : {}),
-    ...(salesRepName     ? { salesRepName                        } : {}),
+    ...(extensionOfficerName ? { extensionOfficer: extensionOfficerName } : {}),
     ...(retailerRef      ? { retailerReference: retailerRef       } : {}),
     ...(marketType       ? { marketType                          } : {}),
     ...(nokName          ? { nokName                             } : {}),
@@ -1077,7 +1079,7 @@ router.post("/formitize/webhook", async (req, res) => {
       address: customerAddress || "", formitize_crm_id: formitizeCrmId || "",
       gender: gender || "", date_of_birth: dateOfBirth || "", marital_status: maritalStatus || "",
       is_employed: isEmployed || "", employer_name: employerName || "",
-      sales_rep_name: salesRepName || "", retailer_reference: retailerRef || "",
+      extension_officer: extensionOfficerName || "", retailer_reference: retailerRef || "",
       market_type: marketType || "", nok_name: nokName || "", nok_relationship: nokRelationship || "",
       nok_national_id: nokNationalId || "", nok_phone: nokPhone || "", nok_email: nokEmail || "",
       nok_address: nokAddress || "", loan_product: product || "",

@@ -23,6 +23,7 @@ interface Customer {
   maritalStatus: string | null;
   isEmployed: string | null;
   employerName: string | null;
+  extensionOfficer: string | null;
   salesRepName: string | null;
   retailerReference: string | null;
   marketType: string | null;
@@ -598,10 +599,10 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
                       <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 border border-primary/20 text-primary font-medium">{c.loanProduct}</span>
                     </div>
                   )}
-                  {c.salesRepName && (
+                  {c.extensionOfficer && (
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">Sales Rep</span>
-                      <span className="text-sm text-white">{c.salesRepName}</span>
+                      <span className="text-xs text-muted-foreground">Extension Officer</span>
+                      <span className="text-sm text-white">{c.extensionOfficer}</span>
                     </div>
                   )}
                   {c.retailerReference && (
