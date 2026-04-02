@@ -935,8 +935,10 @@ router.post("/formitize/webhook", async (req, res) => {
   const normalisePhone = (p: string) => {
     if (!p) return null;
     let s = p.replace(/[\s\-\(\)\.]/g, "");
-    if (s.startsWith("+263")) s = "0" + s.slice(4);
-    else if (s.startsWith("263") && s.length >= 12) s = "0" + s.slice(3);
+    if (s.startsWith("+")) return s || null;
+    if (s.startsWith("263") && s.length >= 12) return "+" + s;
+    if (s.startsWith("0")) return "+263" + s.slice(1);
+    if (/^7[0-9]{8}$/.test(s)) return "+263" + s;
     return s || null;
   };
   const normPhone = normalisePhone(customerPhone || "");

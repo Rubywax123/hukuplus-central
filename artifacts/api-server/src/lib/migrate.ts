@@ -149,12 +149,14 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE agreements ALTER COLUMN branch_id DROP NOT NULL`).catch(() => {});
 
     // ── Backfill: create customer records for existing agreements ─────────────
-    // Normalise phone: strip spaces/dashes, convert 263xxx → 0xxx
+    // Normalise phone to +263 international format for consistent storage.
     const normalisePhone = (p: string) => {
       if (!p) return null;
       let s = p.replace(/[\s\-\(\)\.]/g, "");
-      if (s.startsWith("+263")) s = "0" + s.slice(4);
-      else if (s.startsWith("263") && s.length >= 12) s = "0" + s.slice(3);
+      if (s.startsWith("+")) return s || null;
+      if (s.startsWith("263") && s.length >= 12) return "+" + s;
+      if (s.startsWith("0")) return "+263" + s.slice(1);
+      if (/^7[0-9]{8}$/.test(s)) return "+263" + s;
       return s || null;
     };
 
@@ -357,7 +359,7 @@ export async function runMigrations() {
     await client.query(`
       UPDATE customers
       SET full_name   = 'Tamuka Tsigo',
-          phone       = '0787087472',
+          phone       = '+263787087472',
           national_id = '15-114456 F 15',
           address     = 'Henderson Research Bag 2004, Mazowe'
       WHERE full_name = 'Mazowe Profarmer';
@@ -689,6 +691,21 @@ export async function runMigrations() {
           SELECT 1 FROM formitize_notifications fn
           WHERE fn.formitize_job_id = a.formitize_job_id
         );
+    `);
+
+    // ── Normalise customer phone numbers to +263 international format ────────
+    // Local Zimbabwean numbers stored as "07XXXXXXXX" → "+2637XXXXXXXX".
+    // Numbers already prefixed with "+" (any country code) are left untouched.
+    // Numbers stored as "263XXXXXXXXX" (no leading +) get the "+" prepended.
+    await client.query(`
+      UPDATE customers
+      SET phone = CASE
+        WHEN phone LIKE '0%'              THEN '+263' || SUBSTR(phone, 2)
+        WHEN phone ~ '^263' AND phone NOT LIKE '+%' THEN '+' || phone
+        ELSE phone
+      END
+      WHERE phone IS NOT NULL
+        AND phone NOT LIKE '+%';
     `);
 
     // ── One-time data fix: Angeline Shoko payment receipt (job 23498021) ───

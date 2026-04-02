@@ -10,10 +10,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 function normalisePhone(p: string): string | null {
   if (!p) return null;
   let s = p.replace(/[\s\-\(\)\.]/g, "");
-  if (s.startsWith("+263")) s = "0" + s.slice(4);
-  else if (s.startsWith("263") && s.length >= 12) s = "0" + s.slice(3);
-  // Handle 9-digit Zim numbers missing the leading 0 (e.g. "777482993" → "0777482993")
-  else if (/^7[0-9]{8}$/.test(s)) s = "0" + s;
+  // Already international (any country code starting with +) — keep as-is
+  if (s.startsWith("+")) return s || null;
+  // "263XXXXXXXXX" without leading + → add +
+  if (s.startsWith("263") && s.length >= 12) return "+" + s;
+  // Local format "0XXXXXXXXX" → strip leading 0, prepend +263
+  if (s.startsWith("0")) return "+263" + s.slice(1);
+  // 9-digit Zim number missing leading 0 (e.g. "777482993") → +2637...
+  if (/^7[0-9]{8}$/.test(s)) return "+263" + s;
   return s || null;
 }
 
@@ -29,10 +33,16 @@ router.get("/customers", async (req, res): Promise<void> => {
   // Build WHERE conditions
   const conditions: ReturnType<typeof ilike>[] = [];
   if (search) {
+    // When searching by phone, also try the normalised +263 version so that
+    // typing "0777426937" still finds "+263777426937" stored in the DB.
+    const searchNorm = normalisePhone(search);
+    const phoneConditions = searchNorm && searchNorm !== search
+      ? or(ilike(customersTable.phone, `%${search}%`), ilike(customersTable.phone, `%${searchNorm}%`))
+      : ilike(customersTable.phone, `%${search}%`);
     conditions.push(
       or(
         ilike(customersTable.fullName, `%${search}%`),
-        ilike(customersTable.phone, `%${search}%`),
+        phoneConditions,
         ilike(customersTable.nationalId, `%${search}%`),
         ilike(customersTable.email, `%${search}%`),
       ) as any
