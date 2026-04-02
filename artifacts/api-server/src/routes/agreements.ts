@@ -3,6 +3,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { generateNovafeedAgreementPdf } from "../lib/novafeed-pdf";
 import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
+import { deleteFromLoanRegister } from "../lib/syncXeroInvoices";
 import {
   CreateAgreementBody,
   GetAgreementParams,
@@ -420,6 +421,7 @@ router.get("/loan-register", async (req, res): Promise<void> => {
         COALESCE(a.source, 'formitize') AS source,
         COALESCE(a.dismissed, FALSE)    AS dismissed,
         a.xero_invoice_id,
+        a.loan_register_id,
         a.disbursement_date,
         a.repayment_date,
         a.created_at,
@@ -451,13 +453,26 @@ router.put("/agreements/:id/dismiss", async (req, res): Promise<void> => {
   const client2 = await pool.connect();
   try {
     const result = await client2.query(
-      "UPDATE agreements SET dismissed = $1 WHERE id = $2 RETURNING id, dismissed",
+      "UPDATE agreements SET dismissed = $1 WHERE id = $2 RETURNING id, dismissed, loan_register_id, source",
       [dismiss, id]
     );
     if (result.rows.length === 0) {
       res.status(404).json({ error: "Agreement not found" });
       return;
     }
+    const row = result.rows[0];
+
+    // If dismissing a Xero-synced entry that has a Loan Register record, remove it there too
+    if (dismiss && row.source === "xero_sync" && row.loan_register_id) {
+      try {
+        await deleteFromLoanRegister(row.loan_register_id);
+        console.log(`[dismiss] Removed Loan Register entry #${row.loan_register_id} for agreement #${id}`);
+      } catch (err: any) {
+        console.warn(`[dismiss] Could not remove from Loan Register: ${err.message}`);
+        // Non-fatal — local dismissal still applies
+      }
+    }
+
     res.json({ success: true, id, dismissed: dismiss });
   } finally {
     client2.release();

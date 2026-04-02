@@ -2,8 +2,11 @@ import { pool } from "@workspace/db";
 import crypto from "crypto";
 
 const XERO_BASE = "https://api.xero.com/api.xro/2.0";
+const LOAN_REGISTER_URL =
+  process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
+const CENTRAL_API_KEY = process.env.CENTRAL_API_KEY;
 
-// ─── Shared Xero auth helpers ─────────────────────────────────────────────────
+// ─── Xero auth helpers ────────────────────────────────────────────────────────
 
 async function getValidAccessToken(): Promise<{ accessToken: string; tenantId: string } | null> {
   const client = await pool.connect();
@@ -11,7 +14,6 @@ async function getValidAccessToken(): Promise<{ accessToken: string; tenantId: s
     const result = await client.query("SELECT * FROM xero_tokens WHERE id = 1");
     const tokens = result.rows[0];
     if (!tokens) return null;
-
     const expiresAt = new Date(tokens.expires_at);
     if (expiresAt.getTime() - Date.now() < 5 * 60 * 1000) {
       const res = await fetch("https://identity.xero.com/connect/token", {
@@ -48,20 +50,64 @@ function xeroHeaders(auth: { accessToken: string; tenantId: string }) {
   };
 }
 
-// ─── Line-item parsing helpers ────────────────────────────────────────────────
+// ─── Loan Register API helpers ────────────────────────────────────────────────
+
+function loanRegHeaders() {
+  return {
+    "Content-Type": "application/json",
+    ...(CENTRAL_API_KEY ? {
+      Authorization: `Bearer ${CENTRAL_API_KEY}`,
+      "X-Central-System": "HukuPlusCentral",
+    } : {}),
+  };
+}
+
+export async function pushToLoanRegister(payload: Record<string, any>): Promise<number | null> {
+  const res = await fetch(`${LOAN_REGISTER_URL}/api/loans`, {
+    method: "POST",
+    headers: loanRegHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`[loan-register] Push failed (${res.status}): ${body.slice(0, 200)}`);
+    return null;
+  }
+  const data = await res.json() as any;
+  return data.id ?? null;
+}
+
+export async function deleteFromLoanRegister(loanRegisterId: number): Promise<boolean> {
+  const res = await fetch(`${LOAN_REGISTER_URL}/api/loans/${loanRegisterId}`, {
+    method: "DELETE",
+    headers: loanRegHeaders(),
+  });
+  return res.status === 204 || res.status === 200;
+}
+
+// ─── Name splitter: "John Paul Smith" → { surname:"Smith", givenName:"John Paul" }
+function splitName(fullName: string): { surname: string; givenName: string } {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return { surname: parts[0], givenName: "" };
+  const surname = parts[parts.length - 1];
+  const givenName = parts.slice(0, -1).join(" ");
+  return { surname, givenName };
+}
+
+// ─── Parse line items to extract Loan / Fee / Interest amounts ────────────────
 
 interface ParsedLoanLines {
   loanAmount: number;
-  feeAmount: number;
-  interestAmount: number;
-  repaymentAmount: number;
+  loanRaisingFee: number;
+  accruedInterest: number;
+  totalAmount: number;
   trackingOptions: string[];
 }
 
 function parseLoanLineItems(lineItems: any[]): ParsedLoanLines {
   let loanAmount = 0;
-  let feeAmount = 0;
-  let interestAmount = 0;
+  let loanRaisingFee = 0;
+  let accruedInterest = 0;
   const trackingOptions: string[] = [];
 
   for (const li of lineItems) {
@@ -70,19 +116,12 @@ function parseLoanLineItems(lineItems: any[]): ParsedLoanLines {
 
     if (desc.includes("loan") || desc.includes("principal")) {
       loanAmount += amount;
-    } else if (
-      desc.includes("fee") ||
-      desc.includes("facilit") ||
-      desc.includes("admin")
-    ) {
-      feeAmount += amount;
-    } else if (
-      desc.includes("interest") ||
-      desc.includes("42 day") ||
-      desc.includes("42day")
-    ) {
-      interestAmount += amount;
-    } else if (loanAmount === 0 && feeAmount === 0 && interestAmount === 0) {
+    } else if (desc.includes("fee") || desc.includes("facilit") || desc.includes("admin") || desc.includes("rais")) {
+      loanRaisingFee += amount;
+    } else if (desc.includes("interest") || desc.includes("42 day") || desc.includes("42day")) {
+      accruedInterest += amount;
+    } else if (loanAmount === 0 && loanRaisingFee === 0 && accruedInterest === 0) {
+      // First unrecognised line gets treated as loan principal
       loanAmount += amount;
     }
 
@@ -91,21 +130,34 @@ function parseLoanLineItems(lineItems: any[]): ParsedLoanLines {
     }
   }
 
-  const repaymentAmount = loanAmount + feeAmount + interestAmount;
-  return { loanAmount, feeAmount, interestAmount, repaymentAmount, trackingOptions };
+  const totalAmount = loanAmount + loanRaisingFee + accruedInterest;
+  return { loanAmount, loanRaisingFee, accruedInterest, totalAmount, trackingOptions };
+}
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
 }
 
 // ─── Main sync function ───────────────────────────────────────────────────────
 
 export interface SyncXeroResult {
   checked: number;
-  created: number;
+  pushed: number;
   skipped: number;
   errors: string[];
 }
 
 export async function syncXeroInvoices(): Promise<SyncXeroResult> {
-  const result: SyncXeroResult = { checked: 0, created: 0, skipped: 0, errors: [] };
+  const result: SyncXeroResult = { checked: 0, pushed: 0, skipped: 0, errors: [] };
+
+  if (!CENTRAL_API_KEY) {
+    result.errors.push("CENTRAL_API_KEY not set — cannot push to Loan Register.");
+    return result;
+  }
 
   const auth = await getValidAccessToken();
   if (!auth) {
@@ -117,25 +169,27 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
   try {
     // ── Fetch known HukuPlus branch names from DB ─────────────────────────
     const branchRows = await client.query(
-      `SELECT LOWER(b.name) AS name
+      `SELECT LOWER(b.name) AS name, b.name AS original_name
        FROM branches b
        JOIN retailers r ON r.id = b.retailer_id
        WHERE LOWER(r.name) LIKE '%hukuplus%'
           OR LOWER(r.name) LIKE '%huku plus%'`
     );
-    const hukuplusBranches = new Set<string>(branchRows.rows.map((r: any) => r.name));
+    const hukuplusBranchSet = new Set<string>(branchRows.rows.map((r: any) => r.name as string));
+    const branchOriginalNames = new Map<string, string>(
+      branchRows.rows.map((r: any) => [r.name as string, r.original_name as string])
+    );
 
-    // Also fetch xero_contact_ids of known customers so we can match by contact
+    // ── Fetch known customers keyed by xero_contact_id ───────────────────
     const contactRows = await client.query(
-      `SELECT id, xero_contact_id, full_name FROM customers
+      `SELECT id, xero_contact_id, full_name, phone, national_id, date_of_birth,
+              sales_rep_name, retailer_reference
+       FROM customers
        WHERE xero_contact_id IS NOT NULL AND xero_contact_id != ''`
     );
-    const contactMap = new Map<string, { id: number; name: string }>();
+    const contactMap = new Map<string, any>();
     for (const r of contactRows.rows) {
-      contactMap.set((r.xero_contact_id as string).toLowerCase(), {
-        id: r.id,
-        name: r.full_name,
-      });
+      contactMap.set((r.xero_contact_id as string).toLowerCase(), r);
     }
 
     // ── Fetch AUTHORISED ACCREC invoices from Xero (last 90 days) ─────────
@@ -150,7 +204,7 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
 
     if (!invoiceRes.ok) {
       const body = await invoiceRes.text();
-      result.errors.push(`Xero invoice fetch failed: ${invoiceRes.status} — ${body.slice(0, 200)}`);
+      result.errors.push(`Xero invoice fetch failed (${invoiceRes.status}): ${body.slice(0, 200)}`);
       return result;
     }
 
@@ -162,39 +216,35 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       const xeroInvoiceId: string = inv.InvoiceID;
       const lineItems: any[] = inv.LineItems ?? [];
 
-      // ── Identify HukuPlus invoices ─────────────────────────────────────
-      // A HukuPlus invoice has tracking options matching our known branches
-      // OR the contact is a known HukuPlus customer.
+      // ── Parse line items ───────────────────────────────────────────────
       const parsed = parseLoanLineItems(lineItems);
 
-      const hasHukuPlusTracking =
-        parsed.trackingOptions.some((opt) => {
-          const lower = opt.toLowerCase();
-          return (
-            lower.includes("hukuplus") ||
-            lower.includes("huku plus") ||
-            hukuplusBranches.has(lower)
-          );
-        });
+      // ── Identify HukuPlus invoices by tracking options ─────────────────
+      const hasHukuPlusTracking = parsed.trackingOptions.some((opt) => {
+        const lower = opt.toLowerCase();
+        return (
+          lower.includes("hukuplus") ||
+          lower.includes("huku plus") ||
+          hukuplusBranchSet.has(lower)
+        );
+      });
 
       const contactId: string = (inv.Contact?.ContactID ?? "").toLowerCase();
-      const contactMatch = contactMap.get(contactId);
-      const hasKnownContact = !!contactMatch;
+      const matchedCustomer = contactMap.get(contactId);
 
-      if (!hasHukuPlusTracking && !hasKnownContact) {
+      if (!hasHukuPlusTracking && !matchedCustomer) {
         result.skipped++;
         continue;
       }
 
-      // Must have at least one non-zero loan amount line item
-      if (parsed.loanAmount <= 0 && parsed.repaymentAmount <= 0) {
+      if (parsed.loanAmount <= 0 && parsed.totalAmount <= 0) {
         result.skipped++;
         continue;
       }
 
-      // ── Deduplicate by xero_invoice_id ─────────────────────────────────
+      // ── Deduplicate: skip if already in agreements table ───────────────
       const existing = await client.query(
-        "SELECT id FROM agreements WHERE xero_invoice_id = $1",
+        "SELECT id, loan_register_id FROM agreements WHERE xero_invoice_id = $1",
         [xeroInvoiceId]
       );
       if (existing.rows.length > 0) {
@@ -203,80 +253,134 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       }
 
       // ── Resolve customer details ────────────────────────────────────────
-      const customerName: string = inv.Contact?.Name ?? "Unknown Customer";
-      const customerId: number | null = contactMatch?.id ?? null;
+      const xeroContactName: string = inv.Contact?.Name ?? "Unknown Customer";
+      const { surname, givenName } = matchedCustomer
+        ? splitName(matchedCustomer.full_name as string)
+        : splitName(xeroContactName);
 
-      // Resolve branch name from tracking options
-      let branchName: string | null = null;
+      const phone: string = matchedCustomer?.phone ?? "";
+      const dateOfBirth: string | null = matchedCustomer?.date_of_birth ?? null;
+      const nationalId: string | null = matchedCustomer?.national_id ?? null;
+      const salesRep: string | null = matchedCustomer?.sales_rep_name ?? null;
+      const customerId: number | null = matchedCustomer?.id ?? null;
+
+      // ── Resolve branch / retailer from tracking options ────────────────
+      let officeBranch: string | null = null;
       for (const opt of parsed.trackingOptions) {
+        const lower = opt.toLowerCase();
         if (
-          opt.toLowerCase().includes("hukuplus") ||
-          opt.toLowerCase().includes("huku plus") ||
-          hukuplusBranches.has(opt.toLowerCase())
+          lower.includes("hukuplus") ||
+          lower.includes("huku plus") ||
+          hukuplusBranchSet.has(lower)
         ) {
-          branchName = opt;
+          officeBranch = branchOriginalNames.get(lower) ?? opt;
           break;
         }
-        // Use the first tracking option as branch if no HukuPlus-specific one found
-        if (!branchName) branchName = opt;
+      }
+      // Fall back to first tracking option as branch
+      if (!officeBranch && parsed.trackingOptions.length > 0) {
+        officeBranch = parsed.trackingOptions[0];
       }
 
-      // Look up branchId from name
+      // ── Look up branchId in Central DB ─────────────────────────────────
       let branchId: number | null = null;
-      if (branchName) {
+      if (officeBranch) {
         const br = await client.query(
           "SELECT id FROM branches WHERE LOWER(name) = LOWER($1) LIMIT 1",
-          [branchName]
+          [officeBranch]
         );
         branchId = br.rows[0]?.id ?? null;
       }
 
-      // ── Create agreement record ─────────────────────────────────────────
-      const signingToken = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-      const invoiceDate = inv.DateString
+      // ── Calculate dates ────────────────────────────────────────────────
+      const creditApprovalDate: string = inv.DateString
         ? new Date(inv.DateString).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0];
+      const disbursementDate = creditApprovalDate;
+      const dueDate = addDays(creditApprovalDate, 42);
+
+      // ── Build Loan Register payload ────────────────────────────────────
+      const loanPayload: Record<string, any> = {
+        clientSurname:       surname,
+        clientGivenName:     givenName,
+        telephone:           phone,
+        dateOfBirth:         dateOfBirth,
+        idPassport:          nationalId,
+        loanType:            "HukuPlus",
+        creditApprovalDate,
+        disbursementDate,
+        dueDate,
+        term:                42,
+        loanAmount:          parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
+        loanRaisingFee:      parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee : null,
+        accruedInterest:     parsed.accruedInterest > 0 ? parsed.accruedInterest : null,
+        totalAmount:         parsed.totalAmount > 0 ? parsed.totalAmount : parsed.loanAmount,
+        officeBranch,
+        retailer:            officeBranch,
+        loanNumber:          inv.InvoiceNumber ?? null,
+        extension:           salesRep,
+        xeroInvoiceId,
+        notes:               `Xero Invoice: ${inv.InvoiceNumber ?? xeroInvoiceId}`,
+        status:              "active",
+      };
+
+      // ── Push to Loan Register ──────────────────────────────────────────
+      const loanRegisterId = await pushToLoanRegister(loanPayload);
+
+      // ── Store locally in agreements (tracking record) ──────────────────
+      const signingToken = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
 
       await client.query(
         `INSERT INTO agreements
-           (customer_id, customer_name, loan_product, loan_amount,
-            facility_fee_amount, interest_amount, repayment_amount,
+           (customer_id, customer_name, customer_phone, loan_product,
+            loan_amount, facility_fee_amount, interest_amount, repayment_amount,
             form_type, status, signing_token, expires_at,
-            xero_invoice_id, source, dismissed, branch_id,
-            disbursement_date, created_at)
+            xero_invoice_id, source, dismissed, loan_register_id,
+            branch_id, disbursement_date, created_at)
          VALUES
-           ($1,$2,'HukuPlus',$3,$4,$5,$6,
-            'agreement','active',$7,$8,
-            $9,'xero_sync',FALSE,$10,
-            $11,NOW())`,
+           ($1,$2,$3,'HukuPlus',
+            $4,$5,$6,$7,
+            'agreement','active',$8,$9,
+            $10,'xero_sync',FALSE,$11,
+            $12,$13,NOW())
+         ON CONFLICT DO NOTHING`,
         [
           customerId,
-          customerName,
-          parsed.loanAmount > 0 ? parsed.loanAmount : parsed.repaymentAmount,
-          parsed.feeAmount > 0 ? parsed.feeAmount.toFixed(2) : null,
-          parsed.interestAmount > 0 ? parsed.interestAmount.toFixed(2) : null,
-          parsed.repaymentAmount > 0 ? parsed.repaymentAmount.toFixed(2) : null,
+          `${givenName} ${surname}`.trim() || xeroContactName,
+          phone || null,
+          parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
+          parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee.toFixed(2) : null,
+          parsed.accruedInterest > 0 ? parsed.accruedInterest.toFixed(2) : null,
+          parsed.totalAmount > 0 ? parsed.totalAmount.toFixed(2) : null,
           signingToken,
           expiresAt,
           xeroInvoiceId,
+          loanRegisterId,
           branchId,
-          invoiceDate,
+          disbursementDate,
         ]
       );
 
-      // ── Update last sync timestamp in settings ─────────────────────────
+      // ── Update last sync timestamp ─────────────────────────────────────
       await client.query(`
         INSERT INTO system_settings (key, value, updated_at)
         VALUES ('xero_invoice_last_sync', NOW()::TEXT, NOW())
         ON CONFLICT (key) DO UPDATE SET value = NOW()::TEXT, updated_at = NOW()
       `);
 
-      result.created++;
-      console.log(`[xero-sync] Created agreement for "${customerName}" — invoice ${inv.InvoiceNumber}`);
+      if (loanRegisterId) {
+        result.pushed++;
+        console.log(
+          `[xero-sync] Pushed "${givenName} ${surname}" → Loan Register #${loanRegisterId} (Xero: ${inv.InvoiceNumber})`
+        );
+      } else {
+        // Push failed but still stored locally
+        result.errors.push(`Push failed for invoice ${inv.InvoiceNumber} (${xeroContactName})`);
+      }
     }
 
-    // Always update last sync timestamp even if nothing new
+    // Always update last sync timestamp
     await client.query(`
       INSERT INTO system_settings (key, value, updated_at)
       VALUES ('xero_invoice_last_sync', NOW()::TEXT, NOW())

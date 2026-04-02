@@ -711,11 +711,13 @@ export async function runMigrations() {
     // ── Xero invoice sync columns on agreements ──────────────────────────────
     // source: 'formitize' (default) or 'xero_sync'
     // xero_invoice_id: unique Xero InvoiceID for deduplication
-    // dismissed: soft-hide erroneous synced invoices from Loan Register
+    // dismissed: soft-hide / remove erroneous synced invoices
+    // loan_register_id: matching loan ID in the external Loan Register app
     await client.query(`
       ALTER TABLE agreements ADD COLUMN IF NOT EXISTS xero_invoice_id TEXT;
       ALTER TABLE agreements ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'formitize';
       ALTER TABLE agreements ADD COLUMN IF NOT EXISTS dismissed BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS loan_register_id INTEGER;
     `);
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS agreements_xero_invoice_id_uniq

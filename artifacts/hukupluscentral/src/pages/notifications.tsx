@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bell, CheckCheck, ChevronDown, Clock, User, Store, RefreshCw } from "lucide-react";
+import { Bell, CheckCheck, ChevronDown, Clock, User, Store, RefreshCw, ExternalLink, EyeOff, Eye, Loader2 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -62,11 +62,31 @@ interface CountsResponse {
   newTotal: number;
 }
 
+type XeroEntry = {
+  id: number;
+  customer_name: string;
+  customer_phone: string | null;
+  loan_amount: string | number;
+  facility_fee_amount: string | null;
+  interest_amount: string | null;
+  repayment_amount: string | null;
+  xero_invoice_id: string | null;
+  loan_register_id: number | null;
+  dismissed: boolean;
+  branch_name: string | null;
+  disbursement_date: string | null;
+  created_at: string;
+};
+
 export default function NotificationsPage() {
   const qc = useQueryClient();
+  const [mode, setMode] = useState<"formitize" | "xero">("formitize");
   const [activeProduct, setActiveProduct] = useState<string>("All");
   const [activeType, setActiveType] = useState<string>("all");
   const [showActioned, setShowActioned] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const statusFilter = showActioned ? "all" : "new";
 
@@ -129,6 +149,60 @@ export default function NotificationsPage() {
     },
   });
 
+  // ── Xero invoice syncs query ──────────────────────────────────────────────
+  const { data: xeroEntries = [], refetch: refetchXero } = useQuery<XeroEntry[]>({
+    queryKey: ["/api/loan-register", "xero_sync"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/loan-register`, { credentials: "include" });
+      if (!r.ok) return [];
+      const all: XeroEntry[] = await r.json();
+      return all.filter(e => (e as any).source === "xero_sync");
+    },
+    enabled: mode === "xero",
+    refetchInterval: mode === "xero" ? 60_000 : false,
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: async ({ id, dismissed }: { id: number; dismissed: boolean }) => {
+      const r = await fetch(`${BASE}/api/agreements/${id}/dismiss`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ dismissed }),
+      });
+      if (!r.ok) throw new Error("Failed to dismiss");
+      return r.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/loan-register"] }),
+  });
+
+  const handleXeroSync = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const r = await fetch(`${BASE}/api/xero/sync-invoices`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (data.errors?.length) {
+        setSyncMsg(`Warning: ${data.errors[0]}`);
+      } else if (data.pushed > 0) {
+        setSyncMsg(`✓ ${data.pushed} new loan${data.pushed !== 1 ? "s" : ""} pushed to Loan Register`);
+      } else {
+        setSyncMsg("✓ Already up to date — no new invoices found");
+      }
+      refetchXero();
+    } catch {
+      setSyncMsg("Sync request failed — check Xero connection in Settings.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const xeroVisible = showDismissed ? xeroEntries : xeroEntries.filter(e => !e.dismissed);
+  const xeroDismissedCount = xeroEntries.filter(e => e.dismissed).length;
+
   const newCount = counts?.newTotal ?? 0;
 
   const productNewCount = (product: string) => {
@@ -144,7 +218,7 @@ export default function NotificationsPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
             <Bell className="w-5 h-5 text-amber-400" />
@@ -152,11 +226,30 @@ export default function NotificationsPage() {
           <div>
             <h1 className="text-xl font-bold text-white">Notifications</h1>
             <p className="text-sm text-white/50">
-              {newCount > 0 ? `${newCount} unactioned task${newCount !== 1 ? "s" : ""}` : "All caught up"}
+              {mode === "formitize"
+                ? (newCount > 0 ? `${newCount} unactioned task${newCount !== 1 ? "s" : ""}` : "All caught up")
+                : `${xeroEntries.filter(e => !e.dismissed).length} active Xero invoice${xeroEntries.filter(e => !e.dismissed).length !== 1 ? "s" : ""} pushed to Loan Register`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Mode toggle */}
+          <div className="flex rounded-lg border border-white/10 overflow-hidden text-xs font-medium">
+            <button
+              onClick={() => setMode("formitize")}
+              className={`px-3 py-1.5 transition-colors ${mode === "formitize" ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70 hover:bg-white/5"}`}
+            >
+              Formitize
+            </button>
+            <button
+              onClick={() => { setMode("xero"); qc.invalidateQueries({ queryKey: ["/api/loan-register"] }); }}
+              className={`px-3 py-1.5 transition-colors flex items-center gap-1 ${mode === "xero" ? "bg-blue-500/20 text-blue-300" : "text-white/40 hover:text-white/70 hover:bg-white/5"}`}
+            >
+              <ExternalLink className="w-3 h-3" />
+              Xero Invoices
+            </button>
+          </div>
+          {mode === "formitize" && (
           <button
             onClick={() => refetch()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors"
@@ -164,7 +257,8 @@ export default function NotificationsPage() {
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh
           </button>
-          {visibleNew > 0 && (
+          )}
+          {mode === "formitize" && visibleNew > 0 && (
             <button
               onClick={() => markAllMutation.mutate()}
               disabled={markAllMutation.isPending}
@@ -176,6 +270,121 @@ export default function NotificationsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Xero Invoice Syncs ─────────────────────────────────────────── */}
+      {mode === "xero" && (
+        <div className="space-y-4">
+          {/* Sync bar */}
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/10">
+            <p className="flex-1 text-sm text-muted-foreground">
+              When a HukuPlus loan invoice is approved in Xero, it is automatically pushed to the Loan Register. Use <strong className="text-foreground">Sync Now</strong> to pull immediately, or wait for the hourly background sync.
+            </p>
+            <button
+              onClick={handleXeroSync}
+              disabled={syncing}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
+            >
+              {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {syncing ? "Syncing…" : "Sync Now"}
+            </button>
+          </div>
+
+          {syncMsg && (
+            <div className={`text-sm rounded-lg px-4 py-2 ${syncMsg.startsWith("✓") ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-amber-500/10 text-amber-300 border border-amber-500/20"}`}>
+              {syncMsg}
+            </div>
+          )}
+
+          {/* Entries */}
+          <div className="space-y-2">
+            {xeroEntries.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">
+                No Xero invoice pushes yet — click Sync Now or wait for the hourly sync.
+              </div>
+            ) : (
+              <>
+                {xeroVisible.map(e => (
+                  <div
+                    key={e.id}
+                    className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${
+                      e.dismissed
+                        ? "bg-white/2 border-white/5 opacity-50"
+                        : "bg-white/5 border-white/10"
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
+                      <ExternalLink className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-white text-sm">{e.customer_name}</span>
+                        {e.branch_name && (
+                          <span className="text-xs text-muted-foreground">{e.branch_name}</span>
+                        )}
+                        {e.loan_register_id ? (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                            Pushed → Register #{e.loan_register_id}
+                          </span>
+                        ) : (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                            Push pending
+                          </span>
+                        )}
+                        {e.dismissed && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20">
+                            Dismissed
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                        <span>Loan: ${parseFloat(String(e.loan_amount || 0)).toLocaleString("en-ZW", { minimumFractionDigits: 2 })}</span>
+                        {e.facility_fee_amount && <span>Fee: ${parseFloat(String(e.facility_fee_amount)).toLocaleString("en-ZW", { minimumFractionDigits: 2 })}</span>}
+                        {e.interest_amount && <span>Interest: ${parseFloat(String(e.interest_amount)).toLocaleString("en-ZW", { minimumFractionDigits: 2 })}</span>}
+                        {e.repayment_amount && <span className="text-white/60 font-medium">Total: ${parseFloat(String(e.repayment_amount)).toLocaleString("en-ZW", { minimumFractionDigits: 2 })}</span>}
+                        <span className="ml-auto">{e.disbursement_date ? format(new Date(e.disbursement_date), "dd MMM yyyy") : format(new Date(e.created_at), "dd MMM yyyy")}</span>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {e.dismissed ? (
+                        <button
+                          onClick={() => dismissMutation.mutate({ id: e.id, dismissed: false })}
+                          disabled={dismissMutation.isPending}
+                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-emerald-500/10 border border-white/10 hover:border-emerald-500/20 text-muted-foreground hover:text-emerald-300 transition-colors"
+                        >
+                          <Eye className="w-3 h-3" />
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => dismissMutation.mutate({ id: e.id, dismissed: true })}
+                          disabled={dismissMutation.isPending}
+                          title="Removes this entry from the Loan Register — does not affect the Xero invoice"
+                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/20 text-muted-foreground hover:text-red-300 transition-colors"
+                        >
+                          <EyeOff className="w-3 h-3" />
+                          Dismiss
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {xeroDismissedCount > 0 && (
+                  <button
+                    onClick={() => setShowDismissed(v => !v)}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+                  >
+                    {showDismissed ? "Hide" : `Show ${xeroDismissedCount} dismissed`}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Formitize notifications ─────────────────────────────────────── */}
+      {mode === "formitize" && <>
 
       {/* Product tabs */}
       <div className="flex gap-1 mb-4 p-1 bg-white/5 rounded-xl border border-white/10 w-fit">
@@ -278,6 +487,7 @@ export default function NotificationsPage() {
           </AnimatePresence>
         </div>
       )}
+      </>}
     </div>
   );
 }
