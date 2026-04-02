@@ -131,6 +131,92 @@ router.get("/whatsapp/unread-count", async (req, res): Promise<void> => {
   res.json({ count: (row as any)?.count ?? 0 });
 });
 
+// ─── List approved templates ──────────────────────────────────────────────────
+
+router.get("/whatsapp/templates", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isConfigured()) { res.json({ templates: [] }); return; }
+
+  const r = await fetch(`${WATI_API_URL}/api/v1/getMessageTemplates`, {
+    headers: { "Authorization": `Bearer ${WATI_API_TOKEN}` },
+  });
+  if (!r.ok) { res.status(502).json({ error: "Could not fetch templates" }); return; }
+
+  const data = await r.json() as any;
+  const templates = (data.messageTemplates ?? [])
+    .filter((t: any) => t.status === "APPROVED")
+    .map((t: any) => ({
+      name:        t.elementName,
+      body:        t.body ?? "",
+      params:      (t.customParams ?? []).map((p: any) => p.paramName),
+      headerType:  t.header?.typeString ?? null,
+    }));
+
+  res.json({ templates });
+});
+
+// ─── Send a template message ──────────────────────────────────────────────────
+
+router.post("/whatsapp/send-template", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isConfigured()) { res.status(503).json({ error: "WhatsApp not configured" }); return; }
+
+  const { waId, templateName, parameters } = req.body as {
+    waId: string;
+    templateName: string;
+    parameters: Array<{ name: string; value: string }>;
+  };
+  if (!waId || !templateName) {
+    res.status(400).json({ error: "waId and templateName are required" });
+    return;
+  }
+
+  const phone = waId.replace(/^\+/, "");
+
+  const watiRes = await fetch(`${WATI_API_URL}/api/v1/sendTemplateMessage/${phone}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${WATI_API_TOKEN}`,
+      "Content-Type":  "application/json",
+    },
+    body: JSON.stringify({
+      template_name:  templateName,
+      broadcast_name: templateName,
+      parameters:     (parameters ?? []).map(p => ({ name: p.name, value: p.value })),
+    }),
+  });
+
+  if (!watiRes.ok) {
+    const text = await watiRes.text();
+    res.status(502).json({ error: `WATI error: ${watiRes.status} ${text.slice(0, 300)}` });
+    return;
+  }
+
+  let watiMessageId: string | null = null;
+  try {
+    const j = await watiRes.json() as any;
+    watiMessageId = j?.id ?? j?.whatsappMessageId ?? j?.messageId ?? null;
+  } catch { /* ignore */ }
+
+  // Build a preview of what was sent for the local message store
+  const sentPreview = `[Template: ${templateName}]` +
+    (parameters?.length ? " " + parameters.map(p => p.value).join(", ") : "");
+
+  await db.insert(whatsappMessagesTable).values({
+    conversationId: phone,
+    waId:           phone,
+    senderName:     "Tefco Finance",
+    messageText:    sentPreview,
+    messageType:    "template",
+    direction:      "outbound",
+    watiMessageId,
+    status:         "sent",
+    isRead:         true,
+  });
+
+  res.json({ ok: true });
+});
+
 // ─── Send a message ───────────────────────────────────────────────────────────
 
 router.post("/whatsapp/send", async (req, res): Promise<void> => {

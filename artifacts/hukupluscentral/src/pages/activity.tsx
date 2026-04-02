@@ -8,6 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
+  LayoutTemplate,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -1812,6 +1813,9 @@ function WhatsAppTab() {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<WaConversation | null>(null);
   const [reply, setReply] = useState("");
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
 
   const { data: convData, isLoading: loadingConvs } = useQuery<{
     configured: boolean;
@@ -1856,6 +1860,39 @@ function WhatsAppTab() {
       qc.invalidateQueries({ queryKey: ["wa-conversations"] });
     },
   });
+
+  const { data: templatesData } = useQuery<{ templates: Array<{ name: string; body: string; params: string[]; headerType: string | null }> }>({
+    queryKey: ["wa-templates"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/templates`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  const sendTemplateMutation = useMutation({
+    mutationFn: async ({ templateName, params }: { templateName: string; params: Array<{ name: string; value: string }> }) => {
+      const r = await fetch(`${BASE}/api/whatsapp/send-template`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ waId: selected!.waId, templateName, parameters: params }),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error ?? "Failed"); }
+      return r.json();
+    },
+    onSuccess: () => {
+      setShowTemplates(false);
+      setSelectedTemplate(null);
+      setTemplateParams({});
+      qc.invalidateQueries({ queryKey: ["wa-messages", selected?.waId] });
+      qc.invalidateQueries({ queryKey: ["wa-conversations"] });
+    },
+  });
+
+  const templates = templatesData?.templates ?? [];
+  const activeTpl = templates.find(t => t.name === selectedTemplate) ?? null;
 
   if (loadingConvs) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
 
@@ -1969,13 +2006,75 @@ function WhatsAppTab() {
                 )}
               </div>
 
+              {/* Template picker panel */}
+              {showTemplates && (
+                <div className="mx-4 mb-1 rounded-xl border border-white/10 bg-[#1a2433] p-3 space-y-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Send a Template</p>
+                    <button onClick={() => { setShowTemplates(false); setSelectedTemplate(null); setTemplateParams({}); }} className="text-muted-foreground hover:text-white transition-colors"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                  {templates.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No approved templates found.</p>
+                  ) : templates.map(tpl => (
+                    <div key={tpl.name} className={cn("rounded-lg border p-2.5 cursor-pointer transition-colors", selectedTemplate === tpl.name ? "border-green-500/40 bg-green-500/10" : "border-white/10 bg-white/5 hover:bg-white/8")}
+                      onClick={() => { setSelectedTemplate(tpl.name); setTemplateParams({}); }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-white">{tpl.name}</span>
+                        {tpl.headerType && <span className="text-[10px] text-muted-foreground capitalize">{tpl.headerType}</span>}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{tpl.body || "(no preview)"}</p>
+                      {selectedTemplate === tpl.name && (
+                        <div className="mt-2 space-y-1.5" onClick={e => e.stopPropagation()}>
+                          {tpl.params.map(param => (
+                            <input
+                              key={param}
+                              value={templateParams[param] ?? ""}
+                              onChange={e => setTemplateParams(prev => ({ ...prev, [param]: e.target.value }))}
+                              placeholder={param}
+                              className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/50"
+                            />
+                          ))}
+                          <button
+                            onClick={() => {
+                              const params = tpl.params.map(p => ({ name: p, value: templateParams[p] ?? "" }));
+                              const allFilled = tpl.params.every(p => templateParams[p]?.trim());
+                              if (!allFilled && tpl.params.length > 0) return;
+                              sendTemplateMutation.mutate({ templateName: tpl.name, params });
+                            }}
+                            disabled={sendTemplateMutation.isPending || (tpl.params.length > 0 && !tpl.params.every(p => templateParams[p]?.trim()))}
+                            className="w-full mt-1 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded text-xs text-white font-medium transition-colors flex items-center justify-center gap-1.5"
+                          >
+                            {sendTemplateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                            Send "{tpl.name}"
+                          </button>
+                          {sendTemplateMutation.isError && (
+                            <p className="text-[10px] text-red-400">{String(sendTemplateMutation.error)}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Reply box */}
               <div className="px-4 py-3 border-t border-white/10 flex gap-2">
+                <button
+                  onClick={() => { setShowTemplates(v => !v); setSelectedTemplate(null); setTemplateParams({}); }}
+                  title="Send a template message"
+                  className={cn("px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors flex items-center gap-1.5",
+                    showTemplates
+                      ? "bg-green-600/20 border-green-500/40 text-green-400"
+                      : "bg-white/5 border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20"
+                  )}
+                >
+                  <LayoutTemplate className="w-4 h-4" />
+                </button>
                 <input
                   value={reply}
                   onChange={e => setReply(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && reply.trim()) sendMutation.mutate(); }}
-                  placeholder="Type a message…"
+                  placeholder="Type a reply… (session messages require customer to message first)"
                   className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/50"
                 />
                 <button
