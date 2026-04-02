@@ -254,6 +254,26 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       const xeroInvoiceId: string = inv.InvoiceID;
       const lineItems: any[] = inv.LineItems ?? [];
 
+      // ── Skip non-invoice document types ────────────────────────────────
+      // Xero sometimes returns credit notes, overpayments, and prepayments
+      // in the same Invoices API response. Only process plain ACCREC invoices.
+      const docType: string = (inv.Type ?? "").toUpperCase();
+      if (docType !== "ACCREC") {
+        result.skipped++;
+        console.log(`[sync:xero-invoices] Skipped non-invoice type "${inv.Type}" — ${inv.InvoiceNumber ?? xeroInvoiceId}`);
+        continue;
+      }
+
+      // ── Skip invoices with zero or negative totals (voided / credit notes
+      //    that somehow appear as ACCREC — e.g. CN-prefixed invoice numbers) ──
+      const xeroTotal: number = parseFloat(String(inv.Total ?? 0)) || 0;
+      const xeroInvoiceNumber: string = (inv.InvoiceNumber ?? "").toUpperCase();
+      if (xeroTotal <= 0 || xeroInvoiceNumber.startsWith("CN-")) {
+        result.skipped++;
+        console.log(`[sync:xero-invoices] Skipped zero/negative/credit-note invoice ${inv.InvoiceNumber ?? xeroInvoiceId} (total=${xeroTotal})`);
+        continue;
+      }
+
       // ── Parse line items ───────────────────────────────────────────────
       const parsed = parseLoanLineItems(lineItems);
 
