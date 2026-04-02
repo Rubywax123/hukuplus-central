@@ -23,7 +23,6 @@ import CommsPage from "@/pages/comms";
 import ActivityPage from "@/pages/activity";
 import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
 import ApplyRevolverPage from "@/pages/apply-revolver";
-import LoanRegisterPage from "@/pages/loan-register";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -77,7 +76,6 @@ function Router() {
             <Route path="/notifications" component={NotificationsPage} />
             <Route path="/comms" component={CommsPage} />
             <Route path="/activity" component={ActivityPage} />
-            <Route path="/loan-register" component={LoanRegisterPage} />
             <Route path="/team" component={TeamPage} />
             <Route component={NotFound} />
           </Switch>
