@@ -1,6 +1,7 @@
 import app from "./app";
 import { runMigrations } from "./lib/migrate";
 import { syncHukuPlusStores, syncRevolverStores } from "./routes/sync";
+import { syncXeroInvoices } from "./lib/syncXeroInvoices";
 
 const rawPort = process.env["PORT"];
 
@@ -46,6 +47,23 @@ function startSyncScheduler() {
       );
     } catch (err: any) {
       console.error("[sync:revolver] Failed:", err.message);
+    }
+
+    // Step 3: pull Xero AUTHORISED loan invoices into Loan Register
+    console.log("[sync] Starting scheduled Xero invoice sync...");
+    try {
+      const result = await syncXeroInvoices();
+      console.log(
+        `[sync:xero-invoices] Done — ` +
+        `${result.checked} checked, ` +
+        `${result.created} created, ` +
+        `${result.skipped} skipped.`
+      );
+      if (result.errors.length > 0) {
+        console.warn("[sync:xero-invoices] Warnings:", result.errors.join("; "));
+      }
+    } catch (err: any) {
+      console.error("[sync:xero-invoices] Failed:", err.message);
     }
   };
 

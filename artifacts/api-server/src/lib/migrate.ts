@@ -708,6 +708,30 @@ export async function runMigrations() {
         AND phone NOT LIKE '+%';
     `);
 
+    // ── Xero invoice sync columns on agreements ──────────────────────────────
+    // source: 'formitize' (default) or 'xero_sync'
+    // xero_invoice_id: unique Xero InvoiceID for deduplication
+    // dismissed: soft-hide erroneous synced invoices from Loan Register
+    await client.query(`
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS xero_invoice_id TEXT;
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'formitize';
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS dismissed BOOLEAN NOT NULL DEFAULT FALSE;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS agreements_xero_invoice_id_uniq
+        ON agreements(xero_invoice_id)
+        WHERE xero_invoice_id IS NOT NULL;
+    `);
+
+    // ── System settings table (key-value store for internal config) ───────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS system_settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     // ── One-time data fix: Angeline Shoko payment receipt (job 23498021) ───
     // formcurrency_1 was not extracted by webhook handler — fix payment_amount,
     // branch_name and retailer_name from the known Formitize payload.

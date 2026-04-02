@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { pool } from "@workspace/db";
 import crypto from "crypto";
 import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
+import { syncXeroInvoices } from "../lib/syncXeroInvoices";
 
 const router = Router();
 
@@ -314,4 +315,36 @@ router.get("/xero/customer/:customerId/data", requireStaffAuth, requireSuperAdmi
   }
 });
 
+// ─── POST /xero/sync-invoices — manual trigger ────────────────────────────────
+router.post("/xero/sync-invoices", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await syncXeroInvoices();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error("[xero] Manual invoice sync failed:", err.message);
+    res.status(500).json({ error: "Sync failed", detail: err.message });
+  }
+});
+
+// ─── GET /xero/sync-invoices/status — last sync timestamp + counts ────────────
+router.get("/xero/sync-invoices/status", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const tsResult = await client.query(
+      "SELECT value FROM system_settings WHERE key = 'xero_invoice_last_sync'"
+    );
+    const countResult = await client.query(
+      "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE dismissed = FALSE AND status = 'active') AS active FROM agreements WHERE source = 'xero_sync'"
+    );
+    res.json({
+      lastSync: tsResult.rows[0]?.value ?? null,
+      totalSynced: parseInt(countResult.rows[0]?.total ?? "0", 10),
+      activeSynced: parseInt(countResult.rows[0]?.active ?? "0", 10),
+    });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;
+

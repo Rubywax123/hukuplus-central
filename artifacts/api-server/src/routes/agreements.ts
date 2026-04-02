@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { generateNovafeedAgreementPdf } from "../lib/novafeed-pdf";
-import { db, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
+import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
 import {
   CreateAgreementBody,
   GetAgreementParams,
@@ -396,4 +396,73 @@ router.post("/sign/:token/submit", async (req, res): Promise<void> => {
   res.json({ success: true, signedAt: signedAt.toISOString() });
 });
 
+// ─── GET /loan-register — HukuPlus loan agreements (Formitize + Xero sync) ────
+router.get("/loan-register", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const client2 = await pool.connect();
+  try {
+    const result = await client2.query(`
+      SELECT
+        a.id,
+        a.customer_id,
+        a.customer_name,
+        a.customer_phone,
+        a.loan_product,
+        a.loan_amount,
+        a.facility_fee_amount,
+        a.interest_amount,
+        a.repayment_amount,
+        a.status,
+        a.form_type,
+        COALESCE(a.source, 'formitize') AS source,
+        COALESCE(a.dismissed, FALSE)    AS dismissed,
+        a.xero_invoice_id,
+        a.disbursement_date,
+        a.repayment_date,
+        a.created_at,
+        b.name AS branch_name,
+        r.name AS retailer_name
+      FROM agreements a
+      LEFT JOIN branches  b ON b.id = a.branch_id
+      LEFT JOIN retailers r ON r.id = a.retailer_id
+      WHERE (a.loan_product = 'HukuPlus' OR COALESCE(a.source,'formitize') = 'xero_sync')
+      ORDER BY a.created_at DESC
+    `);
+    res.json(result.rows);
+  } finally {
+    client2.release();
+  }
+});
+
+// ─── PUT /agreements/:id/dismiss — soft-hide a Xero-synced erroneous entry ────
+router.put("/agreements/:id/dismiss", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const dismiss: boolean = req.body.dismissed !== false;
+
+  const client2 = await pool.connect();
+  try {
+    const result = await client2.query(
+      "UPDATE agreements SET dismissed = $1 WHERE id = $2 RETURNING id, dismissed",
+      [dismiss, id]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: "Agreement not found" });
+      return;
+    }
+    res.json({ success: true, id, dismissed: dismiss });
+  } finally {
+    client2.release();
+  }
+});
+
 export default router;
+

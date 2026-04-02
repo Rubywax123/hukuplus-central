@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check } from "lucide-react";
+import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, BookOpen } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -15,6 +15,7 @@ const navItems = [
   { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Kiosk", icon: Monitor },
   { path: "/activity", label: "Activity", icon: Activity, badge: "activity" as const },
+  { path: "/loan-register", label: "Loan Register", icon: BookOpen },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
   { path: "/team", label: "Tefco Staff", icon: Users },
 ];
