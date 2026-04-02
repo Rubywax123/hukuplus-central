@@ -328,6 +328,37 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
     const invoices: any[] = invoiceData.Invoices ?? [];
     result.checked = invoices.length;
 
+    // ── Build a Map of all existing Loan Register loan numbers ────────────────
+    // Used as a secondary dedup check — guards against the case where the local
+    // agreements table has been cleared but the Loan Register still has entries.
+    // Keyed by both "INV-XXXX" and "XXXX" (normalised without prefix).
+    const lrLoanNumberMap = new Map<string, { id: number }>();
+    try {
+      const lrAllRes = await fetch(
+        `${LOAN_REGISTER_URL}/api/loans?status=active&limit=5000`,
+        {
+          headers: {
+            Authorization: `Bearer ${CENTRAL_API_KEY}`,
+            "X-Central-System": "HukuPlusCentral",
+          },
+        }
+      );
+      if (lrAllRes.ok) {
+        const lrAll: any[] = await lrAllRes.json();
+        for (const loan of Array.isArray(lrAll) ? lrAll : []) {
+          if (loan.loanNumber) {
+            const num = String(loan.loanNumber);
+            lrLoanNumberMap.set(num, { id: loan.id });
+            // Also index without INV- prefix so both forms match
+            const normNum = num.replace(/^INV-/i, "");
+            if (normNum !== num) lrLoanNumberMap.set(normNum, { id: loan.id });
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — continue without secondary dedup if LR fetch fails
+    }
+
     for (const inv of invoices) {
       const xeroInvoiceId: string = inv.InvoiceID;
       const lineItems: any[] = inv.LineItems ?? [];
@@ -394,6 +425,32 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       if (existing.rows.length > 0) {
         result.skipped++;
         continue;
+      }
+
+      // ── Secondary dedup: check pre-fetched LR loan number Map ────────────
+      // Guards against DB resets: if the agreements table was cleared but the
+      // Loan Register still has the entry, lrLoanNumberMap catches it.
+      const invoiceNumber: string = inv.InvoiceNumber ?? "";
+      if (invoiceNumber && lrLoanNumberMap.size > 0) {
+        const normInv = invoiceNumber.replace(/^INV-/i, "");
+        const existingLrLoan = lrLoanNumberMap.get(invoiceNumber) ?? lrLoanNumberMap.get(normInv);
+        if (existingLrLoan) {
+          try {
+            await client.query(
+              `INSERT INTO agreements
+                (xero_invoice_id, source, loan_register_id, customer_name, status, created_at)
+               VALUES ($1, 'xero_sync', $2, $3, 'active', NOW())`,
+              [xeroInvoiceId, existingLrLoan.id, inv.Contact?.Name ?? ""]
+            );
+          } catch {
+            // Duplicate xero_invoice_id — already recorded, nothing to do
+          }
+          result.skipped++;
+          console.log(
+            `[sync:xero-invoices] Secondary dedup: ${invoiceNumber} already in Loan Register as #${existingLrLoan.id}, recorded agreement.`
+          );
+          continue;
+        }
       }
 
       // ── Resolve customer details ────────────────────────────────────────

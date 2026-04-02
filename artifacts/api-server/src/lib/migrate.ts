@@ -750,6 +750,31 @@ export async function runMigrations() {
     // Enable pg_trgm for fuzzy name matching on customer search
     await client.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm;`);
 
+    // ── One-time fix: Remap duplicate Xero-sync agreements to original LR IDs ──
+    // On 2026-04-02 the Xero sync imported 37 invoices that already had active
+    // Loan Register entries (created by a previous sync run). The agreements rows
+    // were created pointing to the new (now-deleted) duplicate LR entries. This
+    // update re-points them to the original entries so payment routing is correct.
+    await client.query(`
+      UPDATE agreements SET loan_register_id = CASE loan_register_id
+        WHEN 958 THEN 770 WHEN 959 THEN 772 WHEN 960 THEN 773 WHEN 961 THEN 780
+        WHEN 962 THEN 791 WHEN 963 THEN 793 WHEN 964 THEN 797 WHEN 965 THEN 799
+        WHEN 966 THEN 804 WHEN 967 THEN 807 WHEN 968 THEN 33  WHEN 969 THEN 811
+        WHEN 970 THEN 813 WHEN 972 THEN 816 WHEN 973 THEN 817 WHEN 974 THEN 789
+        WHEN 975 THEN 818 WHEN 976 THEN 819 WHEN 977 THEN 880 WHEN 978 THEN 881
+        WHEN 980 THEN 883 WHEN 981 THEN 885 WHEN 982 THEN 886 WHEN 983 THEN 887
+        WHEN 984 THEN 888 WHEN 985 THEN 889 WHEN 986 THEN 891 WHEN 987 THEN 892
+        WHEN 988 THEN 890 WHEN 989 THEN 34  WHEN 990 THEN 894 WHEN 991 THEN 895
+        WHEN 992 THEN 896 WHEN 993 THEN 897 WHEN 994 THEN 898 WHEN 995 THEN 899
+        WHEN 996 THEN 900
+      END
+      WHERE loan_register_id IN (
+        958,959,960,961,962,963,964,965,966,967,968,969,970,972,973,974,
+        975,976,977,978,980,981,982,983,984,985,986,987,988,989,990,991,
+        992,993,994,995,996
+      );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
