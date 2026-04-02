@@ -210,10 +210,26 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       contactMap.set((r.xero_contact_id as string).toLowerCase(), r);
     }
 
-    // ── Fetch AUTHORISED ACCREC invoices from Xero (last 90 days) ─────────
-    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
+    // ── Determine ModifiedAfter window ────────────────────────────────────
+    // Use last sync timestamp so frequent runs only fetch recently changed invoices.
+    // Subtract 2 min buffer to avoid race conditions at the boundary.
+    // Fall back to 7 days if no prior sync (e.g., first run or fresh deploy).
+    let since: string;
+    try {
+      const lastSyncRow = await client.query(
+        `SELECT value FROM system_settings WHERE key = 'xero_invoice_last_sync'`
+      );
+      if (lastSyncRow.rows[0]?.value) {
+        const lastSyncMs = new Date(lastSyncRow.rows[0].value as string).getTime();
+        const withBuffer = new Date(lastSyncMs - 2 * 60 * 1000);
+        since = withBuffer.toISOString().split("T")[0];
+      } else {
+        // No prior sync — backfill last 7 days
+        since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+      }
+    } catch {
+      since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    }
 
     const invoiceRes = await fetch(
       `${XERO_BASE}/Invoices?Type=ACCREC&Statuses=AUTHORISED,PARTIAL&ModifiedAfter=${since}&includeArchived=false`,
