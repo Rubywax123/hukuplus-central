@@ -56,7 +56,7 @@ function startSyncScheduler() {
       console.log(
         `[sync:xero-invoices] Done — ` +
         `${result.checked} checked, ` +
-        `${result.created} created, ` +
+        `${result.pushed} pushed to Loan Register, ` +
         `${result.skipped} skipped.`
       );
       if (result.errors.length > 0) {
