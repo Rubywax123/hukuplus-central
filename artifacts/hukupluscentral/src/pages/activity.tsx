@@ -1726,15 +1726,39 @@ function PaymentModal({ notification, onClose, onDone }: {
 
           {/* STEP — DONE */}
           {step === "done" && (
-            <div className="py-8 text-center space-y-3">
-              <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto" />
-              <p className="text-base font-semibold text-foreground">Payment processed successfully</p>
-              {resultErrors.length > 0 && (
-                <div className="text-left mt-4 space-y-1">
-                  <p className="text-xs font-semibold text-amber-300">Some Xero payments had warnings:</p>
-                  {resultErrors.map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
+            <div className="py-6 space-y-4">
+              <div className="text-center space-y-2">
+                <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto" />
+                <p className="text-base font-semibold text-foreground">Payment processed in Xero</p>
+                {resultErrors.length > 0 && (
+                  <div className="text-left mt-2 space-y-1">
+                    <p className="text-xs font-semibold text-amber-300">Some invoices had warnings:</p>
+                    {resultErrors.map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
+                  </div>
+                )}
+              </div>
+
+              {/* Loan Register follow-up — always shown after a payment, since balance may now be $0 */}
+              <div className="mx-2 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-300">Action required in Loan Register</p>
+                    <p className="text-xs text-amber-300/70 mt-1">
+                      The Loan Register does not auto-complete when a payment is applied. If this loan is fully paid, open the Loan Register and mark it as <strong>Completed</strong> there.
+                    </p>
+                    <a
+                      href="https://loan-manager-automate.replit.app/active"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Open Loan Register → Active Loans
+                    </a>
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
