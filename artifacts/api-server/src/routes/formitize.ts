@@ -725,6 +725,15 @@ router.post("/formitize/webhook", async (req, res) => {
   const isNewCustomerForm = formName.includes("new customer");
 
   // Extract customer identity fields (broad search across all product field names)
+  //
+  // HukuPlus Loan Agreement layout:
+  //   formcrm_1  = the BORROWER selected from the Formitize CRM lookup (Stanley Zhange = borrower)
+  //   formtext_3 = branch staff member who processed the loan (NOT the borrower)
+  //   formtext_4 = same staff name repeated
+  //   borrowerid = borrower's national ID card number (stored on the borrower record in CRM)
+  // All other standard forms: formcrm_1 is the primary borrower/applicant identifier.
+  const isHukuPlusAgreement = product === "HukuPlus" && formType === "agreement" && !isNewCustomerForm;
+
   const customerName = isNewCustomerForm
     ? (findField(
         "formtext_6",              // borrower/customer name slot in new-customer forms
@@ -736,8 +745,8 @@ router.post("/formitize/webhook", async (req, res) => {
         "employeename", "employee name", "debtorname", "debtor name",
         "applicantname", "applicant name", "revolverName",
         "fullname", "full name", "name",
-        "formtext_1", "formtext_2", "formtext_3",
-        "borrowerid"
+        "formtext_1", "formtext_2", "formtext_3"
+        // NOTE: borrowerid deliberately excluded — it contains the national ID number, not a name
       );
 
   if (!customerName) {
@@ -761,11 +770,13 @@ router.post("/formitize/webhook", async (req, res) => {
   // National ID — label-based first, then form-specific internal IDs as fallback.
   // formtext_4 deliberately NOT listed here: in ChikweretiOne it's the customer's cellphone.
   // Revolver's "Applicant ID" is caught by the "applicantid" label needle.
+  // borrowerid = HukuPlus Loan Agreement field containing the borrower's national ID card number.
   const nationalIdRaw = findField(
     "applicantid", "applicant id",
     "nationalid", "national_id", "idnumber", "id number", "national id",
     "employeeid", "employee id", "debtornid", "nid",
-    "formtext_7"  // HukuPlus new-customer form slot
+    "borrowerid",  // HukuPlus Loan Agreement: borrower's national ID card
+    "formtext_7"   // HukuPlus new-customer form slot
   ) || null;
 
   // Email — "Applicant Email" (formEmail_2) must come BEFORE generic "email"/"formemail_1"
@@ -966,7 +977,13 @@ router.post("/formitize/webhook", async (req, res) => {
   const isEmployed     = strOrNull(findField("areyouemployed", "employed", "earnsalary"));
   // "employercompany" catches ChikweretiOne's "Employer Company" field specifically
   const employerName   = strOrNull(findField("employercompany", "nameofemployer", "employername", "employer", "placeofwork"));
-  const salesRepName   = strOrNull(findField("nameofsalesrepresentative", "salesrepresentative", "salesrep", "salesrepname"));
+  // For HukuPlus Loan Agreements, the branch staff member who processed the loan is in
+  // formtext_3 / formtext_4 (e.g. "Tatenda Nyamutowa" at Rusape). For all other forms,
+  // use the standard named sales-rep fields.
+  const salesRepName   = strOrNull(
+    findField("nameofsalesrepresentative", "salesrepresentative", "salesrep", "salesrepname") ||
+    (isHukuPlusAgreement ? (findField("formtext_3") || findField("formtext_4")) : "")
+  );
   const retailerRef    = strOrNull(findField("retailerreferencenumber", "retailerreference", "referencenumber", "retailerref"));
   const marketType     = strOrNull(findField("wheredoesthecustomersell", "sellchickens", "markettype", "sellbirds"));
 
