@@ -1768,7 +1768,44 @@ interface WaMessage {
   messageText: string | null;
   messageType: string;
   direction: string;
+  status: string;
   createdAt: string;
+}
+
+function MessageTicks({ status }: { status: string }) {
+  if (status === "read") {
+    return (
+      <span className="inline-flex items-center ml-1" title="Read">
+        <svg className="w-3.5 h-3 text-blue-300" viewBox="0 0 18 11" fill="currentColor">
+          <path d="M1 5.5L5.5 10L12 1M6 5.5L10.5 10L17 1" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </span>
+    );
+  }
+  if (status === "delivered") {
+    return (
+      <span className="inline-flex items-center ml-1" title="Delivered">
+        <svg className="w-3.5 h-3 text-green-200" viewBox="0 0 18 11" fill="none">
+          <path d="M1 5.5L5.5 10L12 1M6 5.5L10.5 10L17 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <span className="inline-flex items-center ml-1 text-red-300" title="Failed to deliver">
+        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      </span>
+    );
+  }
+  // "sent" — single grey tick
+  return (
+    <span className="inline-flex items-center ml-1" title="Sent">
+      <svg className="w-3 h-3 text-green-200" viewBox="0 0 12 11" fill="none">
+        <path d="M1 5.5L5 9.5L11 1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </span>
+  );
 }
 
 function WhatsAppTab() {
@@ -1922,8 +1959,9 @@ function WhatsAppTab() {
                           : "bg-white/10 text-foreground rounded-bl-sm"
                       )}>
                         <p>{msg.messageText ?? "[media]"}</p>
-                        <p className={cn("text-[10px] mt-0.5", msg.direction === "outbound" ? "text-green-200" : "text-muted-foreground")}>
+                        <p className={cn("text-[10px] mt-0.5 flex items-center justify-end gap-0.5", msg.direction === "outbound" ? "text-green-200" : "text-muted-foreground")}>
                           {fmt(msg.createdAt)}
+                          {msg.direction === "outbound" && <MessageTicks status={msg.status} />}
                         </p>
                       </div>
                     </div>

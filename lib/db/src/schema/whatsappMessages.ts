@@ -9,6 +9,7 @@ export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   messageType: text("message_type").notNull().default("text"),
   direction: text("direction").notNull(),
   watiMessageId: text("wati_message_id").unique(),
+  status: text("status").notNull().default("sent"),
   isRead: boolean("is_read").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

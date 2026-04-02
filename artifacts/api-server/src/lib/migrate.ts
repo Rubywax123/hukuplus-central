@@ -650,6 +650,9 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_wa_messages_created ON whatsapp_messages(created_at DESC);
     `);
 
+    // ── Message status on whatsapp_messages ────────────────────────────────
+    await client.query(`ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent';`);
+
     // ── Signed documents on agreements ─────────────────────────────────────
     // Stores an array of {url, name} objects uploaded via the document upload form.
     await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS signed_documents JSONB DEFAULT '[]'::jsonb;`);

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, whatsappMessagesTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, isNotNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -17,12 +17,33 @@ function isConfigured() {
 router.post("/whatsapp/webhook", async (req, res): Promise<void> => {
   const body = req.body;
 
-  // WATI sends eventType = "message" for incoming messages
-  if (body?.eventType !== "message" || body?.owner === true) {
+  if (body?.eventType !== "message") {
     res.sendStatus(200);
     return;
   }
 
+  // owner=true means this is an outbound message status update from WATI
+  if (body?.owner === true) {
+    const watiMsgId  = body.whatsappMessageId ?? body.id ?? null;
+    const rawStatus  = (body.statusString ?? body.status ?? "").toLowerCase();
+    const statusMap: Record<string, string> = { sent: "sent", delivered: "delivered", read: "read", failed: "failed" };
+    const status = statusMap[rawStatus];
+
+    if (watiMsgId && status) {
+      try {
+        await db.update(whatsappMessagesTable)
+          .set({ status })
+          .where(eq(whatsappMessagesTable.watiMessageId, watiMsgId));
+        console.log(`[whatsapp] status update ${watiMsgId} → ${status}`);
+      } catch (err: any) {
+        console.warn("[whatsapp] status update failed:", err.message);
+      }
+    }
+    res.sendStatus(200);
+    return;
+  }
+
+  // Inbound customer message
   try {
     await db.insert(whatsappMessagesTable).values({
       conversationId: body.conversationId ?? body.waId ?? "unknown",
@@ -32,6 +53,7 @@ router.post("/whatsapp/webhook", async (req, res): Promise<void> => {
       messageType:    body.type ?? "text",
       direction:      "inbound",
       watiMessageId:  body.whatsappMessageId ?? null,
+      status:         "received",
       isRead:         false,
     }).onConflictDoNothing();
   } catch (err: any) {
@@ -142,16 +164,25 @@ router.post("/whatsapp/send", async (req, res): Promise<void> => {
     return;
   }
 
+  // Capture WATI's message ID so we can match delivery/read status callbacks
+  let watiMessageId: string | null = null;
+  try {
+    const watiJson = await watiRes.json() as any;
+    watiMessageId = watiJson?.id ?? watiJson?.whatsappMessageId ?? watiJson?.messageId ?? null;
+  } catch { /* ignore parse errors */ }
+
   // Store the outbound message locally
   const conversationId = phone;
   await db.insert(whatsappMessagesTable).values({
     conversationId,
-    waId:        phone,
-    senderName:  "Tefco Finance",
+    waId:          phone,
+    senderName:    "Tefco Finance",
     messageText,
-    messageType: "text",
-    direction:   "outbound",
-    isRead:      true,
+    messageType:   "text",
+    direction:     "outbound",
+    watiMessageId,
+    status:        "sent",
+    isRead:        true,
   });
 
   res.json({ ok: true });
