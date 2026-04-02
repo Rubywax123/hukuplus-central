@@ -323,6 +323,8 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
   // ── Re-fetch applied invoices from Xero to detect fully-paid ones ────────────
   const autoCompletedLoanRegisterIds: number[] = [];
   const fullyPaidInvoiceIds: string[] = [];
+  // Map invoiceId → total amount paid (for recording paymentsReceived on the Loan Register)
+  const fullyPaidAmounts = new Map<string, number>();
 
   if (applied.length > 0) {
     for (const invoiceId of applied) {
@@ -334,8 +336,11 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
         if (invRes.ok) {
           const invData = await invRes.json() as any;
           const inv = invData.Invoices?.[0];
-          if (inv && (inv.AmountDue === 0 || inv.AmountDue === "0" || parseFloat(inv.AmountDue) === 0)) {
+          if (inv && parseFloat(String(inv.AmountDue ?? 1)) === 0) {
             fullyPaidInvoiceIds.push(invoiceId);
+            // Record the total paid — AmountPaid is the accumulated amount across all payments
+            const totalPaid = parseFloat(String(inv.AmountPaid ?? inv.Total ?? 0)) || 0;
+            if (totalPaid > 0) fullyPaidAmounts.set(invoiceId, totalPaid);
           }
         }
       } catch {
@@ -371,19 +376,29 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     for (const invoiceId of fullyPaidInvoiceIds) {
       try {
         const agResult = await client.query(
-          `SELECT id, loan_register_id FROM agreements WHERE xero_invoice_id = $1 LIMIT 1`,
+          `SELECT id, loan_register_id, repayment_amount, loan_amount, facility_fee_amount, interest_amount
+           FROM agreements WHERE xero_invoice_id = $1 LIMIT 1`,
           [invoiceId]
         );
         const ag = agResult.rows[0];
         if (ag?.loan_register_id) {
-          const ok = await updateLoanRegisterStatus(ag.loan_register_id, "completed");
+          // Determine amount paid: use Xero's AmountPaid, fallback to repayment_amount from DB
+          const xeroPaid = fullyPaidAmounts.get(invoiceId) ?? 0;
+          const dbTotal =
+            parseFloat(String(ag.repayment_amount ?? 0)) ||
+            (parseFloat(String(ag.loan_amount ?? 0)) +
+             parseFloat(String(ag.facility_fee_amount ?? 0)) +
+             parseFloat(String(ag.interest_amount ?? 0)));
+          const paymentsReceived = xeroPaid > 0 ? xeroPaid : dbTotal;
+
+          const ok = await updateLoanRegisterStatus(ag.loan_register_id, "completed", paymentsReceived || undefined);
           if (ok) {
             autoCompletedLoanRegisterIds.push(ag.loan_register_id);
             await client.query(
               `UPDATE agreements SET status = 'completed', updated_at = NOW() WHERE id = $1`,
               [ag.id]
             );
-            console.log(`[payment] Auto-completed Loan Register #${ag.loan_register_id} (invoice ${invoiceId})`);
+            console.log(`[payment] Auto-completed Loan Register #${ag.loan_register_id} (invoice ${invoiceId}, paid $${paymentsReceived})`);
           }
         }
       } catch (err: any) {
@@ -394,7 +409,8 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     // Optionally mark the customer's most recent active loan agreement as complete (manual override)
     if (markLoanComplete && customerId) {
       const agResult = await client.query(
-        `SELECT id, loan_register_id FROM agreements
+        `SELECT id, loan_register_id, repayment_amount, loan_amount, facility_fee_amount, interest_amount
+         FROM agreements
          WHERE customer_id = $1
            AND status NOT IN ('completed', 'cancelled')
          ORDER BY created_at DESC
@@ -408,10 +424,15 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
           [ag.id]
         );
         if (ag.loan_register_id && !autoCompletedLoanRegisterIds.includes(ag.loan_register_id)) {
-          const ok = await updateLoanRegisterStatus(ag.loan_register_id, "completed");
+          const dbTotal =
+            parseFloat(String(ag.repayment_amount ?? 0)) ||
+            (parseFloat(String(ag.loan_amount ?? 0)) +
+             parseFloat(String(ag.facility_fee_amount ?? 0)) +
+             parseFloat(String(ag.interest_amount ?? 0)));
+          const ok = await updateLoanRegisterStatus(ag.loan_register_id, "completed", dbTotal || undefined);
           if (ok) {
             autoCompletedLoanRegisterIds.push(ag.loan_register_id);
-            console.log(`[payment] Manual-complete Loan Register #${ag.loan_register_id}`);
+            console.log(`[payment] Manual-complete Loan Register #${ag.loan_register_id} (paid $${dbTotal})`);
           }
         }
       }

@@ -85,22 +85,100 @@ export async function deleteFromLoanRegister(loanRegisterId: number): Promise<bo
   return res.status === 204 || res.status === 200;
 }
 
-export async function updateLoanRegisterStatus(
+export async function updateLoanRegister(
   loanRegisterId: number,
-  status: "completed" | "active"
+  updates: Record<string, any>
 ): Promise<boolean> {
   const res = await fetch(`${LOAN_REGISTER_URL}/api/loans/${loanRegisterId}`, {
     method: "PUT",
     headers: loanRegHeaders(),
-    body: JSON.stringify({ status }),
+    body: JSON.stringify(updates),
   });
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[loan-register] Status update failed (${res.status}): ${body.slice(0, 200)}`);
+    console.error(`[loan-register] Update failed (${res.status}): ${body.slice(0, 200)}`);
     return false;
   }
-  const data = await res.json() as any;
-  return data?.status === status;
+  return true;
+}
+
+export async function updateLoanRegisterStatus(
+  loanRegisterId: number,
+  status: "completed" | "active",
+  paymentsReceived?: number
+): Promise<boolean> {
+  const updates: Record<string, any> = { status };
+  if (paymentsReceived != null && paymentsReceived > 0) {
+    updates.paymentsReceived = paymentsReceived;
+  }
+  // When completing a loan, always set balanceOwing to 0 (fully paid)
+  if (status === "completed") {
+    updates.balanceOwing = 0;
+  }
+  return updateLoanRegister(loanRegisterId, updates);
+}
+
+// ─── Backfill paid amounts for all completed loans in the Loan Register ────────
+// Fetches all completed loans where paymentsReceived = 0, then sets
+// paymentsReceived = loanAmount + loanRaisingFee + accruedInterest for each.
+export async function backfillCompletedLoanPayments(): Promise<{ updated: number; skipped: number; errors: string[] }> {
+  const result = { updated: 0, skipped: 0, errors: [] as string[] };
+
+  let page = 1;
+  const pageSize = 100;
+
+  while (true) {
+    let loans: any[];
+    try {
+      const r = await fetch(
+        `${LOAN_REGISTER_URL}/api/loans?status=completed&page=${page}&limit=${pageSize}`,
+        { headers: loanRegHeaders() }
+      );
+      if (!r.ok) {
+        result.errors.push(`Loan Register list failed (${r.status}) on page ${page}`);
+        break;
+      }
+      loans = await r.json() as any[];
+      if (!Array.isArray(loans) || loans.length === 0) break;
+    } catch (err: any) {
+      result.errors.push(`Fetch error page ${page}: ${err.message}`);
+      break;
+    }
+
+    for (const loan of loans) {
+      const paid = parseFloat(String(loan.paymentsReceived ?? 0)) || 0;
+      if (paid > 0) {
+        result.skipped++;
+        continue;
+      }
+
+      const loanAmt  = parseFloat(String(loan.loanAmount ?? 0)) || 0;
+      const fee      = parseFloat(String(loan.loanRaisingFee ?? 0)) || 0;
+      const interest = parseFloat(String(loan.accruedInterest ?? 0)) || 0;
+      const total    = loanAmt + fee + interest;
+
+      if (total <= 0) {
+        result.skipped++;
+        continue;
+      }
+
+      try {
+        const ok = await updateLoanRegister(loan.id, { paymentsReceived: total, balanceOwing: 0 });
+        if (ok) {
+          result.updated++;
+        } else {
+          result.errors.push(`Failed to update loan #${loan.id}`);
+        }
+      } catch (err: any) {
+        result.errors.push(`Error updating loan #${loan.id}: ${err.message}`);
+      }
+    }
+
+    if (loans.length < pageSize) break;
+    page++;
+  }
+
+  return result;
 }
 
 // ─── Name splitter: "John Paul Smith" → { surname:"Smith", givenName:"John Paul" }

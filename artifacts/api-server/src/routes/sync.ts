@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { db, retailersTable, branchesTable, retailerMappingsTable, branchMappingsTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
+import { backfillCompletedLoanPayments } from "../lib/syncXeroInvoices";
+import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
 
 const REVOLVER_URL = "https://credit-facility-manager.replit.app";
 const CENTRAL_API_KEY = process.env.CENTRAL_API_KEY ?? "";
@@ -380,6 +382,22 @@ router.post("/sync/revolver", async (req, res): Promise<void> => {
     res.json({ ok: true, ...results });
   } catch (err: any) {
     res.status(502).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/sync/backfill-loan-payments ─────────────────────────────────────
+// One-time (and re-runnable) backfill: sets paymentsReceived on ALL completed
+// loans in the Loan Register where paymentsReceived is currently 0.
+// Safe to run multiple times — loans that already have paymentsReceived > 0 are skipped.
+router.post("/sync/backfill-loan-payments", requireStaffAuth, requireSuperAdmin, async (_req, res): Promise<void> => {
+  try {
+    console.log("[sync] Starting completed-loan payments backfill...");
+    const result = await backfillCompletedLoanPayments();
+    console.log(`[sync] Backfill done — updated: ${result.updated}, skipped: ${result.skipped}, errors: ${result.errors.length}`);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error("[sync] Backfill failed:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
