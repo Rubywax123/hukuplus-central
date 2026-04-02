@@ -1470,6 +1470,20 @@ function PaymentModal({ notification, onClose, onDone }: {
   const totalAllocated = Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
   const unallocated = paymentAmount - totalAllocated;
 
+  const skipMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/formitize/notifications/${notification.id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status: "actioned" }),
+      });
+      if (!r.ok) throw new Error("Skip failed");
+      return r.json();
+    },
+    onSuccess: () => { onDone(); },
+  });
+
   const processMutation = useMutation({
     mutationFn: async () => {
       const allocs = Object.entries(allocations)
@@ -1563,7 +1577,7 @@ function PaymentModal({ notification, onClose, onDone }: {
                 <div className="text-center py-8 space-y-2">
                   <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
                   <p className="text-sm text-muted-foreground">No matching customers found in Xero.</p>
-                  <p className="text-xs text-muted-foreground">Use "Skip (manual)" to handle this in Xero directly.</p>
+                  <p className="text-xs text-muted-foreground">The name may be spelled differently in Xero. Use <strong className="text-foreground">Skip (manual)</strong> below to mark this as handled — then process the payment directly in Xero.</p>
                 </div>
               )}
               {(matchData?.candidates ?? []).map(c => (
@@ -1739,22 +1753,35 @@ function PaymentModal({ notification, onClose, onDone }: {
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors">
             {step === "done" ? "Close" : "Cancel"}
           </button>
-          {step === "allocating" && (
-            <button
-              onClick={() => processMutation.mutate()}
-              disabled={!bankCode || processMutation.isPending || selected?.invoices.length === 0}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-50 transition-colors"
-            >
-              {processMutation.isPending
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</>
-                : <><ArrowRight className="w-4 h-4" /> Apply Payment in Xero</>}
-            </button>
-          )}
-          {step === "error" && (
-            <button onClick={() => setStep("allocating")} className="px-4 py-2 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-foreground transition-colors">
-              Try Again
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {step === "matching" && !matching && (
+              <button
+                onClick={() => skipMutation.mutate()}
+                disabled={skipMutation.isPending}
+                title="Mark as handled — you will process this payment manually in Xero"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground border border-white/10 hover:border-white/20 hover:bg-white/5 transition-colors disabled:opacity-50"
+              >
+                {skipMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                Skip (manual)
+              </button>
+            )}
+            {step === "allocating" && (
+              <button
+                onClick={() => processMutation.mutate()}
+                disabled={!bankCode || processMutation.isPending || selected?.invoices.length === 0}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-50 transition-colors"
+              >
+                {processMutation.isPending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</>
+                  : <><ArrowRight className="w-4 h-4" /> Apply Payment in Xero</>}
+              </button>
+            )}
+            {step === "error" && (
+              <button onClick={() => setStep("allocating")} className="px-4 py-2 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-foreground transition-colors">
+                Try Again
+              </button>
+            )}
+          </div>
         </div>
       </motion.div>
     </div>
