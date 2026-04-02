@@ -119,7 +119,8 @@ interface ParsedLoanLines {
   loanRaisingFee: number;
   accruedInterest: number;
   totalAmount: number;
-  trackingOptions: string[];
+  trackingOptions: string[];    // tracking option values (e.g. "Profeeds Rusape")
+  trackingCategories: string[]; // tracking category names (e.g. "HukuPlus")
 }
 
 function parseLoanLineItems(lineItems: any[]): ParsedLoanLines {
@@ -127,6 +128,7 @@ function parseLoanLineItems(lineItems: any[]): ParsedLoanLines {
   let loanRaisingFee = 0;
   let accruedInterest = 0;
   const trackingOptions: string[] = [];
+  const trackingCategories: string[] = [];
 
   for (const li of lineItems) {
     const desc = (li.Description || "").toLowerCase();
@@ -145,11 +147,13 @@ function parseLoanLineItems(lineItems: any[]): ParsedLoanLines {
 
     for (const t of li.Tracking ?? []) {
       if (t.Option) trackingOptions.push((t.Option as string).trim());
+      // Capture the category name (e.g. "HukuPlus") to detect loan type by category
+      if (t.Name) trackingCategories.push((t.Name as string).trim());
     }
   }
 
   const totalAmount = loanAmount + loanRaisingFee + accruedInterest;
-  return { loanAmount, loanRaisingFee, accruedInterest, totalAmount, trackingOptions };
+  return { loanAmount, loanRaisingFee, accruedInterest, totalAmount, trackingOptions, trackingCategories };
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -253,15 +257,23 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       // ── Parse line items ───────────────────────────────────────────────
       const parsed = parseLoanLineItems(lineItems);
 
-      // ── Identify HukuPlus invoices by tracking options ─────────────────
-      const hasHukuPlusTracking = parsed.trackingOptions.some((opt) => {
-        const lower = opt.toLowerCase();
-        return (
-          lower.includes("hukuplus") ||
-          lower.includes("huku plus") ||
-          hukuplusBranchSet.has(lower)
-        );
-      });
+      // ── Identify HukuPlus invoices by tracking category name OR option value ──
+      // Xero returns tracking as { Name: "HukuPlus", Option: "Profeeds Rusape" }.
+      // The category name is the reliable signal — check it first, then fall back
+      // to option-value matching against our known HukuPlus branch list.
+      const hasHukuPlusTracking =
+        parsed.trackingCategories.some((cat) => {
+          const lower = cat.toLowerCase();
+          return lower.includes("hukuplus") || lower.includes("huku plus");
+        }) ||
+        parsed.trackingOptions.some((opt) => {
+          const lower = opt.toLowerCase();
+          return (
+            lower.includes("hukuplus") ||
+            lower.includes("huku plus") ||
+            hukuplusBranchSet.has(lower)
+          );
+        });
 
       const contactId: string = (inv.Contact?.ContactID ?? "").toLowerCase();
       const matchedCustomer = contactMap.get(contactId);
