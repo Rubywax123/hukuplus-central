@@ -746,6 +746,9 @@ export async function runMigrations() {
         AND payment_amount IS NULL;
     `);
 
+    // Enable pg_trgm for fuzzy name matching on customer search
+    await client.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm;`);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

@@ -49,6 +49,41 @@ function xeroHeaders(auth: { accessToken: string; tenantId: string }) {
   };
 }
 
+function mapInvoices(invoices: any[]) {
+  return invoices.map((inv: any) => ({
+    invoiceId: inv.InvoiceID,
+    invoiceNumber: inv.InvoiceNumber,
+    status: inv.Status,
+    date: inv.DateString,
+    dueDate: inv.DueDateString,
+    total: inv.Total,
+    amountDue: inv.AmountDue,
+    amountPaid: inv.AmountPaid,
+    reference: inv.Reference,
+  }));
+}
+
+// Simple character-level Sørensen–Dice coefficient for scoring Xero-only candidates
+function stringSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const bigrams = (s: string) => {
+    const bg = new Map<string, number>();
+    for (let i = 0; i < s.length - 1; i++) {
+      const bg2 = s.slice(i, i + 2);
+      bg.set(bg2, (bg.get(bg2) ?? 0) + 1);
+    }
+    return bg;
+  };
+  const aGrams = bigrams(a);
+  const bGrams = bigrams(b);
+  let intersection = 0;
+  for (const [gram, count] of aGrams) {
+    intersection += Math.min(count, bGrams.get(gram) ?? 0);
+  }
+  return (2 * intersection) / (a.length + b.length - 2);
+}
+
 // ─── GET /api/payments/bank-accounts ─────────────────────────────────────────
 
 router.get("/payments/bank-accounts", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
@@ -89,38 +124,50 @@ router.post("/payments/match-customer", requireStaffAuth, requireSuperAdmin, asy
 
   const client = await pool.connect();
   try {
-    // Search customers by name (fuzzy), also check branch/retailer context
-    const nameTerms = customerName.trim().split(/\s+/).filter(Boolean);
-    const nameLike = `%${nameTerms.join("%")}%`;
+    const nameTokens = customerName.trim().split(/\s+/).filter(Boolean);
+    const surname    = nameTokens[nameTokens.length - 1] ?? customerName.trim();
+    const firstName  = nameTokens[0] ?? "";
+    // ILIKE patterns for loose matching
+    const allTokensLike = `%${nameTokens.join("%")}%`;
+    const surnameLike   = `%${surname}%`;
 
+    // ── Local DB: trigram similarity + surname ILIKE fallback ──────────────
     const custResult = await client.query<{
       id: number; full_name: string; phone: string | null;
       national_id: string | null; xero_contact_id: string | null;
       branch_name: string | null; retailer_name: string | null;
+      sim: number;
     }>(
       `SELECT DISTINCT c.id, c.full_name, c.phone, c.national_id, c.xero_contact_id,
-              b.name AS branch_name, r.name AS retailer_name
+              b.name AS branch_name, r.name AS retailer_name,
+              similarity(c.full_name, $1) AS sim
        FROM customers c
        LEFT JOIN agreements a ON a.customer_id = c.id
        LEFT JOIN branches b ON b.id = a.branch_id
        LEFT JOIN retailers r ON r.id = a.retailer_id
-       WHERE c.full_name ILIKE $1
-       ORDER BY c.full_name
-       LIMIT 10`,
-      [nameLike]
+       WHERE
+         -- trigram similarity (handles typos / missing letters)
+         similarity(c.full_name, $1) > 0.2
+         -- OR all tokens appear in any order
+         OR (c.full_name ILIKE $2)
+         -- OR the surname alone appears (catches first-name-only mismatches)
+         OR (c.full_name ILIKE $3)
+       ORDER BY sim DESC
+       LIMIT 12`,
+      [customerName.trim(), allTokensLike, surnameLike]
     );
 
-    const customers = custResult.rows;
-
-    // Score by branch/retailer match
-    const scored = customers.map(c => {
-      let score = 0;
-      if (branchName && c.branch_name?.toLowerCase().includes(branchName.toLowerCase())) score += 2;
-      if (retailerName && c.retailer_name?.toLowerCase().includes(retailerName.toLowerCase())) score += 1;
+    // Score: similarity + branch/retailer context
+    const scored = custResult.rows.map(c => {
+      let score = parseFloat(String(c.sim ?? 0)) * 10; // 0–10 from trigram
+      if (branchName   && c.branch_name?.toLowerCase().includes(branchName.toLowerCase()))   score += 3;
+      if (retailerName && c.retailer_name?.toLowerCase().includes(retailerName.toLowerCase())) score += 2;
+      // Boost exact surname match
+      if (c.full_name.toLowerCase().includes(surname.toLowerCase())) score += 1;
       return { ...c, score };
-    }).sort((a, b) => b.score - a.score);
+    }).sort((a, b) => b.score - a.score).slice(0, 10);
 
-    // Fetch Xero invoices for each customer that has a xero_contact_id
+    // Fetch Xero invoices for each locally-matched customer that has a Xero link
     const auth = await getValidAccessToken();
 
     const results = await Promise.all(scored.map(async c => {
@@ -132,17 +179,7 @@ router.post("/payments/match-customer", requireStaffAuth, requireSuperAdmin, asy
         );
         if (invRes.ok) {
           const invData = await invRes.json();
-          invoices = (invData.Invoices ?? []).map((inv: any) => ({
-            invoiceId: inv.InvoiceID,
-            invoiceNumber: inv.InvoiceNumber,
-            status: inv.Status,
-            date: inv.DateString,
-            dueDate: inv.DueDateString,
-            total: inv.Total,
-            amountDue: inv.AmountDue,
-            amountPaid: inv.AmountPaid,
-            reference: inv.Reference,
-          }));
+          invoices = mapInvoices(invData.Invoices ?? []);
         }
       }
       return {
@@ -159,36 +196,48 @@ router.post("/payments/match-customer", requireStaffAuth, requireSuperAdmin, asy
       };
     }));
 
-    // Also search Xero directly for contacts not in our customers table
+    // ── Xero direct search: run 3 terms in parallel ─────────────────────────
+    // 1. Full name  2. Surname only  3. First name only (if multi-word)
     let xeroOnlyResults: any[] = [];
     if (auth) {
-      const contactRes = await fetch(
-        `https://api.xero.com/api.xro/2.0/Contacts?searchTerm=${encodeURIComponent(customerName)}&summaryOnly=false&pageSize=5`,
-        { headers: xeroHeaders(auth) }
-      );
-      if (contactRes.ok) {
-        const contactData = await contactRes.json();
-        const knownXeroIds = new Set(results.map(r => r.xeroContactId).filter(Boolean));
-        for (const c of (contactData.Contacts ?? [])) {
-          if (knownXeroIds.has(c.ContactID)) continue;
-          // Fetch invoices for this contact
+      const searchTerms = Array.from(new Set([
+        customerName.trim(),       // e.g. "Kassimu Matora"
+        surname,                   // e.g. "Matora"
+        ...(nameTokens.length > 1 ? [firstName] : []),  // e.g. "Kassimu"
+      ]));
+
+      const knownXeroIds = new Set(results.map(r => r.xeroContactId).filter(Boolean));
+      const xeroContacts: any[] = [];
+
+      await Promise.all(searchTerms.map(async term => {
+        try {
+          const contactRes = await fetch(
+            `https://api.xero.com/api.xro/2.0/Contacts?searchTerm=${encodeURIComponent(term)}&summaryOnly=false&pageSize=10`,
+            { headers: xeroHeaders(auth) }
+          );
+          if (!contactRes.ok) return;
+          const data = await contactRes.json();
+          for (const c of (data.Contacts ?? [])) {
+            if (!knownXeroIds.has(c.ContactID) && !xeroContacts.some(x => x.ContactID === c.ContactID)) {
+              xeroContacts.push(c);
+              knownXeroIds.add(c.ContactID);
+            }
+          }
+        } catch { /* non-fatal */ }
+      }));
+
+      // Fetch invoices for each new Xero contact
+      xeroOnlyResults = (await Promise.all(xeroContacts.map(async c => {
+        try {
           const invRes = await fetch(
             `https://api.xero.com/api.xro/2.0/Invoices?ContactIDs=${c.ContactID}&Statuses=AUTHORISED,PARTIAL&order=Date ASC&pageSize=50`,
             { headers: xeroHeaders(auth) }
           );
           const invData = invRes.ok ? await invRes.json() : {};
-          const invoices = (invData.Invoices ?? []).map((inv: any) => ({
-            invoiceId: inv.InvoiceID,
-            invoiceNumber: inv.InvoiceNumber,
-            status: inv.Status,
-            date: inv.DateString,
-            dueDate: inv.DueDateString,
-            total: inv.Total,
-            amountDue: inv.AmountDue,
-            amountPaid: inv.AmountPaid,
-            reference: inv.Reference,
-          }));
-          xeroOnlyResults.push({
+          const invoices = mapInvoices(invData.Invoices ?? []);
+          // Rough similarity score vs the search name so best matches float up
+          const sim = stringSimilarity(customerName.trim().toLowerCase(), (c.Name ?? "").toLowerCase());
+          return {
             customerId: null,
             fullName: c.Name,
             phone: c.Phones?.[0]?.PhoneNumber ?? null,
@@ -196,12 +245,14 @@ router.post("/payments/match-customer", requireStaffAuth, requireSuperAdmin, asy
             xeroContactId: c.ContactID,
             branchName: null,
             retailerName: null,
-            score: 0,
+            score: sim * 5, // 0–5 range
             invoices,
             totalOutstanding: invoices.reduce((s: number, i: any) => s + (i.amountDue ?? 0), 0),
-          });
-        }
-      }
+          };
+        } catch { return null; }
+      }))).filter(Boolean);
+
+      xeroOnlyResults.sort((a: any, b: any) => b.score - a.score);
     }
 
     res.json({ candidates: [...results, ...xeroOnlyResults] });
