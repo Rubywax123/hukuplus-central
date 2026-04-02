@@ -72,6 +72,7 @@ type XeroEntry = {
   repayment_amount: string | null;
   xero_invoice_id: string | null;
   loan_register_id: number | null;
+  status: string;
   dismissed: boolean;
   branch_name: string | null;
   disbursement_date: string | null;
@@ -171,6 +172,23 @@ export default function NotificationsPage() {
         body: JSON.stringify({ dismissed }),
       });
       if (!r.ok) throw new Error("Failed to dismiss");
+      return r.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/loan-register"] }),
+  });
+
+  const lrStatusMutation = useMutation({
+    mutationFn: async ({ lrId, status }: { lrId: number; status: "completed" | "active" }) => {
+      const r = await fetch(`${BASE}/api/loan-register/${lrId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to update status");
+      }
       return r.json();
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/loan-register"] }),
@@ -330,6 +348,11 @@ export default function NotificationsPage() {
                             Push pending
                           </span>
                         )}
+                        {e.status === "completed" && !e.dismissed && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                            ✓ Completed
+                          </span>
+                        )}
                         {e.dismissed && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20">
                             Dismissed
@@ -344,7 +367,33 @@ export default function NotificationsPage() {
                         <span className="ml-auto">{e.disbursement_date ? format(new Date(e.disbursement_date), "dd MMM yyyy") : format(new Date(e.created_at), "dd MMM yyyy")}</span>
                       </div>
                     </div>
-                    <div className="shrink-0">
+                    <div className="shrink-0 flex items-center gap-2">
+                      {/* Mark Complete / Mark Active — only for entries linked to the Loan Register */}
+                      {e.loan_register_id && !e.dismissed && (
+                        e.status === "completed" ? (
+                          <button
+                            onClick={() => lrStatusMutation.mutate({ lrId: e.loan_register_id!, status: "active" })}
+                            disabled={lrStatusMutation.isPending}
+                            title="Revert to active in the Loan Register"
+                            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/20 text-muted-foreground hover:text-amber-300 transition-colors"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            Revert
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => lrStatusMutation.mutate({ lrId: e.loan_register_id!, status: "completed" })}
+                            disabled={lrStatusMutation.isPending}
+                            title="Mark this loan as completed in the Loan Register"
+                            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-emerald-500/10 border border-white/10 hover:border-emerald-500/20 text-muted-foreground hover:text-emerald-300 transition-colors"
+                          >
+                            <CheckCheck className="w-3 h-3" />
+                            Mark Complete
+                          </button>
+                        )
+                      )}
+
+                      {/* Dismiss / Restore */}
                       {e.dismissed ? (
                         <button
                           onClick={() => dismissMutation.mutate({ id: e.id, dismissed: false })}

@@ -85,6 +85,24 @@ export async function deleteFromLoanRegister(loanRegisterId: number): Promise<bo
   return res.status === 204 || res.status === 200;
 }
 
+export async function updateLoanRegisterStatus(
+  loanRegisterId: number,
+  status: "completed" | "active"
+): Promise<boolean> {
+  const res = await fetch(`${LOAN_REGISTER_URL}/api/loans/${loanRegisterId}`, {
+    method: "PUT",
+    headers: loanRegHeaders(),
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`[loan-register] Status update failed (${res.status}): ${body.slice(0, 200)}`);
+    return false;
+  }
+  const data = await res.json() as any;
+  return data?.status === status;
+}
+
 // ─── Name splitter: "John Paul Smith" → { surname:"Smith", givenName:"John Paul" }
 function splitName(fullName: string): { surname: string; givenName: string } {
   const parts = fullName.trim().split(/\s+/);

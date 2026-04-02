@@ -1414,6 +1414,7 @@ function PaymentModal({ notification, onClose, onDone }: {
   const [bankCode, setBankCode] = useState("");
   const [markLoanComplete, setMarkLoanComplete] = useState(true);
   const [resultErrors, setResultErrors] = useState<string[]>([]);
+  const [lrAutoCompleted, setLrAutoCompleted] = useState(false);
 
   const paymentAmount = parseFloat(String(notification.payment_amount ?? 0)) || 0;
 
@@ -1509,6 +1510,7 @@ function PaymentModal({ notification, onClose, onDone }: {
     },
     onSuccess: (data) => {
       if (data.errors?.length) setResultErrors(data.errors);
+      setLrAutoCompleted(!!data.autoCompleted);
       setStep("done");
       onDone();
     },
@@ -1738,27 +1740,41 @@ function PaymentModal({ notification, onClose, onDone }: {
                 )}
               </div>
 
-              {/* Loan Register follow-up — always shown after a payment, since balance may now be $0 */}
-              <div className="mx-2 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-amber-300">Action required in Loan Register</p>
-                    <p className="text-xs text-amber-300/70 mt-1">
-                      The Loan Register does not auto-complete when a payment is applied. If this loan is fully paid, open the Loan Register and mark it as <strong>Completed</strong> there.
-                    </p>
-                    <a
-                      href="https://loan-manager-automate.replit.app/active"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      Open Loan Register → Active Loans
-                    </a>
+              {/* Loan Register follow-up */}
+              {lrAutoCompleted ? (
+                <div className="mx-2 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-emerald-300">Loan Register automatically completed</p>
+                      <p className="text-xs text-emerald-300/70 mt-1">
+                        The invoice balance reached $0 — this loan was automatically marked as <strong>Completed</strong> in the Loan Register.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="mx-2 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-amber-300">Check Loan Register status</p>
+                      <p className="text-xs text-amber-300/70 mt-1">
+                        If this loan is now fully paid, use the <strong>Loan Register tab</strong> in Notifications to mark it as Completed — or open the Loan Register directly.
+                      </p>
+                      <a
+                        href="https://loan-manager-automate.replit.app/active"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Open Loan Register → Active Loans
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

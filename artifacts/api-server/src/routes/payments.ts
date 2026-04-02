@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
+import { updateLoanRegisterStatus } from "../lib/syncXeroInvoices";
 
 const router = Router();
 
@@ -319,6 +320,30 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     }
   }
 
+  // ── Re-fetch applied invoices from Xero to detect fully-paid ones ────────────
+  const autoCompletedLoanRegisterIds: number[] = [];
+  const fullyPaidInvoiceIds: string[] = [];
+
+  if (applied.length > 0) {
+    for (const invoiceId of applied) {
+      try {
+        const invRes = await fetch(
+          `https://api.xero.com/api.xro/2.0/Invoices/${invoiceId}`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (invRes.ok) {
+          const invData = await invRes.json() as any;
+          const inv = invData.Invoices?.[0];
+          if (inv && (inv.AmountDue === 0 || inv.AmountDue === "0" || parseFloat(inv.AmountDue) === 0)) {
+            fullyPaidInvoiceIds.push(invoiceId);
+          }
+        }
+      } catch {
+        // Non-fatal — skip
+      }
+    }
+  }
+
   const client = await pool.connect();
   try {
     if (errors.length > 0 && applied.length === 0) {
@@ -342,25 +367,66 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
       [errorSummary, notificationId]
     );
 
-    // Optionally mark the customer's most recent active loan agreement as complete
+    // Auto-complete Loan Register entries for fully-paid invoices
+    for (const invoiceId of fullyPaidInvoiceIds) {
+      try {
+        const agResult = await client.query(
+          `SELECT id, loan_register_id FROM agreements WHERE xero_invoice_id = $1 LIMIT 1`,
+          [invoiceId]
+        );
+        const ag = agResult.rows[0];
+        if (ag?.loan_register_id) {
+          const ok = await updateLoanRegisterStatus(ag.loan_register_id, "completed");
+          if (ok) {
+            autoCompletedLoanRegisterIds.push(ag.loan_register_id);
+            await client.query(
+              `UPDATE agreements SET status = 'completed', updated_at = NOW() WHERE id = $1`,
+              [ag.id]
+            );
+            console.log(`[payment] Auto-completed Loan Register #${ag.loan_register_id} (invoice ${invoiceId})`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[payment] Auto-complete check failed for ${invoiceId}: ${err.message}`);
+      }
+    }
+
+    // Optionally mark the customer's most recent active loan agreement as complete (manual override)
     if (markLoanComplete && customerId) {
-      await client.query(
-        `UPDATE agreements SET status = 'completed', updated_at = NOW()
-         WHERE id = (
-           SELECT id FROM agreements
-           WHERE customer_id = $1
-             AND status NOT IN ('completed', 'cancelled')
-           ORDER BY created_at DESC
-           LIMIT 1
-         )`,
+      const agResult = await client.query(
+        `SELECT id, loan_register_id FROM agreements
+         WHERE customer_id = $1
+           AND status NOT IN ('completed', 'cancelled')
+         ORDER BY created_at DESC
+         LIMIT 1`,
         [customerId]
       );
+      const ag = agResult.rows[0];
+      if (ag) {
+        await client.query(
+          `UPDATE agreements SET status = 'completed', updated_at = NOW() WHERE id = $1`,
+          [ag.id]
+        );
+        if (ag.loan_register_id && !autoCompletedLoanRegisterIds.includes(ag.loan_register_id)) {
+          const ok = await updateLoanRegisterStatus(ag.loan_register_id, "completed");
+          if (ok) {
+            autoCompletedLoanRegisterIds.push(ag.loan_register_id);
+            console.log(`[payment] Manual-complete Loan Register #${ag.loan_register_id}`);
+          }
+        }
+      }
     }
   } finally {
     client.release();
   }
 
-  res.json({ ok: true, applied, errors });
+  res.json({
+    ok: true,
+    applied,
+    errors,
+    autoCompleted: autoCompletedLoanRegisterIds.length > 0,
+    autoCompletedLoanRegisterIds,
+  });
 });
 
 export default router;

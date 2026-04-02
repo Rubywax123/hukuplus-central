@@ -3,7 +3,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { generateNovafeedAgreementPdf } from "../lib/novafeed-pdf";
 import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
-import { deleteFromLoanRegister } from "../lib/syncXeroInvoices";
+import { deleteFromLoanRegister, updateLoanRegisterStatus } from "../lib/syncXeroInvoices";
 import {
   CreateAgreementBody,
   GetAgreementParams,
@@ -416,7 +416,7 @@ router.get("/loan-register", async (req, res): Promise<void> => {
         a.facility_fee_amount,
         a.interest_amount,
         a.repayment_amount,
-        a.status,
+        COALESCE(a.status, 'pending') AS status,
         a.form_type,
         COALESCE(a.source, 'formitize') AS source,
         COALESCE(a.dismissed, FALSE)    AS dismissed,
@@ -477,6 +477,41 @@ router.put("/agreements/:id/dismiss", async (req, res): Promise<void> => {
   } finally {
     client2.release();
   }
+});
+
+// ─── PUT /loan-register/:lrId/status — manually flip Loan Register status ─────
+router.put("/loan-register/:lrId/status", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const lrId = parseInt(req.params.lrId, 10);
+  if (!lrId) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const { status } = req.body as { status?: string };
+  if (status !== "completed" && status !== "active") {
+    res.status(400).json({ error: "status must be 'completed' or 'active'" });
+    return;
+  }
+
+  const ok = await updateLoanRegisterStatus(lrId, status);
+  if (!ok) {
+    res.status(502).json({ error: "Loan Register did not confirm the update" });
+    return;
+  }
+
+  // Mirror the status in our local agreements table
+  const client2 = await pool.connect();
+  try {
+    await client2.query(
+      `UPDATE agreements SET status = $1, updated_at = NOW() WHERE loan_register_id = $2`,
+      [status, lrId]
+    );
+  } finally {
+    client2.release();
+  }
+
+  res.json({ ok: true, lrId, status });
 });
 
 export default router;
