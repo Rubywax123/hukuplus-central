@@ -425,7 +425,7 @@ function parseFormContext(formName: string): {
   else if (n.includes("application")) formType = "application";
   else if (n.includes("drawdown")) formType = "drawdown";
   else if (n.includes("payment") || n.includes("receipt") || n.includes("payment notice")) formType = "payment";
-  else if (n.includes("upload") || n.includes("document")) formType = "upload";
+  else if (n.includes("upload") || n.includes("document") || n.includes("docs") || n.includes("loan doc")) formType = "upload";
   else if (n.includes("approval")) formType = "approval";
   else if (n.includes("undertaking")) formType = "undertaking";
 
@@ -586,13 +586,21 @@ router.post("/formitize/webhook", async (req, res) => {
 
   console.log("[formitize:webhook] Fields:", JSON.stringify(fieldMap));
 
-  // ── Job ID dedup ───────────────────────────────────────────────────────────
+  // ── Activity-only form types (no agreement record needed) ──────────────────
+  // Drawdowns, payments, uploads, approvals, undertakings are events against
+  // existing agreements — store as activity log and return.
+  const activityOnly = ["drawdown", "payment", "upload", "approval", "undertaking"];
+
+  // ── Job ID dedup (agreement forms only) ────────────────────────────────────
+  // Skip dedup for activity-only types — they legitimately share the same
+  // jobID as the parent loan agreement (e.g. a document upload submitted
+  // against the same Formitize job) and must not be silently rejected.
   const rawJobId = body.jobID || body.jobId || body.job_id || null;
   const jobId = (rawJobId && String(rawJobId) !== "0")
     ? String(rawJobId)
     : (body.submittedFormID ? String(body.submittedFormID) : null);
 
-  if (jobId) {
+  if (jobId && !activityOnly.includes(formType)) {
     const existing = await db.select({ id: agreementsTable.id })
       .from(agreementsTable).where(eq(agreementsTable.formitizeJobId, jobId));
     if (existing.length > 0) {
@@ -601,11 +609,6 @@ router.post("/formitize/webhook", async (req, res) => {
       return;
     }
   }
-
-  // ── Activity-only form types (no agreement record needed) ──────────────────
-  // Drawdowns, payments, uploads, approvals, undertakings are events against
-  // existing agreements — store as activity log and return.
-  const activityOnly = ["drawdown", "payment", "upload", "approval", "undertaking"];
   if (activityOnly.includes(formType)) {
     const customerName = findField(
       "formcrm_1", "borrowername", "clientname", "customername", "employeename",
