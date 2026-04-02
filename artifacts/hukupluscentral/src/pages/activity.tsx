@@ -1415,7 +1415,7 @@ function PaymentModal({ notification, onClose, onDone }: {
   const [markLoanComplete, setMarkLoanComplete] = useState(true);
   const [resultErrors, setResultErrors] = useState<string[]>([]);
 
-  const paymentAmount = notification.payment_amount ?? 0;
+  const paymentAmount = parseFloat(String(notification.payment_amount ?? 0)) || 0;
 
   const { data: matchData, isLoading: matching } = useQuery<{ candidates: PaymentCandidate[] }>({
     queryKey: ["payment-match", notification.id],
