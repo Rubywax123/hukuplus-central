@@ -810,8 +810,8 @@ export default function RetailersPage() {
   return (
     <div className="pb-10">
       <PageHeader
-        title="Retailers Directory"
-        description="Manage partner stores, branch networks, and portal access accounts."
+        title="Retailers & Stores"
+        description="Manage partner retailers, their store branches, and portal access accounts."
         action={
           <div className="flex items-center gap-2 flex-wrap">
             <button

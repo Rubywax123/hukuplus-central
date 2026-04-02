@@ -1,4 +1,5 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,10 +8,8 @@ import { LoanAppProvider } from "@/contexts/LoanAppContext";
 
 // Pages
 import DashboardPage from "@/pages/dashboard";
-import RetailersPage from "@/pages/retailers";
 import AgreementsPage from "@/pages/agreements";
 import LoanAppsPage from "@/pages/loan-apps";
-import TeamPage from "@/pages/team";
 import PublicSigningPage from "@/pages/public-signing";
 import KioskPage from "@/pages/kiosk";
 import PortalLoginPage from "@/pages/portal-login";
@@ -24,6 +23,12 @@ import ActivityPage from "@/pages/activity";
 import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
 import ApplyRevolverPage from "@/pages/apply-revolver";
 import NotFound from "@/pages/not-found";
+
+function Redirect({ to }: { to: string }) {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate(to); }, [to]);
+  return null;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,7 +73,6 @@ function Router() {
         <AuthGuard>
           <Switch>
             <Route path="/" component={DashboardPage} />
-            <Route path="/retailers" component={RetailersPage} />
             <Route path="/agreements" component={AgreementsPage} />
             <Route path="/loan-apps" component={LoanAppsPage} />
             <Route path="/customers" component={CustomersPage} />
@@ -76,7 +80,9 @@ function Router() {
             <Route path="/notifications" component={NotificationsPage} />
             <Route path="/comms" component={CommsPage} />
             <Route path="/activity" component={ActivityPage} />
-            <Route path="/team" component={TeamPage} />
+            {/* Legacy redirects — now folded into the Customers hub */}
+            <Route path="/retailers">{() => <Redirect to="/customers?tab=retailers" />}</Route>
+            <Route path="/team">{() => <Redirect to="/customers?tab=staff" />}</Route>
             <Route component={NotFound} />
           </Switch>
         </AuthGuard>

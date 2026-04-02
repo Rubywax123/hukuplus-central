@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { useSearch } from "wouter";
+import { useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus } from "lucide-react";
+import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck } from "lucide-react";
+import RetailersPage from "@/pages/retailers";
+import TefcoStaffPage from "@/pages/team";
 import { motion, AnimatePresence } from "framer-motion";
 import { ActiveAppBanner } from "@/components/layout";
 
@@ -1026,8 +1028,42 @@ export default function CustomersPage() {
   const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
   const queryClient = useQueryClient();
 
-  // Auto-open a customer profile when navigated here with ?customerId=XXX
+  // ── Tab routing ─────────────────────────────────────────────────────────────
+  const [, navigate] = useLocation();
   const searchStr = useSearch();
+  const urlParams = new URLSearchParams(searchStr ?? "");
+  const activeTab = (urlParams.get("tab") ?? "customers") as "customers" | "retailers" | "staff";
+
+  function switchTab(tab: string) {
+    navigate(tab === "customers" ? "/customers" : `/customers?tab=${tab}`);
+  }
+
+  const TAB_ITEMS = [
+    { id: "customers",  label: "Customers",          icon: Users },
+    { id: "retailers",  label: "Retailers & Stores",  icon: Building2 },
+    { id: "staff",      label: "Tefco Staff",          icon: ShieldCheck },
+  ] as const;
+
+  const tabBar = (
+    <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl border border-white/10 w-fit mb-6">
+      {TAB_ITEMS.map(t => (
+        <button
+          key={t.id}
+          onClick={() => switchTab(t.id)}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
+            activeTab === t.id
+              ? "bg-primary text-white shadow-lg shadow-primary/20"
+              : "text-muted-foreground hover:text-white hover:bg-white/5"
+          }`}
+        >
+          <t.icon className="w-4 h-4" />
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Auto-open a customer profile when navigated here with ?customerId=XXX
   useEffect(() => {
     if (!searchStr) return;
     const params = new URLSearchParams(searchStr);
@@ -1035,8 +1071,11 @@ export default function CustomersPage() {
     if (id) {
       const parsed = parseInt(id, 10);
       if (!isNaN(parsed)) setSelectedId(parsed);
-      // Clean URL without reloading so the param doesn't persist on refresh
-      window.history.replaceState({}, "", window.location.pathname);
+      // Clear customerId but preserve other query params (e.g. tab)
+      const newParams = new URLSearchParams(searchStr);
+      newParams.delete("customerId");
+      const qs = newParams.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
     }
   }, [searchStr]);
 
@@ -1067,8 +1106,30 @@ export default function CustomersPage() {
   const customers = data?.customers ?? [];
   const total = data?.total ?? 0;
 
+  // ── Non-customers tabs — render sub-pages with shared tab bar ──────────────
+  if (activeTab === "retailers") {
+    return (
+      <div>
+        {tabBar}
+        <RetailersPage />
+      </div>
+    );
+  }
+
+  if (activeTab === "staff") {
+    return (
+      <div>
+        {tabBar}
+        <TefcoStaffPage />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Tab bar */}
+      {tabBar}
+
       {/* Header */}
       <div>
         <ActiveAppBanner />

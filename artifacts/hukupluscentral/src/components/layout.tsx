@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Store, Monitor, Users, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check } from "lucide-react";
+import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -12,11 +12,9 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/customers", label: "Customers", icon: ContactRound },
-  { path: "/retailers", label: "Retailers", icon: Store },
   { path: "/agreements", label: "Kiosk", icon: Monitor },
   { path: "/activity", label: "Activity", icon: Activity, badge: "activity" as const },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
-  { path: "/team", label: "Tefco Staff", icon: Users },
 ];
 
 const ROLE_LABELS: Record<string, string> = {
