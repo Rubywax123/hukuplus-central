@@ -291,12 +291,17 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
       [errorSummary, notificationId]
     );
 
-    // Optionally mark the customer's active loan agreement as complete
+    // Optionally mark the customer's most recent active loan agreement as complete
     if (markLoanComplete && customerId) {
       await client.query(
         `UPDATE agreements SET status = 'completed', updated_at = NOW()
-         WHERE customer_id = $1 AND status NOT IN ('completed', 'cancelled')
-         ORDER BY created_at DESC LIMIT 1`,
+         WHERE id = (
+           SELECT id FROM agreements
+           WHERE customer_id = $1
+             AND status NOT IN ('completed', 'cancelled')
+           ORDER BY created_at DESC
+           LIMIT 1
+         )`,
         [customerId]
       );
     }
