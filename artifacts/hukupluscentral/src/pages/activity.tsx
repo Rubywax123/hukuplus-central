@@ -1446,15 +1446,22 @@ function PaymentModal({ notification, onClose, onDone }: {
 
   function selectCandidate(c: PaymentCandidate) {
     setSelected(c);
-    // Pre-allocate: loan invoice = largest outstanding first, then rest by date
     const outstanding = [...c.invoices].sort((a, b) => b.amountDue - a.amountDue);
-    let remaining = paymentAmount;
     const alloc: Record<string, string> = {};
-    for (const inv of outstanding) {
-      if (remaining <= 0) { alloc[inv.invoiceId] = "0.00"; continue; }
-      const apply = Math.min(remaining, inv.amountDue);
-      alloc[inv.invoiceId] = apply.toFixed(2);
-      remaining -= apply;
+    if (paymentAmount > 0) {
+      // Known payment amount — allocate greedily starting from largest invoice
+      let remaining = paymentAmount;
+      for (const inv of outstanding) {
+        if (remaining <= 0) { alloc[inv.invoiceId] = "0.00"; continue; }
+        const apply = Math.min(remaining, inv.amountDue);
+        alloc[inv.invoiceId] = apply.toFixed(2);
+        remaining -= apply;
+      }
+    } else {
+      // Unknown payment amount — pre-fill each invoice with its full outstanding balance
+      for (const inv of outstanding) {
+        alloc[inv.invoiceId] = inv.amountDue.toFixed(2);
+      }
     }
     setAllocations(alloc);
     setStep("allocating");
@@ -1631,10 +1638,10 @@ function PaymentModal({ notification, onClose, onDone }: {
                             type="number"
                             step="0.01"
                             min="0"
-                            max={inv.amountDue}
                             value={allocations[inv.invoiceId] ?? "0.00"}
                             onChange={e => setAllocations(prev => ({ ...prev, [inv.invoiceId]: e.target.value }))}
-                            className="w-24 bg-white/5 border border-white/15 rounded-lg px-2 py-1.5 text-sm text-right text-foreground focus:outline-none focus:border-amber-500/50"
+                            onWheel={e => (e.target as HTMLInputElement).blur()}
+                            className="w-24 bg-white/5 border border-white/15 rounded-lg px-2 py-1.5 text-sm text-right text-foreground focus:outline-none focus:border-amber-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                         </div>
                       </div>
@@ -1643,20 +1650,25 @@ function PaymentModal({ notification, onClose, onDone }: {
                 )}
 
                 {/* Allocation summary */}
-                <div className={`mt-3 p-3 rounded-lg text-sm flex items-center justify-between ${
-                  Math.abs(unallocated) < 0.01 ? "bg-green-500/10 border border-green-500/20" :
-                  unallocated > 0 ? "bg-amber-500/10 border border-amber-500/20" :
-                  "bg-red-500/10 border border-red-500/20"
-                }`}>
-                  <span className="text-muted-foreground">
-                    {paymentAmount > 0
-                      ? `$${paymentAmount.toFixed(2)} received — $${totalAllocated.toFixed(2)} allocated`
-                      : `$${totalAllocated.toFixed(2)} allocated`}
-                  </span>
-                  <span className={`font-semibold ${Math.abs(unallocated) < 0.01 ? "text-green-400" : unallocated > 0 ? "text-amber-300" : "text-red-400"}`}>
-                    {Math.abs(unallocated) < 0.01 ? "Fully allocated" : unallocated > 0 ? `$${unallocated.toFixed(2)} unallocated` : `Over by $${Math.abs(unallocated).toFixed(2)}`}
-                  </span>
-                </div>
+                {paymentAmount > 0 ? (
+                  <div className={`mt-3 p-3 rounded-lg text-sm flex items-center justify-between ${
+                    Math.abs(unallocated) < 0.01 ? "bg-green-500/10 border border-green-500/20" :
+                    unallocated > 0 ? "bg-amber-500/10 border border-amber-500/20" :
+                    "bg-red-500/10 border border-red-500/20"
+                  }`}>
+                    <span className="text-muted-foreground">
+                      ${paymentAmount.toFixed(2)} received — ${totalAllocated.toFixed(2)} allocated
+                    </span>
+                    <span className={`font-semibold ${Math.abs(unallocated) < 0.01 ? "text-green-400" : unallocated > 0 ? "text-amber-300" : "text-red-400"}`}>
+                      {Math.abs(unallocated) < 0.01 ? "Fully allocated" : unallocated > 0 ? `$${unallocated.toFixed(2)} unallocated` : `Over by $${Math.abs(unallocated).toFixed(2)}`}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-3 p-3 rounded-lg text-sm flex items-center justify-between bg-white/5 border border-white/10">
+                    <span className="text-muted-foreground">${totalAllocated.toFixed(2)} allocated</span>
+                    <span className="text-muted-foreground text-xs">Adjust amounts if needed</span>
+                  </div>
+                )}
               </div>
 
               {/* Payment date & bank account */}

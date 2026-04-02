@@ -620,13 +620,25 @@ router.post("/formitize/webhook", async (req, res) => {
     if (formType === "payment") {
       const amtRaw = findField(
         "amount", "payment amount", "paid amount", "total paid", "totalamount",
-        "paymentamount", "paidamount", "amountpaid", "amount paid", "receipt amount"
+        "paymentamount", "paidamount", "amountpaid", "amount paid", "receipt amount",
+        "formcurrency_1", "formcurrency", "currency", "receiptamount"
       );
       if (amtRaw) {
         const parsed = parseFloat(amtRaw.replace(/[^0-9.]/g, ""));
         if (!isNaN(parsed) && parsed > 0) paymentAmount = parsed;
       }
     }
+
+    // Extract branch and retailer for payment receipts
+    // Payment receipt layout: formtext_1=customer, formtext_2=branch, "0"=retailer/product
+    const branchName = findField(
+      "branchname", "branch name", "branch", "storename", "store name", "store",
+      "formtext_2"
+    ) || null;
+    const retailerName = findField(
+      "retailername", "retailer name", "retailer", "dealername", "dealer",
+      "formtext_3", "formtext_4"
+    ) || fieldMap["0"] || null;
 
     // Best-effort customer ID lookup so the "View Profile" link works on activity notifications
     let activityCustomerId: number | null = null;
@@ -697,7 +709,7 @@ router.post("/formitize/webhook", async (req, res) => {
 
     // Document uploads auto-complete — they're receipts, not tasks requiring action.
     const notifStatus = formType === "upload" ? "actioned" : "new";
-    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount, status: notifStatus });
+    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount, branchName, retailerName, status: notifStatus });
 
     console.log(`[formitize:webhook] Stored as activity (status=${notifStatus}) — ${rawFormName}`);
     res.status(200).json({ ok: true, stored: "activity", product, formType });

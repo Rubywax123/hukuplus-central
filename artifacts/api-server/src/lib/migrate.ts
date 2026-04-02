@@ -657,6 +657,18 @@ export async function runMigrations() {
     // Stores an array of {url, name} objects uploaded via the document upload form.
     await client.query(`ALTER TABLE agreements ADD COLUMN IF NOT EXISTS signed_documents JSONB DEFAULT '[]'::jsonb;`);
 
+    // ── One-time data fix: Angeline Shoko payment receipt (job 23498021) ───
+    // formcurrency_1 was not extracted by webhook handler — fix payment_amount,
+    // branch_name and retailer_name from the known Formitize payload.
+    await client.query(`
+      UPDATE formitize_notifications
+      SET payment_amount = 1935,
+          branch_name    = COALESCE(branch_name, 'Bindura CBD'),
+          retailer_name  = COALESCE(retailer_name, 'Gain')
+      WHERE formitize_job_id = '23498021'
+        AND payment_amount IS NULL;
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
