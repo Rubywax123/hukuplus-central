@@ -1220,30 +1220,40 @@ router.post("/formitize/webhook", async (req, res) => {
 
 // ─── GET /api/formitize/notifications ────────────────────────────────────────
 router.get("/formitize/notifications", requireStaffAuth, requireSuperAdmin, async (req, res) => {
-  const { product, task_type, status } = req.query;
-  const params: any[] = [];
-  let where = "WHERE 1=1";
-  if (product && product !== "all") { params.push(product); where += ` AND product = $${params.length}`; }
-  if (task_type && task_type !== "all") { params.push(task_type); where += ` AND task_type = $${params.length}`; }
-  if (status && status !== "all") { params.push(status); where += ` AND status = $${params.length}`; }
-  const result = await pool.query(
-    `SELECT * FROM formitize_notifications ${where} ORDER BY created_at DESC LIMIT 500`,
-    params
-  );
-  res.json(result.rows);
+  try {
+    const { product, task_type, status } = req.query;
+    const params: any[] = [];
+    let where = "WHERE 1=1";
+    if (product && product !== "all") { params.push(product); where += ` AND product = $${params.length}`; }
+    if (task_type && task_type !== "all") { params.push(task_type); where += ` AND task_type = $${params.length}`; }
+    if (status && status !== "all") { params.push(status); where += ` AND status = $${params.length}`; }
+    const result = await pool.query(
+      `SELECT * FROM formitize_notifications ${where} ORDER BY created_at DESC LIMIT 500`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error("[formitize] notifications list error:", err.message);
+    res.status(500).json({ error: "Failed to load notifications" });
+  }
 });
 
 // ─── GET /api/formitize/notifications/counts ──────────────────────────────────
 router.get("/formitize/notifications/counts", requireStaffAuth, requireSuperAdmin, async (req, res) => {
-  const result = await pool.query(
-    `SELECT product, task_type, status, COUNT(*) AS count
-     FROM formitize_notifications
-     GROUP BY product, task_type, status`
-  );
-  const newTotal = await pool.query(
-    `SELECT COUNT(*) AS count FROM formitize_notifications WHERE status = 'new'`
-  );
-  res.json({ breakdown: result.rows, newTotal: parseInt(newTotal.rows[0].count) });
+  try {
+    const result = await pool.query(
+      `SELECT product, task_type, status, COUNT(*) AS count
+       FROM formitize_notifications
+       GROUP BY product, task_type, status`
+    );
+    const newTotal = await pool.query(
+      `SELECT COUNT(*) AS count FROM formitize_notifications WHERE status = 'new'`
+    );
+    res.json({ breakdown: result.rows, newTotal: parseInt(newTotal.rows[0].count) });
+  } catch (err: any) {
+    console.error("[formitize] notifications counts error:", err.message);
+    res.status(500).json({ error: "Failed to load counts" });
+  }
 });
 
 // ─── PUT /api/formitize/notifications/:id/status ──────────────────────────────

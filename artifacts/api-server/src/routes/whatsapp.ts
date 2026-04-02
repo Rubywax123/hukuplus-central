@@ -122,12 +122,13 @@ router.get("/whatsapp/unread-count", async (req, res): Promise<void> => {
 
   if (!isConfigured()) { res.json({ count: 0 }); return; }
 
-  const [row] = await db.execute(sql`
+  const result = await db.execute(sql`
     SELECT COUNT(DISTINCT wa_id)::int AS count
     FROM whatsapp_messages
     WHERE is_read = false AND direction = 'inbound'
   `);
 
+  const row = result.rows[0];
   res.json({ count: (row as any)?.count ?? 0 });
 });
 
