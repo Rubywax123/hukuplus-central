@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql, desc, gte } from "drizzle-orm";
 import { db, retailersTable, branchesTable, agreementsTable, activityTable } from "@workspace/db";
+import { pool } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -53,6 +54,60 @@ router.get("/dashboard/recent-activity", async (req, res): Promise<void> => {
   }
   const activity = await db.select().from(activityTable).orderBy(desc(activityTable.timestamp)).limit(20);
   res.json(activity);
+});
+
+// ── Monthly business metrics: new applications, re-applications, agreements issued
+// Dedup: each unique formitize_job_id = 1 event (webhooks can fire multiple times
+// per job but the unique index on formitize_job_id ensures only 1 row per event).
+router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{
+      task_type: string;
+      current_month: string;
+      prev_month: string;
+    }>(`
+      SELECT
+        task_type,
+        COUNT(DISTINCT formitize_job_id)
+          FILTER (WHERE created_at >= DATE_TRUNC('month', NOW())) AS current_month,
+        COUNT(DISTINCT formitize_job_id)
+          FILTER (WHERE created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
+                    AND created_at <  DATE_TRUNC('month', NOW())) AS prev_month
+      FROM formitize_notifications
+      WHERE task_type IN ('application', 'reapplication', 'agreement')
+        AND created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
+      GROUP BY task_type
+    `);
+
+    const get = (type: string, col: "current_month" | "prev_month") =>
+      parseInt(rows.find((r) => r.task_type === type)?.[col] ?? "0", 10);
+
+    const monthLabel = new Date().toLocaleString("en-US", { month: "long", year: "numeric" });
+
+    res.json({
+      month: monthLabel,
+      newApplications: {
+        current: get("application", "current_month"),
+        previous: get("application", "prev_month"),
+      },
+      reApplications: {
+        current: get("reapplication", "current_month"),
+        previous: get("reapplication", "prev_month"),
+      },
+      agreementsIssued: {
+        current: get("agreement", "current_month"),
+        previous: get("agreement", "prev_month"),
+      },
+    });
+  } finally {
+    client.release();
+  }
 });
 
 export default router;
