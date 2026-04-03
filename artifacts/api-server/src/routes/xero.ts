@@ -326,6 +326,78 @@ router.post("/xero/sync-invoices", requireStaffAuth, requireSuperAdmin, async (r
   }
 });
 
+// ─── GET /xero/pending-invoices — recent Xero invoices with import status ────
+// Returns last 30 days of ACCREC invoices showing which are already imported
+// into the Loan Register (via agreements table) and which are still pending.
+router.get("/xero/pending-invoices", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const auth = await getValidAccessToken();
+  if (!auth) return res.status(401).json({ error: "Xero not connected" });
+
+  const client = await pool.connect();
+  try {
+    // Fetch all known xero_invoice_ids from agreements table
+    const agrResult = await client.query(
+      "SELECT xero_invoice_id, loan_register_id, status FROM agreements WHERE xero_invoice_id IS NOT NULL"
+    );
+    const importedSet = new Map<string, { loanRegisterId: number | null; status: string }>();
+    for (const row of agrResult.rows) {
+      importedSet.set(row.xero_invoice_id as string, {
+        loanRegisterId: row.loan_register_id,
+        status: row.status,
+      });
+    }
+
+    // Fetch recent invoices from Xero (last 30 days)
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const invoiceRes = await fetch(
+      `https://api.xero.com/api.xro/2.0/Invoices?Type=ACCREC&Statuses=AUTHORISED,PARTIAL,PAID&ModifiedAfter=${since}&includeArchived=false`,
+      {
+        headers: {
+          Authorization: `Bearer ${auth.accessToken}`,
+          "Xero-tenant-id": auth.tenantId,
+          Accept: "application/json",
+        },
+      }
+    );
+    if (!invoiceRes.ok) {
+      return res.status(502).json({ error: `Xero fetch failed: ${invoiceRes.status}` });
+    }
+    const invoiceData = await invoiceRes.json() as any;
+    const invoices: any[] = (invoiceData.Invoices ?? [])
+      .filter((inv: any) => inv.Type === "ACCREC" && (inv.Total ?? 0) > 0)
+      .sort((a: any, b: any) => {
+        // Most recent first
+        const da = a.DateString ?? a.Date ?? "";
+        const db = b.DateString ?? b.Date ?? "";
+        return db.localeCompare(da);
+      });
+
+    const result = invoices.map((inv: any) => {
+      const imported = importedSet.get(inv.InvoiceID);
+      return {
+        invoiceId:     inv.InvoiceID,
+        invoiceNumber: inv.InvoiceNumber ?? "",
+        contactName:   inv.Contact?.Name ?? "",
+        date:          inv.DateString ?? inv.Date ?? "",
+        dueDate:       inv.DueDateString ?? inv.DueDate ?? "",
+        total:         inv.Total ?? 0,
+        amountDue:     inv.AmountDue ?? 0,
+        xeroStatus:    inv.Status ?? "",
+        imported:      !!imported,
+        lrStatus:      imported?.status ?? null,
+        tracking:      (inv.LineItems?.[0]?.Tracking ?? []).map((t: any) => t.Option).join(" · "),
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("[xero] pending-invoices error:", err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── GET /xero/sync-invoices/status — last sync timestamp + counts ────────────
 router.get("/xero/sync-invoices/status", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   const client = await pool.connect();

@@ -20,6 +20,7 @@ import ApplicationsPage from "@/pages/applications";
 import NotificationsPage from "@/pages/notifications";
 import CommsPage from "@/pages/comms";
 import ActivityPage from "@/pages/activity";
+import XeroIntegrationPage from "@/pages/xero";
 import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
 import ApplyRevolverPage from "@/pages/apply-revolver";
 import NotFound from "@/pages/not-found";
@@ -80,6 +81,7 @@ function Router() {
             <Route path="/notifications" component={NotificationsPage} />
             <Route path="/comms" component={CommsPage} />
             <Route path="/activity" component={ActivityPage} />
+            <Route path="/xero" component={XeroIntegrationPage} />
             {/* Legacy redirects — now folded into the Customers hub */}
             <Route path="/retailers">{() => <Redirect to="/customers?tab=retailers" />}</Route>
             <Route path="/team">{() => <Redirect to="/customers?tab=staff" />}</Route>
