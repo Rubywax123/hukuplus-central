@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, sql, desc, gte } from "drizzle-orm";
 import { db, retailersTable, branchesTable, agreementsTable, activityTable } from "@workspace/db";
 import { pool } from "@workspace/db";
+import { getMonthlyHistory, upsertMonthSnapshot } from "../lib/snapshotMonths";
 
 const router: IRouter = Router();
 
@@ -107,6 +108,59 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
     });
   } finally {
     client.release();
+  }
+});
+
+// ── Full monthly history: stored snapshots + live current month ───────────────
+router.get("/dashboard/monthly-history", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const history = await getMonthlyHistory();
+    res.json(history);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Manual snapshot trigger (super_admin only) ────────────────────────────────
+// POST /api/dashboard/snapshot-month
+// Body: { month: "2026-03" }   — locks in totals for that calendar month
+router.post("/dashboard/snapshot-month", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const user = req.user as any;
+  if (user?.role !== "super_admin") {
+    res.status(403).json({ error: "Super admin only" });
+    return;
+  }
+
+  const { month } = req.body as { month?: string };
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    res.status(400).json({ error: "Provide month as YYYY-MM, e.g. \"2026-03\"" });
+    return;
+  }
+
+  const [year, mon] = month.split("-").map(Number);
+  const monthStart = new Date(year, mon - 1, 1);
+
+  // Refuse to snapshot the current month — that's always live
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (monthStart >= currentMonthStart) {
+    res.status(400).json({ error: "Cannot snapshot the current month — it is always computed live." });
+    return;
+  }
+
+  try {
+    const snapshot = await upsertMonthSnapshot(monthStart, `manual snapshot by ${user.email ?? user.username}`);
+    res.json({ ok: true, snapshot });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

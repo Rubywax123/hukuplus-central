@@ -2,6 +2,7 @@ import app from "./app";
 import { runMigrations } from "./lib/migrate";
 import { syncHukuPlusStores, syncRevolverStores } from "./routes/sync";
 import { syncXeroInvoices } from "./lib/syncXeroInvoices";
+import { autoSnapshotPreviousMonth } from "./lib/snapshotMonths";
 
 const rawPort = process.env["PORT"];
 
@@ -17,8 +18,9 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const STORE_SYNC_INTERVAL_MS  = 60 * 60 * 1000; // 1 hour  — HukuPlus + Revolver store data
-const XERO_SYNC_INTERVAL_MS   =  5 * 60 * 1000; // 5 minutes — Xero invoice → Loan Register
+const STORE_SYNC_INTERVAL_MS     = 60 * 60 * 1000; // 1 hour  — HukuPlus + Revolver store data
+const XERO_SYNC_INTERVAL_MS      =  5 * 60 * 1000; // 5 minutes — Xero invoice → Loan Register
+const SNAPSHOT_CHECK_INTERVAL_MS =  6 * 60 * 60 * 1000; // 6 hours — monthly snapshot rollover
 
 async function runStoreSync() {
   // Step 1: pull from HukuPlus into Central
@@ -68,6 +70,14 @@ async function runXeroSync() {
   }
 }
 
+async function runSnapshotCheck() {
+  try {
+    await autoSnapshotPreviousMonth();
+  } catch (err: any) {
+    console.error("[snapshot] Auto-snapshot check failed:", err.message);
+  }
+}
+
 function startSyncScheduler() {
   // Store sync: run once on startup, then every hour
   runStoreSync();
@@ -78,7 +88,12 @@ function startSyncScheduler() {
   runXeroSync();
   setInterval(runXeroSync, XERO_SYNC_INTERVAL_MS);
 
-  console.log("[sync] Scheduler started — stores every 60 min, Xero invoices every 5 min.");
+  // Monthly snapshot check: run once on startup, then every 6 hours
+  // Automatically locks in the previous month's totals on rollover
+  runSnapshotCheck();
+  setInterval(runSnapshotCheck, SNAPSHOT_CHECK_INTERVAL_MS);
+
+  console.log("[sync] Scheduler started — stores every 60 min, Xero every 5 min, snapshot check every 6 h.");
 }
 
 runMigrations()

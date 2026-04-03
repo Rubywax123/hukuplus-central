@@ -775,6 +775,22 @@ export async function runMigrations() {
       );
     `);
 
+    // ── Monthly snapshot store ───────────────────────────────────────────────
+    // Permanently stores end-of-month business totals for historical comparison.
+    // Current month is always computed live; past months are locked in here.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS monthly_snapshots (
+        id           SERIAL PRIMARY KEY,
+        month        DATE NOT NULL UNIQUE, -- first day of the month, e.g. '2026-04-01'
+        new_applications   INT NOT NULL DEFAULT 0,
+        re_applications    INT NOT NULL DEFAULT 0,
+        agreements_issued  INT NOT NULL DEFAULT 0,
+        notes        TEXT,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
