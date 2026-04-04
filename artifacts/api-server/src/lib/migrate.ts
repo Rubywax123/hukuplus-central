@@ -775,6 +775,16 @@ export async function runMigrations() {
       );
     `);
 
+    // ── One-time fix: reset upload notifications from auto-actioned → new ────
+    // Previously, document uploads were auto-marked "actioned" immediately,
+    // bypassing the Activity queue. They should require staff review like all
+    // other events. This resets them so they appear in the queue.
+    await client.query(`
+      UPDATE formitize_notifications
+      SET status = 'new'
+      WHERE task_type = 'upload' AND status = 'actioned'
+    `);
+
     // ── Monthly snapshot store ───────────────────────────────────────────────
     // Permanently stores end-of-month business totals for historical comparison.
     // Current month is always computed live; past months are locked in here.

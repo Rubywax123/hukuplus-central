@@ -710,8 +710,8 @@ router.post("/formitize/webhook", async (req, res) => {
       }
     }
 
-    // Document uploads auto-complete — they're receipts, not tasks requiring action.
-    const notifStatus = formType === "upload" ? "actioned" : "new";
+    // Document uploads appear in Activity queue so staff can review and action them.
+    const notifStatus = "new";
     await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount, branchName, retailerName, status: notifStatus });
 
     console.log(`[formitize:webhook] Stored as activity (status=${notifStatus}) — ${rawFormName}`);
