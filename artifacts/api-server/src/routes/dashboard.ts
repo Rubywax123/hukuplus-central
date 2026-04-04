@@ -75,9 +75,18 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
     }>(`
       SELECT
         task_type,
-        COUNT(DISTINCT formitize_job_id)
+        -- Agreements dedup by customer (one loan per customer per month, regardless
+        -- of how many times the agreement doc was resubmitted/resent).
+        -- Applications/re-applications dedup by job_id (each submission is its own event).
+        COUNT(DISTINCT CASE
+          WHEN task_type = 'agreement' THEN LOWER(TRIM(customer_name))
+          ELSE formitize_job_id
+        END)
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW())) AS current_month,
-        COUNT(DISTINCT formitize_job_id)
+        COUNT(DISTINCT CASE
+          WHEN task_type = 'agreement' THEN LOWER(TRIM(customer_name))
+          ELSE formitize_job_id
+        END)
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
                     AND created_at <  DATE_TRUNC('month', NOW())) AS prev_month
       FROM formitize_notifications

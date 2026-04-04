@@ -775,6 +775,11 @@ export async function runMigrations() {
       );
     `);
 
+    // ── One-time fix: delete March 2026 snapshot so it is recreated with ─────
+    // the corrected agreement dedup logic (per customer, not per job_id).
+    // The scheduler will auto-recreate it immediately on startup.
+    await client.query(`DELETE FROM monthly_snapshots WHERE month = '2026-03-01'`);
+
     // ── One-time fix: reset upload notifications from auto-actioned → new ────
     // Previously, document uploads were auto-marked "actioned" immediately,
     // bypassing the Activity queue. They should require staff review like all

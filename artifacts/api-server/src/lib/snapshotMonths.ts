@@ -21,7 +21,13 @@ export async function computeMonthTotals(monthStart: Date): Promise<{
   const client = await pool.connect();
   try {
     const { rows } = await client.query<{ task_type: string; count: string }>(`
-      SELECT task_type, COUNT(DISTINCT formitize_job_id) AS count
+      SELECT task_type,
+        -- Agreements dedup by customer (one loan per customer per month).
+        -- Applications/re-applications dedup by job_id.
+        COUNT(DISTINCT CASE
+          WHEN task_type = 'agreement' THEN LOWER(TRIM(customer_name))
+          ELSE formitize_job_id
+        END) AS count
       FROM formitize_notifications
       WHERE task_type IN ('application', 'reapplication', 'agreement')
         AND created_at >= $1
