@@ -4,6 +4,29 @@ import { db, retailersTable, branchesTable, agreementsTable, activityTable } fro
 import { pool } from "@workspace/db";
 import { getMonthlyHistory, upsertMonthSnapshot } from "../lib/snapshotMonths";
 
+const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
+const LR_KEY = process.env.CENTRAL_API_KEY;
+
+// Count active Loan Register loans whose disbursementDate starts with yearMonth (e.g. "2026-04")
+async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
+  if (!LR_KEY) return 0;
+  try {
+    const res = await fetch(`${LR_URL}/api/loans?status=active&limit=5000`, {
+      headers: {
+        Authorization: `Bearer ${LR_KEY}`,
+        "X-Central-System": "HukuPlusCentral",
+      },
+    });
+    if (!res.ok) return 0;
+    const loans: any[] = await res.json();
+    return (Array.isArray(loans) ? loans : [])
+      .filter((l) => l.disbursementDate && String(l.disbursementDate).startsWith(yearMonth))
+      .length;
+  } catch {
+    return 0;
+  }
+}
+
 const router: IRouter = Router();
 
 router.get("/dashboard/stats", async (req, res): Promise<void> => {
@@ -66,31 +89,24 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
     return;
   }
 
+  const now = new Date();
+  const currentYM  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const prevDate   = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousYM = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+
   const client = await pool.connect();
   try {
-    const { rows } = await client.query<{
-      task_type: string;
-      current_month: string;
-      prev_month: string;
-    }>(`
+    // Applications + re-applications: sourced from Formitize notifications
+    const { rows } = await client.query<{ task_type: string; current_month: string; prev_month: string }>(`
       SELECT
         task_type,
-        -- Agreements dedup by customer (one loan per customer per month, regardless
-        -- of how many times the agreement doc was resubmitted/resent).
-        -- Applications/re-applications dedup by job_id (each submission is its own event).
-        COUNT(DISTINCT CASE
-          WHEN task_type = 'agreement' THEN LOWER(TRIM(customer_name))
-          ELSE formitize_job_id
-        END)
+        COUNT(DISTINCT formitize_job_id)
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW())) AS current_month,
-        COUNT(DISTINCT CASE
-          WHEN task_type = 'agreement' THEN LOWER(TRIM(customer_name))
-          ELSE formitize_job_id
-        END)
+        COUNT(DISTINCT formitize_job_id)
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
                     AND created_at <  DATE_TRUNC('month', NOW())) AS prev_month
       FROM formitize_notifications
-      WHERE task_type IN ('application', 'reapplication', 'agreement')
+      WHERE task_type IN ('application', 'reapplication')
         AND created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
       GROUP BY task_type
     `);
@@ -98,7 +114,14 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
     const get = (type: string, col: "current_month" | "prev_month") =>
       parseInt(rows.find((r) => r.task_type === type)?.[col] ?? "0", 10);
 
-    const monthLabel = new Date().toLocaleString("en-US", { month: "long", year: "numeric" });
+    // Agreements: sourced from Loan Register by disbursementDate — the ground truth.
+    // Each loan in the LR is a unique disbursement; no double-counting possible.
+    const [currentAgreements, previousAgreements] = await Promise.all([
+      countLRDisbursementsForMonth(currentYM),
+      countLRDisbursementsForMonth(previousYM),
+    ]);
+
+    const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
 
     res.json({
       month: monthLabel,
@@ -111,8 +134,8 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
         previous: get("reapplication", "prev_month"),
       },
       agreementsIssued: {
-        current: get("agreement", "current_month"),
-        previous: get("agreement", "prev_month"),
+        current:  currentAgreements,
+        previous: previousAgreements,
       },
     });
   } finally {

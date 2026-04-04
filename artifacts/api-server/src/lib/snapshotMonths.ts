@@ -1,5 +1,29 @@
 import { pool } from "@workspace/db";
 
+const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
+const LR_KEY = process.env.CENTRAL_API_KEY;
+
+async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
+  if (!LR_KEY) return 0;
+  try {
+    // Check both active and completed loans — completed needed for past months
+    const [activeRes, completedRes] = await Promise.all([
+      fetch(`${LR_URL}/api/loans?status=active&limit=5000`, {
+        headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" },
+      }),
+      fetch(`${LR_URL}/api/loans?status=completed&limit=5000`, {
+        headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" },
+      }),
+    ]);
+    const active    = activeRes.ok    ? (await activeRes.json()    as any[]) : [];
+    const completed = completedRes.ok ? (await completedRes.json() as any[]) : [];
+    const all = [...(Array.isArray(active) ? active : []), ...(Array.isArray(completed) ? completed : [])];
+    return all.filter((l) => l.disbursementDate && String(l.disbursementDate).startsWith(yearMonth)).length;
+  } catch {
+    return 0;
+  }
+}
+
 export interface MonthSnapshot {
   month: string;       // ISO date string for first of month, e.g. "2026-03-01"
   monthLabel: string;  // e.g. "March 2026"
@@ -17,29 +41,30 @@ export async function computeMonthTotals(monthStart: Date): Promise<{
 }> {
   const monthEnd = new Date(monthStart);
   monthEnd.setMonth(monthEnd.getMonth() + 1);
+  const yearMonth = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
 
   const client = await pool.connect();
   try {
+    // Applications + re-applications from Formitize notifications (dedup by job_id)
     const { rows } = await client.query<{ task_type: string; count: string }>(`
-      SELECT task_type,
-        -- Agreements dedup by customer (one loan per customer per month).
-        -- Applications/re-applications dedup by job_id.
-        COUNT(DISTINCT CASE
-          WHEN task_type = 'agreement' THEN LOWER(TRIM(customer_name))
-          ELSE formitize_job_id
-        END) AS count
+      SELECT task_type, COUNT(DISTINCT formitize_job_id) AS count
       FROM formitize_notifications
-      WHERE task_type IN ('application', 'reapplication', 'agreement')
+      WHERE task_type IN ('application', 'reapplication')
         AND created_at >= $1
         AND created_at <  $2
       GROUP BY task_type
     `, [monthStart.toISOString(), monthEnd.toISOString()]);
 
     const get = (t: string) => parseInt(rows.find((r) => r.task_type === t)?.count ?? "0", 10);
+
+    // Agreements from Loan Register by disbursementDate — the ground truth.
+    // Each LR loan is a unique disbursement; no double-counting from resubmissions.
+    const agreementsIssued = await countLRDisbursementsForMonth(yearMonth);
+
     return {
       newApplications: get("application"),
       reApplications:  get("reapplication"),
-      agreementsIssued: get("agreement"),
+      agreementsIssued,
     };
   } finally {
     client.release();
