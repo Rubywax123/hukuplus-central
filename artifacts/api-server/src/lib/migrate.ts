@@ -826,6 +826,15 @@ export async function runMigrations() {
         AND retailer_name = 'Novafeeds'
     `);
 
+    // ── Reset Xero sync timestamp to force 7-day backfill on next startup ─────
+    // The previous sync logic used date-only ModifiedAfter (losing the time),
+    // which caused all 100 invoices per day to be re-checked and the newly
+    // approved ones to be missed (pagination gap). Clearing the timestamp forces
+    // a fresh 7-day window on the next sync run so pending invoices are caught.
+    await client.query(`
+      DELETE FROM system_settings WHERE key = 'xero_invoice_last_sync'
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

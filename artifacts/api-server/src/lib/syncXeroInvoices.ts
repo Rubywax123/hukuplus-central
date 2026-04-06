@@ -293,39 +293,54 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
     }
 
     // ── Determine ModifiedAfter window ────────────────────────────────────
-    // Use last sync timestamp so frequent runs only fetch recently changed invoices.
-    // Subtract 2 min buffer to avoid race conditions at the boundary.
-    // Fall back to 7 days if no prior sync (e.g., first run or fresh deploy).
+    // Use FULL ISO timestamp (not just date) so each 5-min sync window only
+    // fetches invoices changed since the previous run, not all of today.
+    // Subtract 2 min buffer to avoid missing invoices at the boundary.
+    // Fall back to 7 days if no prior sync (first run or fresh deploy).
     let since: string;
     try {
       const lastSyncRow = await client.query(
         `SELECT value FROM system_settings WHERE key = 'xero_invoice_last_sync'`
       );
       if (lastSyncRow.rows[0]?.value) {
-        const lastSyncMs = new Date(lastSyncRow.rows[0].value as string).getTime();
-        const withBuffer = new Date(lastSyncMs - 2 * 60 * 1000);
-        since = withBuffer.toISOString().split("T")[0];
+        // Parse stored value — may be PostgreSQL text format "2026-04-06 10:00:00+00"
+        // or our new ISO format "2026-04-06T10:00:00Z".  Normalise the separator.
+        const raw = (lastSyncRow.rows[0].value as string).replace(" ", "T");
+        const lastSyncMs = new Date(raw).getTime();
+        if (isNaN(lastSyncMs)) {
+          // Unparseable — fall back to 7 days
+          since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        } else {
+          since = new Date(lastSyncMs - 2 * 60 * 1000).toISOString();
+        }
       } else {
-        // No prior sync — backfill last 7 days
-        since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+        since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       }
     } catch {
-      since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+      since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     }
 
-    const invoiceRes = await fetch(
-      `${XERO_BASE}/Invoices?Type=ACCREC&Statuses=AUTHORISED,PARTIAL&ModifiedAfter=${since}&includeArchived=false`,
-      { headers: xeroHeaders(auth) }
-    );
-
-    if (!invoiceRes.ok) {
-      const body = await invoiceRes.text();
-      result.errors.push(`Xero invoice fetch failed (${invoiceRes.status}): ${body.slice(0, 200)}`);
-      return result;
+    // ── Paginate through all matching Xero invoices ───────────────────────
+    // Xero returns max 100 per page. Without pagination the sync silently
+    // misses invoices that fall past the first 100.
+    const invoices: any[] = [];
+    let page = 1;
+    while (true) {
+      const invoiceRes = await fetch(
+        `${XERO_BASE}/Invoices?Type=ACCREC&Statuses=AUTHORISED,PARTIAL&ModifiedAfter=${encodeURIComponent(since)}&includeArchived=false&page=${page}`,
+        { headers: xeroHeaders(auth) }
+      );
+      if (!invoiceRes.ok) {
+        const body = await invoiceRes.text();
+        result.errors.push(`Xero invoice fetch failed (${invoiceRes.status}) page ${page}: ${body.slice(0, 200)}`);
+        break;
+      }
+      const invoiceData = await invoiceRes.json() as any;
+      const pageInvoices: any[] = invoiceData.Invoices ?? [];
+      invoices.push(...pageInvoices);
+      if (pageInvoices.length < 100) break; // last page
+      page++;
     }
-
-    const invoiceData = await invoiceRes.json() as any;
-    const invoices: any[] = invoiceData.Invoices ?? [];
     result.checked = invoices.length;
 
     // ── Build a Map of all existing Loan Register loan numbers ────────────────
@@ -453,6 +468,25 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
         }
       }
 
+      // ── Check for an unlinked Formitize agreement for the same customer ──
+      // When the Formitize webhook fires before Xero approval, it creates an
+      // agreement with no xero_invoice_id. Rather than duplicating, link it.
+      let existingFormitizeAgreementId: number | null = null;
+      if (contactId) {
+        const fzCheck = await client.query(
+          `SELECT a.id FROM agreements a
+           JOIN customers c ON c.id = a.customer_id
+           WHERE c.xero_contact_id ILIKE $1
+             AND (a.xero_invoice_id IS NULL OR a.xero_invoice_id = '')
+             AND a.source = 'formitize'
+             AND a.created_at > NOW() - INTERVAL '30 days'
+           ORDER BY a.created_at DESC
+           LIMIT 1`,
+          [contactId]
+        );
+        existingFormitizeAgreementId = fzCheck.rows[0]?.id ?? null;
+      }
+
       // ── Resolve customer details ────────────────────────────────────────
       const xeroContactName: string = inv.Contact?.Name ?? "Unknown Customer";
       const { surname, givenName } = matchedCustomer
@@ -529,45 +563,75 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       const loanRegisterId = await pushToLoanRegister(loanPayload);
 
       // ── Store locally in agreements (tracking record) ──────────────────
-      const signingToken = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-
-      await client.query(
-        `INSERT INTO agreements
-           (customer_id, customer_name, customer_phone, loan_product,
-            loan_amount, facility_fee_amount, interest_amount, repayment_amount,
-            form_type, status, signing_token, expires_at,
-            xero_invoice_id, source, dismissed, loan_register_id,
-            branch_id, disbursement_date, created_at)
-         VALUES
-           ($1,$2,$3,'HukuPlus',
-            $4,$5,$6,$7,
-            'agreement','active',$8,$9,
-            $10,'xero_sync',FALSE,$11,
-            $12,$13,NOW())
-         ON CONFLICT DO NOTHING`,
-        [
-          customerId,
-          `${givenName} ${surname}`.trim() || xeroContactName,
-          phone || null,
-          parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
-          parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee.toFixed(2) : null,
-          parsed.accruedInterest > 0 ? parsed.accruedInterest.toFixed(2) : null,
-          parsed.totalAmount > 0 ? parsed.totalAmount.toFixed(2) : null,
-          signingToken,
-          expiresAt,
-          xeroInvoiceId,
-          loanRegisterId,
-          branchId,
-          disbursementDate,
-        ]
-      );
+      // If a Formitize agreement already exists for this customer (webhook
+      // fired before Xero approval), link it rather than creating a duplicate.
+      if (existingFormitizeAgreementId) {
+        await client.query(
+          `UPDATE agreements SET
+             xero_invoice_id  = $1,
+             loan_register_id = $2,
+             loan_amount      = COALESCE(loan_amount, $3),
+             facility_fee_amount = COALESCE(facility_fee_amount, $4),
+             interest_amount  = COALESCE(interest_amount, $5),
+             repayment_amount = COALESCE(repayment_amount, $6),
+             disbursement_date = COALESCE(disbursement_date, $7),
+             branch_id        = COALESCE(branch_id, $8)
+           WHERE id = $9`,
+          [
+            xeroInvoiceId,
+            loanRegisterId,
+            parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
+            parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee.toFixed(2) : null,
+            parsed.accruedInterest > 0 ? parsed.accruedInterest.toFixed(2) : null,
+            parsed.totalAmount > 0 ? parsed.totalAmount.toFixed(2) : null,
+            disbursementDate,
+            branchId,
+            existingFormitizeAgreementId,
+          ]
+        );
+        console.log(
+          `[sync:xero-invoices] Linked Formitize agreement #${existingFormitizeAgreementId} → Xero ${invoiceNumber}`
+        );
+      } else {
+        const signingToken = crypto.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+        await client.query(
+          `INSERT INTO agreements
+             (customer_id, customer_name, customer_phone, loan_product,
+              loan_amount, facility_fee_amount, interest_amount, repayment_amount,
+              form_type, status, signing_token, expires_at,
+              xero_invoice_id, source, dismissed, loan_register_id,
+              branch_id, disbursement_date, created_at)
+           VALUES
+             ($1,$2,$3,'HukuPlus',
+              $4,$5,$6,$7,
+              'agreement','active',$8,$9,
+              $10,'xero_sync',FALSE,$11,
+              $12,$13,NOW())
+           ON CONFLICT DO NOTHING`,
+          [
+            customerId,
+            `${givenName} ${surname}`.trim() || xeroContactName,
+            phone || null,
+            parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
+            parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee.toFixed(2) : null,
+            parsed.accruedInterest > 0 ? parsed.accruedInterest.toFixed(2) : null,
+            parsed.totalAmount > 0 ? parsed.totalAmount.toFixed(2) : null,
+            signingToken,
+            expiresAt,
+            xeroInvoiceId,
+            loanRegisterId,
+            branchId,
+            disbursementDate,
+          ]
+        );
+      }
 
       // ── Update last sync timestamp ─────────────────────────────────────
       await client.query(`
         INSERT INTO system_settings (key, value, updated_at)
-        VALUES ('xero_invoice_last_sync', NOW()::TEXT, NOW())
-        ON CONFLICT (key) DO UPDATE SET value = NOW()::TEXT, updated_at = NOW()
+        VALUES ('xero_invoice_last_sync', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), NOW())
+        ON CONFLICT (key) DO UPDATE SET value = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), updated_at = NOW()
       `);
 
       if (loanRegisterId) {
@@ -584,8 +648,8 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
     // Always update last sync timestamp
     await client.query(`
       INSERT INTO system_settings (key, value, updated_at)
-      VALUES ('xero_invoice_last_sync', NOW()::TEXT, NOW())
-      ON CONFLICT (key) DO UPDATE SET value = NOW()::TEXT, updated_at = NOW()
+      VALUES ('xero_invoice_last_sync', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), NOW())
+      ON CONFLICT (key) DO UPDATE SET value = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), updated_at = NOW()
     `);
 
     return result;
