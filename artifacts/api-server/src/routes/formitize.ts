@@ -928,7 +928,34 @@ router.post("/formitize/webhook", async (req, res) => {
         await fallbackToNovafeeds();
       }
     } else {
-      await fallbackToNovafeeds();
+      // Last resort: check if customer email looks like a store email
+      // (e.g. chivu@profeeds.co.zw → retailer "profeeds", branch "chivu")
+      const custEmail = (customerEmailRaw || "").trim();
+      if (custEmail.includes("@")) {
+        const custDomain    = custEmail.split("@")[1] ?? "";
+        const custRetHint   = custDomain.split(".")[0]?.toLowerCase() ?? "";
+        const custBranchHint = custEmail.split("@")[0]?.toLowerCase() ?? "";
+        if (custRetHint.length > 2) {
+          const hintRetailers = await db.select().from(retailersTable)
+            .where(ilike(retailersTable.name, `%${custRetHint}%`));
+          if (hintRetailers.length === 1) {
+            const branches = await db.select().from(branchesTable)
+              .where(eq(branchesTable.retailerId, hintRetailers[0].id));
+            // Try to match branch by local-part of email (e.g. "chivu")
+            const branchMatch = branches.find(b => b.name.toLowerCase() === custBranchHint)
+              ?? branches.find(b => b.name.toLowerCase().includes(custBranchHint) || custBranchHint.includes(b.name.toLowerCase()));
+            const chosenBranch = branchMatch ?? branches[0];
+            if (chosenBranch) {
+              branchId          = chosenBranch.id;
+              resolvedBranchName = chosenBranch.name;
+              retailerId        = hintRetailers[0].id;
+              resolvedRetailerName = hintRetailers[0].name;
+            } else { await fallbackToNovafeeds(); }
+          } else { await fallbackToNovafeeds(); }
+        } else { await fallbackToNovafeeds(); }
+      } else {
+        await fallbackToNovafeeds();
+      }
     }
   } else if (product === "Revolver") {
     // Revolver → look for store name in form; search synced Revolver retailers

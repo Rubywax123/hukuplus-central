@@ -806,6 +806,26 @@ export async function runMigrations() {
       );
     `);
 
+    // ── One-time fix: Martha Fashibeyi (job 23505199) was assigned to ────────
+    // Novafeeds Main Branch because the HUKUPLUS LOAN AGREEMENT form didn't
+    // include formtext_5 (branch name), triggering the Novafeeds fallback.
+    // Her store email chivu@profeeds.co.zw correctly identifies her as a
+    // Profeeds Chivu customer. Correct both the agreement and the notification.
+    await client.query(`
+      UPDATE agreements
+      SET branch_id = 24, retailer_id = 1
+      WHERE id = 82
+        AND branch_id = 3
+        AND customer_name ILIKE '%Fashibeyi%'
+    `);
+    await client.query(`
+      UPDATE formitize_notifications
+      SET branch_name = 'Chivu', retailer_name = 'Profeeds'
+      WHERE formitize_job_id = '23505199'
+        AND branch_name = 'Main Branch'
+        AND retailer_name = 'Novafeeds'
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
