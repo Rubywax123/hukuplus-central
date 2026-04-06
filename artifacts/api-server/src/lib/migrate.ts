@@ -777,18 +777,33 @@ export async function runMigrations() {
 
     // ── One-time fix: delete March 2026 snapshot so it is recreated with ─────
     // the Loan Register disbursement-date based agreement count (ground truth).
-    // The scheduler will auto-recreate it immediately on startup.
-    await client.query(`DELETE FROM monthly_snapshots WHERE month = '2026-03-01'`);
+    // Only delete if it still has the old Formitize-based incorrect count (8).
+    // Guarded so it does not wipe a correctly re-built snapshot on every restart.
+    await client.query(`
+      DELETE FROM monthly_snapshots
+      WHERE month = '2026-03-01' AND agreements_issued >= 8
+    `);
 
     // ── One-time fix: reset upload notifications from auto-actioned → new ────
     // Previously, document uploads were auto-marked "actioned" immediately,
-    // bypassing the Activity queue. They should require staff review like all
-    // other events. This resets them so they appear in the queue.
-    await client.query(`
-      UPDATE formitize_notifications
-      SET status = 'new'
-      WHERE task_type = 'upload' AND status = 'actioned'
-    `);
+    // bypassing the Activity queue. This was a one-time correction for
+    // pre-existing data. Guarded by system_settings so it runs exactly once
+    // and never resets items that have been manually actioned by staff.
+    const uploadResetDone = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_upload_reset_v1'`
+    );
+    if (!uploadResetDone.rows[0]) {
+      await client.query(`
+        UPDATE formitize_notifications
+        SET status = 'new'
+        WHERE task_type = 'upload' AND status = 'actioned'
+      `);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_upload_reset_v1', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
 
     // ── Monthly snapshot store ───────────────────────────────────────────────
     // Permanently stores end-of-month business totals for historical comparison.
@@ -826,14 +841,23 @@ export async function runMigrations() {
         AND retailer_name = 'Novafeeds'
     `);
 
-    // ── Reset Xero sync timestamp to force 7-day backfill on next startup ─────
-    // The previous sync logic used date-only ModifiedAfter (losing the time),
-    // which caused all 100 invoices per day to be re-checked and the newly
-    // approved ones to be missed (pagination gap). Clearing the timestamp forces
-    // a fresh 7-day window on the next sync run so pending invoices are caught.
-    await client.query(`
-      DELETE FROM system_settings WHERE key = 'xero_invoice_last_sync'
-    `);
+    // ── Reset Xero sync timestamp once to force 7-day backfill ───────────────
+    // The previous sync logic used date-only ModifiedAfter which caused new
+    // invoices to be missed past page 1. Clear the timestamp once so the first
+    // run after this fix fetches a 7-day window and catches pending invoices.
+    // Guarded: once the sync has run and written a new ISO-format timestamp,
+    // this no longer triggers.
+    const xeroResetDone = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_xero_ts_reset_v1'`
+    );
+    if (!xeroResetDone.rows[0]) {
+      await client.query(`DELETE FROM system_settings WHERE key = 'xero_invoice_last_sync'`);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_xero_ts_reset_v1', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
 
     console.log("[migrate] All migrations complete.");
   } finally {

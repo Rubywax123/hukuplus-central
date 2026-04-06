@@ -233,7 +233,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
           }`}
         >
           <CheckCheck className="w-3.5 h-3.5" />
-          {isNew ? "Skip (manual)" : "Reopen"}
+          {isNew ? "Mark Done" : "Reopen"}
         </button>
       </div>
     </div>
@@ -1579,7 +1579,7 @@ function PaymentModal({ notification, onClose, onDone }: {
                 <div className="text-center py-8 space-y-2">
                   <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
                   <p className="text-sm text-muted-foreground">No matching customers found in Xero.</p>
-                  <p className="text-xs text-muted-foreground">The name may be spelled differently in Xero. Use <strong className="text-foreground">Skip (manual)</strong> below to mark this as handled — then process the payment directly in Xero.</p>
+                  <p className="text-xs text-muted-foreground">The name may be spelled differently in Xero. Use <strong className="text-foreground">Mark Done</strong> below if you've handled this manually — then process the payment directly in Xero.</p>
                 </div>
               )}
               {(matchData?.candidates ?? []).map(c => (
@@ -1798,11 +1798,11 @@ function PaymentModal({ notification, onClose, onDone }: {
               <button
                 onClick={() => skipMutation.mutate()}
                 disabled={skipMutation.isPending}
-                title="Mark as handled — you will process this payment manually in Xero"
+                title="Mark as done — you will process this payment manually in Xero"
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground border border-white/10 hover:border-white/20 hover:bg-white/5 transition-colors disabled:opacity-50"
               >
                 {skipMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                Skip (manual)
+                Mark Done
               </button>
             )}
             {step === "allocating" && (
