@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull, isNotNull } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { generateNovafeedAgreementPdf } from "../lib/novafeed-pdf";
 import { db, pool, agreementsTable, retailersTable, branchesTable, activityTable } from "@workspace/db";
@@ -395,6 +395,39 @@ router.post("/sign/:token/submit", async (req, res): Promise<void> => {
   });
 
   res.json({ success: true, signedAt: signedAt.toISOString() });
+});
+
+// ─── POST /agreements/:id/mark-done — toggle kiosk "done" flag ───────────────
+router.post("/agreements/:id/mark-done", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const userName: string = (req.user as any)?.name ?? (req.user as any)?.email ?? "staff";
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      "SELECT marked_done_at FROM agreements WHERE id = $1",
+      [id]
+    );
+    if (rows.length === 0) { res.status(404).json({ error: "Agreement not found" }); return; }
+
+    const isDone = !!rows[0].marked_done_at;
+    if (isDone) {
+      await client.query(
+        "UPDATE agreements SET marked_done_at = NULL, marked_done_by = NULL WHERE id = $1",
+        [id]
+      );
+    } else {
+      await client.query(
+        "UPDATE agreements SET marked_done_at = NOW(), marked_done_by = $2 WHERE id = $1",
+        [id, userName]
+      );
+    }
+    res.json({ ok: true, id, markedDone: !isDone });
+  } finally {
+    client.release();
+  }
 });
 
 // ─── GET /loan-register — HukuPlus loan agreements (Formitize + Xero sync) ────

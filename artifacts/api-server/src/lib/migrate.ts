@@ -720,6 +720,12 @@ export async function runMigrations() {
       ALTER TABLE agreements ADD COLUMN IF NOT EXISTS dismissed BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE agreements ADD COLUMN IF NOT EXISTS loan_register_id INTEGER;
     `);
+
+    // ── Mark Done: staff can dismiss a kiosk row without changing its status ─
+    await client.query(`
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS marked_done_at TIMESTAMPTZ;
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS marked_done_by TEXT;
+    `);
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS agreements_xero_invoice_id_uniq
         ON agreements(xero_invoice_id)

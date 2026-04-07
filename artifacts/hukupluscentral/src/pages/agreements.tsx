@@ -3,7 +3,7 @@ import { useListAgreements, useCreateAgreement, useListRetailers, useListBranche
 import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label, Select } from "@/components/ui-extras";
 import {
   Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload,
-  FileText, Copy, Monitor, ScrollText, Banknote, Info,
+  FileText, Copy, Monitor, ScrollText, Banknote, Info, CheckSquare, RotateCcw,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -43,15 +43,40 @@ export default function AgreementsPage() {
   const queryClient = useQueryClient();
   const createMutation = useCreateAgreement();
 
-  // Only show Novafeeds agreements
-  const agreements = useMemo(
+  // Novafeeds agreements split into active (needs action) and done (archived)
+  const allNova = useMemo(
     () => (allAgreements ?? []).filter(isNovafeeds),
     [allAgreements]
+  );
+  const agreements = useMemo(
+    () => allNova.filter(a => !(a as any).markedDoneAt),
+    [allNova]
+  );
+  const doneAgreements = useMemo(
+    () => allNova.filter(a => !!(a as any).markedDoneAt),
+    [allNova]
   );
 
   // ── Filters ──────────────────────────────────────────────────────────────
   const [searchTerm,   setSearchTerm]   = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  // ── Done view toggle ──────────────────────────────────────────────────────
+  const [showDone,    setShowDone]    = useState(false);
+  const [doneLoading, setDoneLoading] = useState<Set<number>>(new Set());
+
+  const markDone = async (id: number) => {
+    setDoneLoading(prev => { const n = new Set(prev); n.add(id); return n; });
+    try {
+      await fetch(`${BASE}/api/agreements/${id}/mark-done`, {
+        method: "POST",
+        credentials: "include",
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
+    } finally {
+      setDoneLoading(prev => { const n = new Set(prev); n.delete(id); return n; });
+    }
+  };
 
   // ── Bulk select ───────────────────────────────────────────────────────────
   const [selected,    setSelected]    = useState<Set<number>>(new Set());
@@ -92,16 +117,17 @@ export default function AgreementsPage() {
     if (id !== undefined) { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }
   };
 
-  // ── Filtered list ─────────────────────────────────────────────────────────
+  // ── Filtered list — uses active or done list based on view toggle ─────────
   const filtered = useMemo(() => {
-    return agreements.filter(a => {
+    const source = showDone ? doneAgreements : agreements;
+    return source.filter(a => {
       if (searchTerm && !a.customerName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-      if (statusFilter !== "all" && a.status !== statusFilter) return false;
+      if (!showDone && statusFilter !== "all" && a.status !== statusFilter) return false;
       return true;
     });
-  }, [agreements, searchTerm, statusFilter]);
+  }, [agreements, doneAgreements, showDone, searchTerm, statusFilter]);
 
-  // ── Status counts ─────────────────────────────────────────────────────────
+  // ── Status counts (active items only) ─────────────────────────────────────
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: 0, signed: 0, pending: 0, disbursed: 0, expired: 0 };
     agreements.forEach(a => { c.all++; if (c[a.status] !== undefined) c[a.status]++; });
@@ -249,7 +275,7 @@ export default function AgreementsPage() {
             />
           </div>
           <div className="flex items-center gap-1 flex-wrap">
-            {STATUS_TABS.map(s => (
+            {!showDone && STATUS_TABS.map(s => (
               <button
                 key={s.id}
                 onClick={() => setStatusFilter(s.id)}
@@ -264,6 +290,18 @@ export default function AgreementsPage() {
               </button>
             ))}
           </div>
+          {/* Done view toggle */}
+          <button
+            onClick={() => { setShowDone(d => !d); setSearchTerm(""); setStatusFilter("all"); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ml-auto ${
+              showDone
+                ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-300"
+                : "bg-white/5 border-white/10 text-muted-foreground hover:text-white hover:bg-white/10"
+            }`}
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            {showDone ? "← Back to Active" : `Done (${doneAgreements.length})`}
+          </button>
         </div>
 
         {/* ── Bulk action bar ── */}
@@ -375,34 +413,58 @@ export default function AgreementsPage() {
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      {a.status === "signed" || a.status === "disbursed" ? (
+                      {showDone ? (
+                        /* ── Done view: only show Restore ── */
                         <button
-                          onClick={() => navigate(`/agreements/${a.id}/execution`)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20"
+                          onClick={() => markDone(a.id)}
+                          disabled={doneLoading.has(a.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-colors border border-white/10 text-muted-foreground hover:text-white disabled:opacity-40"
                         >
-                          <ScrollText className="w-3.5 h-3.5" /> Certificate
+                          <RotateCcw className="w-3.5 h-3.5" /> Restore
                         </button>
-                      ) : a.status === "application" ? (
-                        <span className="text-xs text-muted-foreground italic px-3 py-1.5">Awaiting</span>
                       ) : (
                         <>
-                          <a
-                            href={a.signingUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20"
-                          >
-                            <Monitor className="w-3.5 h-3.5" /> Kiosk
-                          </a>
+                          {/* ── Normal actions ── */}
+                          {a.status === "signed" || a.status === "disbursed" ? (
+                            <button
+                              onClick={() => navigate(`/agreements/${a.id}/execution`)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20"
+                            >
+                              <ScrollText className="w-3.5 h-3.5" /> Certificate
+                            </button>
+                          ) : a.status === "application" ? (
+                            <span className="text-xs text-muted-foreground italic px-3 py-1.5">Awaiting</span>
+                          ) : (
+                            <>
+                              <a
+                                href={a.signingUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors border border-primary/20"
+                              >
+                                <Monitor className="w-3.5 h-3.5" /> Kiosk
+                              </a>
+                              <button
+                                onClick={() => a.signingUrl && copyLink(a.signingUrl, a.id)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-colors border border-white/10 text-muted-foreground hover:text-white"
+                                title="Copy signing link"
+                              >
+                                {copiedId === a.id
+                                  ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
+                                  : <Copy className="w-3.5 h-3.5" />
+                                }
+                              </button>
+                            </>
+                          )}
+                          {/* ── Mark Done (always available in active view) ── */}
                           <button
-                            onClick={() => a.signingUrl && copyLink(a.signingUrl, a.id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium transition-colors border border-white/10 text-muted-foreground hover:text-white"
-                            title="Copy signing link"
+                            onClick={() => markDone(a.id)}
+                            disabled={doneLoading.has(a.id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-emerald-500/10 text-xs font-medium transition-colors border border-white/10 hover:border-emerald-500/20 text-muted-foreground hover:text-emerald-400 disabled:opacity-40"
+                            title="Mark as done — hides this row"
                           >
-                            {copiedId === a.id
-                              ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
-                              : <Copy className="w-3.5 h-3.5" />
-                            }
+                            <CheckSquare className="w-3.5 h-3.5" />
+                            {doneLoading.has(a.id) ? "…" : "Done"}
                           </button>
                         </>
                       )}
@@ -413,7 +475,10 @@ export default function AgreementsPage() {
               {filtered.length === 0 && !isLoading && (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                    No Novafeeds kiosk agreements found.
+                    {showDone
+                      ? "No completed agreements yet. Mark items done from the active view."
+                      : "No active agreements — everything is actioned."
+                    }
                   </td>
                 </tr>
               )}
@@ -423,7 +488,10 @@ export default function AgreementsPage() {
 
         {filtered.length > 0 && (
           <div className="px-4 py-3 border-t border-white/5 bg-black/10 text-xs text-muted-foreground">
-            Showing {filtered.length} of {agreements.length} Novafeeds agreements
+            {showDone
+              ? `Showing ${filtered.length} completed agreement${filtered.length !== 1 ? "s" : ""} — click Restore to bring one back`
+              : `Showing ${filtered.length} of ${agreements.length} active Novafeeds agreements`
+            }
           </div>
         )}
       </GlassCard>

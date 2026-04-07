@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, real, json, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, real, json, numeric, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { retailersTable } from "./retailers";
@@ -36,6 +36,8 @@ export const agreementsTable = pgTable("agreements", {
   loanTenorMonths: integer("loan_tenor_months"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  markedDoneAt: timestamp("marked_done_at", { withTimezone: true }),
+  markedDoneBy: text("marked_done_by"),
 });
 
 export const insertAgreementSchema = createInsertSchema(agreementsTable).omit({ id: true, createdAt: true });
