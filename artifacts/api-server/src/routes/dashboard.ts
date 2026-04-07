@@ -48,12 +48,13 @@ async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> 
   const loans = await fetchLRLoans();
   if (loans !== null) {
     const matched = loans.filter((l) => {
+      if (l.status !== "active") return false;
       for (const field of DATE_FIELDS) {
         if (l[field] && String(l[field]).startsWith(yearMonth)) return true;
       }
       return false;
     });
-    console.log(`[dashboard] LR disbursement count for ${yearMonth}: ${matched.length} of ${loans.length}`);
+    console.log(`[dashboard] LR active disbursement count for ${yearMonth}: ${matched.length} of ${loans.length}`);
     return matched.length;
   }
 
