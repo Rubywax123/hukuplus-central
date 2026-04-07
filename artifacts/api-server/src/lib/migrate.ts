@@ -793,6 +793,24 @@ export async function runMigrations() {
       `);
     }
 
+    // ── One-time fix v2: delete March 2026 snapshot saved with count=0 ────────
+    // The v1 migration deleted the old 113-count snapshot, but the rebuilt one
+    // was saved with agreements_issued=0 because the LR API was returning 401.
+    // Delete it again so it gets recalculated with the corrected auth + fallback.
+    const marchSnapshotResetV2Done = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_march_snapshot_reset_v2'`
+    );
+    if (!marchSnapshotResetV2Done.rows[0]) {
+      await client.query(`
+        DELETE FROM monthly_snapshots WHERE month = '2026-03-01' AND agreements_issued = 0
+      `);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_march_snapshot_reset_v2', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
+
     // ── One-time fix: reset upload notifications from auto-actioned → new ────
     // Previously, document uploads were auto-marked "actioned" immediately,
     // bypassing the Activity queue. This was a one-time correction for

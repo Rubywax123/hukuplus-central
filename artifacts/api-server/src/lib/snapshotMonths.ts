@@ -5,21 +5,32 @@ const LR_KEY = process.env.HUKUPLUS_API_KEY;
 
 const DATE_FIELDS = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
 
+async function fetchLRLoans(): Promise<any[] | null> {
+  if (!LR_KEY) return null;
+  const patterns = [
+    { url: `${LR_URL}/api/central/loans`, headers: { Authorization: `Bearer ${LR_KEY}` } },
+    { url: `${LR_URL}/api/loans`,         headers: { Authorization: `Bearer ${LR_KEY}` } },
+    { url: `${LR_URL}/api/loans`,         headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" } },
+  ];
+  for (const { url, headers } of patterns) {
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) { console.warn(`[snapshot] LR ${url} → ${res.status}`); continue; }
+      const raw = await res.json();
+      const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
+      if (loans.length > 0) {
+        console.log(`[snapshot] LR loans via ${url}: ${loans.length} total. Sample keys: ${Object.keys(loans[0]).join(", ")}`);
+        return loans;
+      }
+    } catch (err: any) { console.warn(`[snapshot] LR error (${url}): ${err.message}`); }
+  }
+  return null;
+}
+
 async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
-  if (!LR_KEY) return 0;
-  try {
-    // Fetch all loans — LR API ignores ?status= and ?limit= params
-    const res = await fetch(`${LR_URL}/api/loans`, {
-      headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" },
-    });
-    if (!res.ok) return 0;
-    const raw = await res.json();
-    const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
-    if (loans.length > 0) {
-      console.log(`[snapshot] LR returned ${loans.length} total loans. Sample keys: ${Object.keys(loans[0]).join(", ")}`);
-    } else {
-      console.warn(`[snapshot] LR returned 0 loans (raw type: ${Array.isArray(raw) ? "array" : typeof raw}, keys: ${Object.keys(raw ?? {}).join(", ")})`);
-    }
+  // ── Try LR API ────────────────────────────────────────────────────────────
+  const loans = await fetchLRLoans();
+  if (loans !== null) {
     const matched = loans.filter((l) => {
       for (const field of DATE_FIELDS) {
         if (l[field] && String(l[field]).startsWith(yearMonth)) return true;
@@ -28,6 +39,28 @@ async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> 
     });
     console.log(`[snapshot] LR count for ${yearMonth}: ${matched.length} of ${loans.length}`);
     return matched.length;
+  }
+
+  // ── Fallback: local agreements table ─────────────────────────────────────
+  console.warn(`[snapshot] LR unavailable — counting local agreements for ${yearMonth}`);
+  try {
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query<{ count: string }>(`
+        SELECT COUNT(*)::int AS count
+        FROM agreements
+        WHERE form_type = 'agreement'
+          AND (
+            (disbursement_date IS NOT NULL AND to_char(disbursement_date, 'YYYY-MM') = $1)
+            OR (disbursement_date IS NULL AND to_char(created_at, 'YYYY-MM') = $1)
+          )
+      `, [yearMonth]);
+      const count = parseInt(rows[0]?.count ?? "0", 10);
+      console.log(`[snapshot] Local DB count for ${yearMonth}: ${count}`);
+      return count;
+    } finally {
+      client.release();
+    }
   } catch {
     return 0;
   }

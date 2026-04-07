@@ -7,47 +7,79 @@ import { getMonthlyHistory, upsertMonthSnapshot } from "../lib/snapshotMonths";
 const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
 const LR_KEY = process.env.HUKUPLUS_API_KEY;
 
-// Count Loan Register loans whose disbursementDate (or creditApprovalDate) starts
-// with yearMonth (e.g. "2026-04"). Fetches all loans — the LR API ignores ?status=
-// filters and always returns the full set. Checks all common date field names to
-// be resilient against LR schema changes.
-async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
-  if (!LR_KEY) return 0;
-  try {
-    // Fetch all loans — LR ignores ?status= / ?limit= params; returns everything
-    const res = await fetch(`${LR_URL}/api/loans`, {
-      headers: {
-        Authorization: `Bearer ${LR_KEY}`,
-        "X-Central-System": "HukuPlusCentral",
-      },
-    });
-    if (!res.ok) {
-      console.warn(`[dashboard] LR API returned ${res.status} when counting disbursements for ${yearMonth}`);
-      return 0;
-    }
-    const raw = await res.json();
-    const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
-    if (loans.length === 0) {
-      console.warn(`[dashboard] LR returned 0 loans for disbursement count (month=${yearMonth}). First raw keys: ${Object.keys(raw ?? {}).join(", ")}`);
-      return 0;
-    }
-    // Diagnose field names from first loan
-    const sample = loans[0];
-    console.log(`[dashboard] LR loan sample keys: ${Object.keys(sample).join(", ")}`);
+const DATE_FIELDS = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
 
-    // Try all known date field names
-    const dateFields = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
+// Try to fetch loans from the LR API using multiple auth patterns.
+// Returns the parsed loans array, or null if all patterns fail.
+async function fetchLRLoans(): Promise<any[] | null> {
+  if (!LR_KEY) return null;
+
+  // Pattern 1: same auth as the working stores sync — no X-Central-System header
+  const patterns = [
+    { url: `${LR_URL}/api/central/loans`, headers: { Authorization: `Bearer ${LR_KEY}` } },
+    { url: `${LR_URL}/api/loans`,         headers: { Authorization: `Bearer ${LR_KEY}` } },
+    { url: `${LR_URL}/api/loans`,         headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" } },
+  ];
+
+  for (const { url, headers } of patterns) {
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        console.warn(`[dashboard] LR fetch ${url} → ${res.status}`);
+        continue;
+      }
+      const raw = await res.json();
+      const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
+      if (loans.length > 0) {
+        console.log(`[dashboard] LR loans fetched via ${url} — ${loans.length} total. Sample keys: ${Object.keys(loans[0]).join(", ")}`);
+        return loans;
+      }
+    } catch (err: any) {
+      console.warn(`[dashboard] LR fetch error (${url}): ${err.message}`);
+    }
+  }
+  return null;
+}
+
+// Count agreements issued in a given month. Primary source: Loan Register API.
+// Fallback: local agreements table (which the Xero sync populates from Xero invoices).
+async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
+  // ── Try LR API first ──────────────────────────────────────────────────────
+  const loans = await fetchLRLoans();
+  if (loans !== null) {
     const matched = loans.filter((l) => {
-      for (const field of dateFields) {
-        const val = l[field];
-        if (val && String(val).startsWith(yearMonth)) return true;
+      for (const field of DATE_FIELDS) {
+        if (l[field] && String(l[field]).startsWith(yearMonth)) return true;
       }
       return false;
     });
-    console.log(`[dashboard] LR disbursement count for ${yearMonth}: ${matched.length} of ${loans.length} loans`);
+    console.log(`[dashboard] LR disbursement count for ${yearMonth}: ${matched.length} of ${loans.length}`);
     return matched.length;
+  }
+
+  // ── Fallback: count from local agreements table ───────────────────────────
+  // Xero sync records each AUTHORISED invoice as an agreement with disbursement_date.
+  console.warn(`[dashboard] LR API unavailable — counting agreements from local DB for ${yearMonth}`);
+  try {
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query<{ count: string }>(`
+        SELECT COUNT(*)::int AS count
+        FROM agreements
+        WHERE form_type = 'agreement'
+          AND (
+            (disbursement_date IS NOT NULL AND to_char(disbursement_date, 'YYYY-MM') = $1)
+            OR (disbursement_date IS NULL AND to_char(created_at, 'YYYY-MM') = $1)
+          )
+      `, [yearMonth]);
+      const count = parseInt(rows[0]?.count ?? "0", 10);
+      console.log(`[dashboard] Local DB agreements for ${yearMonth}: ${count}`);
+      return count;
+    } finally {
+      client.release();
+    }
   } catch (err: any) {
-    console.error(`[dashboard] LR count error for ${yearMonth}: ${err.message}`);
+    console.error(`[dashboard] Local agreements count error for ${yearMonth}: ${err.message}`);
     return 0;
   }
 }
