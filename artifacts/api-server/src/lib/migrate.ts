@@ -793,6 +793,49 @@ export async function runMigrations() {
       `);
     }
 
+    // ── One-time fix v5: delete March 2026 snapshot to rebuild with disbursementDate-only filter
+    // Previous builds used creditApprovalDate & completedAt; now only disbursementDate + loanType.
+    const marchSnapshotResetV5Done = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_march_snapshot_reset_v5'`
+    );
+    if (!marchSnapshotResetV5Done.rows[0]) {
+      await client.query(`DELETE FROM monthly_snapshots WHERE month = '2026-03-01'`);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_march_snapshot_reset_v5', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
+
+    // ── One-time fix v4: delete March 2026 snapshot to rebuild with completedAt filter
+    // Previous snapshot used status="active" filter; now using !completedAt which
+    // matches the LR "Active Loans" view (includes overdue/late loans too).
+    const marchSnapshotResetV4Done = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_march_snapshot_reset_v4'`
+    );
+    if (!marchSnapshotResetV4Done.rows[0]) {
+      await client.query(`DELETE FROM monthly_snapshots WHERE month = '2026-03-01'`);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_march_snapshot_reset_v4', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
+
+    // ── One-time fix v3: delete March 2026 snapshot to rebuild with loanType filter ─
+    // Previous snapshot counted all loan types; now only HukuPlus is counted.
+    const marchSnapshotResetV3Done = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_march_snapshot_reset_v3'`
+    );
+    if (!marchSnapshotResetV3Done.rows[0]) {
+      await client.query(`DELETE FROM monthly_snapshots WHERE month = '2026-03-01'`);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_march_snapshot_reset_v3', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
+
     // ── One-time fix v2: delete March 2026 snapshot saved with count=0 ────────
     // The v1 migration deleted the old 113-count snapshot, but the rebuilt one
     // was saved with agreements_issued=0 because the LR API was returning 401.

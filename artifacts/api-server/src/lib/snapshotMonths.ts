@@ -3,7 +3,8 @@ import { pool } from "@workspace/db";
 const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
 const LR_KEY = process.env.HUKUPLUS_API_KEY;
 
-const DATE_FIELDS = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
+// Only match on disbursementDate — the LR web UI groups loans by disbursement date.
+const DATE_FIELDS = ["disbursementDate"];
 
 async function fetchLRLoans(): Promise<any[] | null> {
   if (!LR_KEY) return null;
@@ -31,14 +32,17 @@ async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> 
   // ── Try LR API ────────────────────────────────────────────────────────────
   const loans = await fetchLRLoans();
   if (loans !== null) {
+    // Count HukuPlus loans with a disbursementDate in yearMonth.
+    // disbursementDate only — matches LR web UI grouping; no status/completedAt filter
+    // so historical months show total issued (not just currently outstanding).
     const matched = loans.filter((l) => {
-      if (l.status !== "active") return false;
+      if (String(l.loanType ?? "").toLowerCase() !== "hukuplus") return false;
       for (const field of DATE_FIELDS) {
         if (l[field] && String(l[field]).startsWith(yearMonth)) return true;
       }
       return false;
     });
-    console.log(`[snapshot] LR active count for ${yearMonth}: ${matched.length} of ${loans.length}`);
+    console.log(`[snapshot] LR HukuPlus disbursement count for ${yearMonth}: ${matched.length} of ${loans.length}`);
     return matched.length;
   }
 
