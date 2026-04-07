@@ -95,6 +95,13 @@ All routes mounted at `/api`:
 - `GET /api/dashboard/stats`
 - `GET /api/dashboard/recent-activity`
 
+#### LR Loan Count Logic (Resolved)
+- Loan counts (agreements_issued) come from the LR API: `GET /api/central/loans` with `Authorization: Bearer HUKUPLUS_API_KEY`
+- **Filter**: `loanType === "hukuplus"` + `disbursementDate` starts with `YYYY-MM` only
+- **disbursementDate ONLY** — other date fields (creditApprovalDate, createdAt) are NOT used; they fall in different months and cause overcounting
+- No status/completedAt filter — historical months count all loans ever issued, matching the LR web UI
+- Confirmed correct: March = 63, April = 11 (as shown in LR web UI)
+
 ### Users
 - `GET /api/users`
 - `PATCH /api/users/:id/role`
