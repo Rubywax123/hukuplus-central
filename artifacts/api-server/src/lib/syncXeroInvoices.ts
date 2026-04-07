@@ -119,10 +119,13 @@ export async function updateLoanRegisterStatus(
 }
 
 // ─── Backfill paid amounts for all completed loans in the Loan Register ────────
-// Fetches all completed loans where paymentsReceived = 0, then sets
-// paymentsReceived = loanAmount + loanRaisingFee + accruedInterest for each.
+// DISABLED — Loan Register is READ-ONLY from Central.
 export async function backfillCompletedLoanPayments(): Promise<{ updated: number; skipped: number; errors: string[] }> {
-  const result = { updated: 0, skipped: 0, errors: [] as string[] };
+  const result = { updated: 0, skipped: 0, errors: ["LR is read-only from Central — backfill disabled"] as string[] };
+  console.warn("[sync:xero-invoices] backfillCompletedLoanPayments is disabled: LR is read-only.");
+  return result;
+  // Dead code below kept for reference only:
+  const _result = { updated: 0, skipped: 0, errors: [] as string[] };
 
   let page = 1;
   const pageSize = 100;
@@ -532,35 +535,10 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
         ? new Date(inv.DateString).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0];
       const disbursementDate = creditApprovalDate;
-      const dueDate = addDays(creditApprovalDate, 42);
 
-      // ── Build Loan Register payload ────────────────────────────────────
-      const loanPayload: Record<string, any> = {
-        clientSurname:       surname,
-        clientGivenName:     givenName,
-        telephone:           phone,
-        dateOfBirth:         dateOfBirth,
-        idPassport:          nationalId,
-        loanType:            "HukuPlus",
-        creditApprovalDate,
-        disbursementDate,
-        dueDate,
-        term:                42,
-        loanAmount:          parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
-        loanRaisingFee:      parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee : null,
-        accruedInterest:     parsed.accruedInterest > 0 ? parsed.accruedInterest : null,
-        totalAmount:         parsed.totalAmount > 0 ? parsed.totalAmount : parsed.loanAmount,
-        officeBranch,
-        retailer:            officeBranch,
-        loanNumber:          inv.InvoiceNumber ?? null,
-        extension:           salesRep,
-        xeroInvoiceId,
-        notes:               `Xero Invoice: ${inv.InvoiceNumber ?? xeroInvoiceId}`,
-        status:              "active",
-      };
-
-      // ── Push to Loan Register ──────────────────────────────────────────
-      const loanRegisterId = await pushToLoanRegister(loanPayload);
+      // ── LR is READ-ONLY from Central — do NOT push ────────────────────
+      // The Loan Register is managed directly; Central only reads it for
+      // reporting. All LR write calls have been removed.
 
       // ── Store locally in agreements (tracking record) ──────────────────
       // If a Formitize agreement already exists for this customer (webhook
@@ -568,18 +546,16 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       if (existingFormitizeAgreementId) {
         await client.query(
           `UPDATE agreements SET
-             xero_invoice_id  = $1,
-             loan_register_id = $2,
-             loan_amount      = COALESCE(loan_amount, $3),
-             facility_fee_amount = COALESCE(facility_fee_amount, $4),
-             interest_amount  = COALESCE(interest_amount, $5),
-             repayment_amount = COALESCE(repayment_amount, $6),
-             disbursement_date = COALESCE(disbursement_date, $7),
-             branch_id        = COALESCE(branch_id, $8)
-           WHERE id = $9`,
+             xero_invoice_id     = $1,
+             loan_amount         = COALESCE(loan_amount, $2),
+             facility_fee_amount = COALESCE(facility_fee_amount, $3),
+             interest_amount     = COALESCE(interest_amount, $4),
+             repayment_amount    = COALESCE(repayment_amount, $5),
+             disbursement_date   = COALESCE(disbursement_date, $6),
+             branch_id           = COALESCE(branch_id, $7)
+           WHERE id = $8`,
           [
             xeroInvoiceId,
-            loanRegisterId,
             parsed.loanAmount > 0 ? parsed.loanAmount : parsed.totalAmount,
             parsed.loanRaisingFee > 0 ? parsed.loanRaisingFee.toFixed(2) : null,
             parsed.accruedInterest > 0 ? parsed.accruedInterest.toFixed(2) : null,
@@ -600,14 +576,14 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
              (customer_id, customer_name, customer_phone, loan_product,
               loan_amount, facility_fee_amount, interest_amount, repayment_amount,
               form_type, status, signing_token, expires_at,
-              xero_invoice_id, source, dismissed, loan_register_id,
+              xero_invoice_id, source, dismissed,
               branch_id, disbursement_date, created_at)
            VALUES
              ($1,$2,$3,'HukuPlus',
               $4,$5,$6,$7,
               'agreement','active',$8,$9,
-              $10,'xero_sync',FALSE,$11,
-              $12,$13,NOW())
+              $10,'xero_sync',FALSE,
+              $11,$12,NOW())
            ON CONFLICT DO NOTHING`,
           [
             customerId,
@@ -620,29 +596,15 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
             signingToken,
             expiresAt,
             xeroInvoiceId,
-            loanRegisterId,
             branchId,
             disbursementDate,
           ]
         );
       }
-
-      // ── Update last sync timestamp ─────────────────────────────────────
-      await client.query(`
-        INSERT INTO system_settings (key, value, updated_at)
-        VALUES ('xero_invoice_last_sync', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), NOW())
-        ON CONFLICT (key) DO UPDATE SET value = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), updated_at = NOW()
-      `);
-
-      if (loanRegisterId) {
-        result.pushed++;
-        console.log(
-          `[xero-sync] Pushed "${givenName} ${surname}" → Loan Register #${loanRegisterId} (Xero: ${inv.InvoiceNumber})`
-        );
-      } else {
-        // Push failed but still stored locally
-        result.errors.push(`Push failed for invoice ${inv.InvoiceNumber} (${xeroContactName})`);
-      }
+      result.pushed++;
+      console.log(
+        `[sync:xero-invoices] Tracked "${givenName} ${surname}" locally (Xero: ${inv.InvoiceNumber})`
+      );
     }
 
     // Always update last sync timestamp

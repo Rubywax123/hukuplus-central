@@ -3,22 +3,31 @@ import { pool } from "@workspace/db";
 const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
 const LR_KEY = process.env.CENTRAL_API_KEY;
 
+const DATE_FIELDS = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
+
 async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
   if (!LR_KEY) return 0;
   try {
-    // Check both active and completed loans — completed needed for past months
-    const [activeRes, completedRes] = await Promise.all([
-      fetch(`${LR_URL}/api/loans?status=active&limit=5000`, {
-        headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" },
-      }),
-      fetch(`${LR_URL}/api/loans?status=completed&limit=5000`, {
-        headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" },
-      }),
-    ]);
-    const active    = activeRes.ok    ? (await activeRes.json()    as any[]) : [];
-    const completed = completedRes.ok ? (await completedRes.json() as any[]) : [];
-    const all = [...(Array.isArray(active) ? active : []), ...(Array.isArray(completed) ? completed : [])];
-    return all.filter((l) => l.disbursementDate && String(l.disbursementDate).startsWith(yearMonth)).length;
+    // Fetch all loans — LR API ignores ?status= and ?limit= params
+    const res = await fetch(`${LR_URL}/api/loans`, {
+      headers: { Authorization: `Bearer ${LR_KEY}`, "X-Central-System": "HukuPlusCentral" },
+    });
+    if (!res.ok) return 0;
+    const raw = await res.json();
+    const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
+    if (loans.length > 0) {
+      console.log(`[snapshot] LR returned ${loans.length} total loans. Sample keys: ${Object.keys(loans[0]).join(", ")}`);
+    } else {
+      console.warn(`[snapshot] LR returned 0 loans (raw type: ${Array.isArray(raw) ? "array" : typeof raw}, keys: ${Object.keys(raw ?? {}).join(", ")})`);
+    }
+    const matched = loans.filter((l) => {
+      for (const field of DATE_FIELDS) {
+        if (l[field] && String(l[field]).startsWith(yearMonth)) return true;
+      }
+      return false;
+    });
+    console.log(`[snapshot] LR count for ${yearMonth}: ${matched.length} of ${loans.length}`);
+    return matched.length;
   } catch {
     return 0;
   }

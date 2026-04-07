@@ -777,12 +777,21 @@ export async function runMigrations() {
 
     // ── One-time fix: delete March 2026 snapshot so it is recreated with ─────
     // the Loan Register disbursement-date based agreement count (ground truth).
-    // Only delete if it still has the old Formitize-based incorrect count (8).
-    // Guarded so it does not wipe a correctly re-built snapshot on every restart.
-    await client.query(`
-      DELETE FROM monthly_snapshots
-      WHERE month = '2026-03-01' AND agreements_issued >= 8
-    `);
+    // Guarded via system_settings so it runs exactly once and never wipes a
+    // snapshot that has been correctly rebuilt after the fix.
+    const marchSnapshotResetDone = await client.query(
+      `SELECT value FROM system_settings WHERE key = 'migration_march_snapshot_reset_v1'`
+    );
+    if (!marchSnapshotResetDone.rows[0]) {
+      await client.query(`
+        DELETE FROM monthly_snapshots WHERE month = '2026-03-01'
+      `);
+      await client.query(`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_march_snapshot_reset_v1', 'done', NOW())
+        ON CONFLICT (key) DO NOTHING
+      `);
+    }
 
     // ── One-time fix: reset upload notifications from auto-actioned → new ────
     // Previously, document uploads were auto-marked "actioned" immediately,

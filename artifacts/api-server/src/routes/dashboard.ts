@@ -7,22 +7,47 @@ import { getMonthlyHistory, upsertMonthSnapshot } from "../lib/snapshotMonths";
 const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
 const LR_KEY = process.env.CENTRAL_API_KEY;
 
-// Count active Loan Register loans whose disbursementDate starts with yearMonth (e.g. "2026-04")
+// Count Loan Register loans whose disbursementDate (or creditApprovalDate) starts
+// with yearMonth (e.g. "2026-04"). Fetches all loans — the LR API ignores ?status=
+// filters and always returns the full set. Checks all common date field names to
+// be resilient against LR schema changes.
 async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
   if (!LR_KEY) return 0;
   try {
-    const res = await fetch(`${LR_URL}/api/loans?status=active&limit=5000`, {
+    // Fetch all loans — LR ignores ?status= / ?limit= params; returns everything
+    const res = await fetch(`${LR_URL}/api/loans`, {
       headers: {
         Authorization: `Bearer ${LR_KEY}`,
         "X-Central-System": "HukuPlusCentral",
       },
     });
-    if (!res.ok) return 0;
-    const loans: any[] = await res.json();
-    return (Array.isArray(loans) ? loans : [])
-      .filter((l) => l.disbursementDate && String(l.disbursementDate).startsWith(yearMonth))
-      .length;
-  } catch {
+    if (!res.ok) {
+      console.warn(`[dashboard] LR API returned ${res.status} when counting disbursements for ${yearMonth}`);
+      return 0;
+    }
+    const raw = await res.json();
+    const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
+    if (loans.length === 0) {
+      console.warn(`[dashboard] LR returned 0 loans for disbursement count (month=${yearMonth}). First raw keys: ${Object.keys(raw ?? {}).join(", ")}`);
+      return 0;
+    }
+    // Diagnose field names from first loan
+    const sample = loans[0];
+    console.log(`[dashboard] LR loan sample keys: ${Object.keys(sample).join(", ")}`);
+
+    // Try all known date field names
+    const dateFields = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
+    const matched = loans.filter((l) => {
+      for (const field of dateFields) {
+        const val = l[field];
+        if (val && String(val).startsWith(yearMonth)) return true;
+      }
+      return false;
+    });
+    console.log(`[dashboard] LR disbursement count for ${yearMonth}: ${matched.length} of ${loans.length} loans`);
+    return matched.length;
+  } catch (err: any) {
+    console.error(`[dashboard] LR count error for ${yearMonth}: ${err.message}`);
     return 0;
   }
 }
