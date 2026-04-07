@@ -4,7 +4,9 @@ import crypto from "crypto";
 const XERO_BASE = "https://api.xero.com/api.xro/2.0";
 const LOAN_REGISTER_URL =
   process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
-const CENTRAL_API_KEY = process.env.CENTRAL_API_KEY;
+// HUKUPLUS_API_KEY authenticates Central → Loan Register calls (read-only).
+// CENTRAL_API_KEY is Central's own inbound API key — do NOT use it for LR calls.
+const HUKUPLUS_API_KEY = process.env.HUKUPLUS_API_KEY;
 
 // ─── Xero auth helpers ────────────────────────────────────────────────────────
 
@@ -55,8 +57,8 @@ function xeroHeaders(auth: { accessToken: string; tenantId: string }) {
 function loanRegHeaders() {
   return {
     "Content-Type": "application/json",
-    ...(CENTRAL_API_KEY ? {
-      Authorization: `Bearer ${CENTRAL_API_KEY}`,
+    ...(HUKUPLUS_API_KEY ? {
+      Authorization: `Bearer ${HUKUPLUS_API_KEY}`,
       "X-Central-System": "HukuPlusCentral",
     } : {}),
   };
@@ -257,11 +259,6 @@ export interface SyncXeroResult {
 export async function syncXeroInvoices(): Promise<SyncXeroResult> {
   const result: SyncXeroResult = { checked: 0, pushed: 0, skipped: 0, errors: [] };
 
-  if (!CENTRAL_API_KEY) {
-    result.errors.push("CENTRAL_API_KEY not set — cannot push to Loan Register.");
-    return result;
-  }
-
   const auth = await getValidAccessToken();
   if (!auth) {
     result.errors.push("Xero not connected — please reconnect in Settings.");
@@ -356,7 +353,7 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
         `${LOAN_REGISTER_URL}/api/loans?status=active&limit=5000`,
         {
           headers: {
-            Authorization: `Bearer ${CENTRAL_API_KEY}`,
+            Authorization: `Bearer ${HUKUPLUS_API_KEY}`,
             "X-Central-System": "HukuPlusCentral",
           },
         }

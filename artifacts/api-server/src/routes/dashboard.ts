@@ -5,7 +5,7 @@ import { pool } from "@workspace/db";
 import { getMonthlyHistory, upsertMonthSnapshot } from "../lib/snapshotMonths";
 
 const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
-const LR_KEY = process.env.CENTRAL_API_KEY;
+const LR_KEY = process.env.HUKUPLUS_API_KEY;
 
 // Count Loan Register loans whose disbursementDate (or creditApprovalDate) starts
 // with yearMonth (e.g. "2026-04"). Fetches all loans — the LR API ignores ?status=

@@ -2,7 +2,7 @@ import { Router } from "express";
 
 const router = Router();
 
-const CENTRAL_API_KEY = process.env.CENTRAL_API_KEY;
+const HUKUPLUS_API_KEY = process.env.HUKUPLUS_API_KEY;
 
 const LOAN_APPS = [
   {
@@ -34,8 +34,8 @@ const LOAN_APPS = [
 router.get("/integrations/apps", (req, res) => {
   const apps = LOAN_APPS.map((app) => ({
     ...app,
-    hasApiKey: !!CENTRAL_API_KEY,
-    status: CENTRAL_API_KEY ? "key_ready" : "no_key",
+    hasApiKey: !!HUKUPLUS_API_KEY,
+    status: HUKUPLUS_API_KEY ? "key_ready" : "no_key",
   }));
   res.json(apps);
 });
@@ -45,8 +45,8 @@ router.get("/integrations/apps/:id/ping", async (req, res) => {
   if (!app) return res.status(404).json({ error: "App not found" });
 
   const headers: Record<string, string> = {};
-  if (CENTRAL_API_KEY) {
-    headers["Authorization"] = `Bearer ${CENTRAL_API_KEY}`;
+  if (HUKUPLUS_API_KEY) {
+    headers["Authorization"] = `Bearer ${HUKUPLUS_API_KEY}`;
     headers["X-Central-System"] = "HukuPlusCentral";
   }
 

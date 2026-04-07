@@ -1,7 +1,7 @@
 import { pool } from "@workspace/db";
 
 const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
-const LR_KEY = process.env.CENTRAL_API_KEY;
+const LR_KEY = process.env.HUKUPLUS_API_KEY;
 
 const DATE_FIELDS = ["disbursementDate", "creditApprovalDate", "loanDate", "date", "startDate", "createdAt", "created_at"];
 
