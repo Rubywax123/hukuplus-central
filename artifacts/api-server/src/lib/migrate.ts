@@ -935,6 +935,34 @@ export async function runMigrations() {
       `);
     }
 
+    // ── Fix mislabelled payroll/salary deduction notifications ───────────────
+    // Any Formitize notification whose form_name includes "payroll deduction"
+    // or "salary deduction" should be product=ChikweretiOne, not HukuPlus.
+    // This applies retroactively to any records created before the detection
+    // logic was updated (tracking category: "Tefco Salary Deduction").
+    await client.query(`
+      UPDATE formitize_notifications
+      SET product = 'ChikweretiOne'
+      WHERE product = 'HukuPlus'
+        AND (
+          LOWER(form_name) LIKE '%payroll deduction%' OR
+          LOWER(form_name) LIKE '%salary deduction%' OR
+          LOWER(form_name) LIKE '%payroll / salary%'
+        )
+    `);
+
+    // Same fix for customers table — loanProduct was set from the notification
+    await client.query(`
+      UPDATE customers
+      SET loan_product = 'ChikweretiOne'
+      WHERE loan_product = 'HukuPlus'
+        AND id IN (
+          SELECT customer_id FROM formitize_notifications
+          WHERE product = 'ChikweretiOne'
+            AND customer_id IS NOT NULL
+        )
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

@@ -408,15 +408,28 @@ router.get("/formitize/status", requireStaffAuth, requireSuperAdmin, async (req,
 });
 
 // ─── Form context detection ────────────────────────────────────────────────────
-function parseFormContext(formName: string): {
+function parseFormContext(formName: string, trackingCategory?: string): {
   product: "HukuPlus" | "ChikweretiOne" | "Revolver";
   formType: "agreement" | "application" | "reapplication" | "drawdown" | "payment" | "upload" | "approval" | "undertaking" | "unknown";
 } {
   const n = formName.toLowerCase();
+  const tc = (trackingCategory ?? "").toLowerCase();
 
   let product: "HukuPlus" | "ChikweretiOne" | "Revolver" = "HukuPlus";
+
   if (n.includes("chikweret")) product = "ChikweretiOne";
   else if (n.includes("revolver")) product = "Revolver";
+  // Salary / payroll deduction → ChikweretiOne
+  // Form names: "Payroll Deduction Application", "Salary Deduction Application", etc.
+  // Tracking category: "Tefco Salary Deduction"
+  else if (
+    n.includes("payroll deduction") ||
+    n.includes("salary deduction") ||
+    n.includes("payroll / salary") ||
+    tc.includes("salary deduction") ||
+    tc.includes("payroll deduction") ||
+    tc.includes("tefco salary")
+  ) product = "ChikweretiOne";
   // HukuPlus catches: "hukuplus", "novafeed", "new customer", "drawdown approval", "payment receipt"
 
   let formType: "agreement" | "application" | "reapplication" | "drawdown" | "payment" | "upload" | "approval" | "undertaking" | "unknown" = "unknown";
@@ -519,7 +532,15 @@ router.post("/formitize/webhook", async (req, res) => {
 
   const body = req.body;
   const rawFormName: string = body.formTitle || body.title || body.form_name || body.FormName || body.formName || "";
-  console.log(`[formitize:webhook] Hit — form="${rawFormName}" submittedFormID=${body.submittedFormID} jobID=${body.jobID}`);
+  // Tracking category — Formitize sends this as trackingCategory, tracking_category, or inside trackingCategories array
+  const rawTrackingCategory: string = (
+    body.trackingCategory ||
+    body.tracking_category ||
+    body.TrackingCategory ||
+    (Array.isArray(body.trackingCategories) ? body.trackingCategories[0] : "") ||
+    ""
+  );
+  console.log(`[formitize:webhook] Hit — form="${rawFormName}" trackingCategory="${rawTrackingCategory}" submittedFormID=${body.submittedFormID} jobID=${body.jobID}`);
 
   const formName = rawFormName.toLowerCase().trim();
   if (!formName) {
@@ -527,7 +548,7 @@ router.post("/formitize/webhook", async (req, res) => {
     return;
   }
 
-  const { product, formType } = parseFormContext(formName);
+  const { product, formType } = parseFormContext(formName, rawTrackingCategory);
   console.log(`[formitize:webhook] Detected — product="${product}" formType="${formType}"`);
 
   // ── Extract all field values from Formitize payload ────────────────────────
