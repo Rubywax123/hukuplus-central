@@ -158,7 +158,7 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
 
   const client = await pool.connect();
   try {
-    // Applications + re-applications: sourced from Formitize notifications
+    // Applications, re-applications, and agreements: sourced from Formitize notifications
     const { rows } = await client.query<{ task_type: string; current_month: string; prev_month: string }>(`
       SELECT
         task_type,
@@ -168,7 +168,7 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
                     AND created_at <  DATE_TRUNC('month', NOW())) AS prev_month
       FROM formitize_notifications
-      WHERE task_type IN ('application', 'reapplication')
+      WHERE task_type IN ('application', 'reapplication', 'agreement')
         AND created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
       GROUP BY task_type
     `);
@@ -176,12 +176,20 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
     const get = (type: string, col: "current_month" | "prev_month") =>
       parseInt(rows.find((r) => r.task_type === type)?.[col] ?? "0", 10);
 
-    // Agreements: sourced from Loan Register by disbursementDate — the ground truth.
-    // Each loan in the LR is a unique disbursement; no double-counting possible.
-    const [currentAgreements, previousAgreements] = await Promise.all([
+    // Agreements: take the higher of (Formitize count, LR disbursement count).
+    // Formitize reflects agreements the moment they are signed — no lag.
+    // LR is the ground truth for older months (pre-Formitize) and for disbursement tracking.
+    // max() ensures historical months (LR only) are never under-counted.
+    const formitizeCurrentAgreements  = get("agreement", "current_month");
+    const formitizePreviousAgreements = get("agreement", "prev_month");
+
+    const [lrCurrentAgreements, lrPreviousAgreements] = await Promise.all([
       countLRDisbursementsForMonth(currentYM),
       countLRDisbursementsForMonth(previousYM),
     ]);
+
+    const currentAgreements  = Math.max(formitizeCurrentAgreements,  lrCurrentAgreements);
+    const previousAgreements = Math.max(formitizePreviousAgreements, lrPreviousAgreements);
 
     const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
 
