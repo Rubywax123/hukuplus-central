@@ -1207,10 +1207,10 @@ function DisbursementModal({ notification, onClose, onDone }: {
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.96 }}
-        className="w-full max-w-lg bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        className="w-full max-w-lg bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
           <div>
             <h2 className="text-base font-semibold text-foreground">Process Disbursement</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -1222,7 +1222,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
           </button>
         </div>
 
-        <div className="p-6">
+        <div className="p-6 overflow-y-auto flex-1">
 
           {/* STEP 1 — CUSTOMER MATCHING */}
           {step === "matching" && (
