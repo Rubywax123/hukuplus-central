@@ -92,11 +92,11 @@ export async function computeMonthTotals(monthStart: Date): Promise<{
 
   const client = await pool.connect();
   try {
-    // Applications, re-applications, and agreements from Formitize (dedup by job_id)
+    // Applications + re-applications from Formitize notifications (dedup by job_id)
     const { rows } = await client.query<{ task_type: string; count: string }>(`
       SELECT task_type, COUNT(DISTINCT formitize_job_id) AS count
       FROM formitize_notifications
-      WHERE task_type IN ('application', 'reapplication', 'agreement')
+      WHERE task_type IN ('application', 'reapplication')
         AND created_at >= $1
         AND created_at <  $2
       GROUP BY task_type
@@ -104,12 +104,10 @@ export async function computeMonthTotals(monthStart: Date): Promise<{
 
     const get = (t: string) => parseInt(rows.find((r) => r.task_type === t)?.count ?? "0", 10);
 
-    // Agreements: max(Formitize, LR) — Formitize reflects agreements the moment
-    // they are signed (no lag). LR is the ground truth for pre-Formitize months.
-    // max() ensures older months (LR only, Formitize count = 0) are never under-counted.
-    const formitizeAgreements = get("agreement");
-    const lrAgreements        = await countLRDisbursementsForMonth(yearMonth);
-    const agreementsIssued    = Math.max(formitizeAgreements, lrAgreements);
+    // Agreements: Loan Register is the ground truth — counts only disbursed loans.
+    // Formitize agreements include signed-but-not-yet-disbursed loans which must
+    // not be counted until they appear in the LR with a disbursementDate.
+    const agreementsIssued = await countLRDisbursementsForMonth(yearMonth);
 
     return {
       newApplications: get("application"),
