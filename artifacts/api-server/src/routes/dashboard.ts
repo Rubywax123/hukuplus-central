@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, desc, gte } from "drizzle-orm";
+import { eq, sql, desc, gte, and, isNull } from "drizzle-orm";
 import { db, retailersTable, branchesTable, agreementsTable, activityTable } from "@workspace/db";
 import { pool } from "@workspace/db";
 import { getMonthlyHistory, upsertMonthSnapshot } from "../lib/snapshotMonths";
@@ -99,7 +99,17 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
   const [totalRetailersResult] = await db.select({ count: sql<number>`count(*)::int` }).from(retailersTable);
   const [totalBranchesResult] = await db.select({ count: sql<number>`count(*)::int` }).from(branchesTable);
   const [totalAgreementsResult] = await db.select({ count: sql<number>`count(*)::int` }).from(agreementsTable);
-  const [pendingResult] = await db.select({ count: sql<number>`count(*)::int` }).from(agreementsTable).where(eq(agreementsTable.status, "pending"));
+  // Pending Signatures: only Novafeeds agreements (managed in this app's kiosk signing
+  // workflow) that haven't been signed or marked as done. Agreements handled directly
+  // in Formitize can be dismissed via "Mark Done" to remove them from this count.
+  const [pendingResult] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(agreementsTable)
+    .where(and(
+      eq(agreementsTable.status, "pending"),
+      eq(agreementsTable.loanProduct, "Novafeeds"),
+      isNull(agreementsTable.markedDoneAt),
+    ));
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
