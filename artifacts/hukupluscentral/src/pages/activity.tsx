@@ -1415,6 +1415,7 @@ function PaymentModal({ notification, onClose, onDone }: {
   const [markLoanComplete, setMarkLoanComplete] = useState(true);
   const [resultErrors, setResultErrors] = useState<string[]>([]);
   const [lrAutoCompleted, setLrAutoCompleted] = useState(false);
+  const [creditPosted, setCreditPosted] = useState<number>(0);
 
   const paymentAmount = parseFloat(String(notification.payment_amount ?? 0)) || 0;
 
@@ -1447,13 +1448,19 @@ function PaymentModal({ notification, onClose, onDone }: {
 
   function selectCandidate(c: PaymentCandidate) {
     setSelected(c);
-    const outstanding = [...c.invoices].sort((a, b) => b.amountDue - a.amountDue);
+    // Sort oldest first — excess payment goes to oldest arrears before newer invoices
+    const outstanding = [...c.invoices].sort((a, b) => {
+      const aDate = a.date ? new Date(a.date).getTime() : 0;
+      const bDate = b.date ? new Date(b.date).getTime() : 0;
+      return aDate - bDate;
+    });
     const alloc: Record<string, string> = {};
     if (paymentAmount > 0) {
-      // Known payment amount — allocate greedily starting from largest invoice
+      // Known payment amount — allocate oldest-first, capped at each invoice's AmountDue.
+      // Any remainder after all invoices is an overpayment credit shown below.
       let remaining = paymentAmount;
       for (const inv of outstanding) {
-        if (remaining <= 0) { alloc[inv.invoiceId] = "0.00"; continue; }
+        if (remaining <= 0.005) { alloc[inv.invoiceId] = "0.00"; continue; }
         const apply = Math.min(remaining, inv.amountDue);
         alloc[inv.invoiceId] = apply.toFixed(2);
         remaining -= apply;
@@ -1502,6 +1509,10 @@ function PaymentModal({ notification, onClose, onDone }: {
           allocations: allocs,
           markLoanComplete,
           customerId: selected!.customerId,
+          // Any payment amount above the sum of invoice allocations — the backend
+          // will apply this to other outstanding invoices oldest-first, then post
+          // any remainder as a Xero Overpayment (credit balance on account).
+          creditAmount: unallocated > 0.01 ? Math.round(unallocated * 100) / 100 : 0,
         }),
       });
       const data = await r.json();
@@ -1511,6 +1522,7 @@ function PaymentModal({ notification, onClose, onDone }: {
     onSuccess: (data) => {
       if (data.errors?.length) setResultErrors(data.errors);
       setLrAutoCompleted(!!data.autoCompleted);
+      if (data.overpaymentPosted && data.overpaymentAmount > 0) setCreditPosted(data.overpaymentAmount);
       setStep("done");
       onDone();
     },
@@ -1669,14 +1681,18 @@ function PaymentModal({ notification, onClose, onDone }: {
                 {paymentAmount > 0 ? (
                   <div className={`mt-3 p-3 rounded-lg text-sm flex items-center justify-between ${
                     Math.abs(unallocated) < 0.01 ? "bg-green-500/10 border border-green-500/20" :
-                    unallocated > 0 ? "bg-amber-500/10 border border-amber-500/20" :
+                    unallocated > 0 ? "bg-blue-500/10 border border-blue-500/20" :
                     "bg-red-500/10 border border-red-500/20"
                   }`}>
                     <span className="text-muted-foreground">
-                      ${paymentAmount.toFixed(2)} received — ${totalAllocated.toFixed(2)} allocated
+                      ${paymentAmount.toFixed(2)} received — ${totalAllocated.toFixed(2)} to invoices
                     </span>
-                    <span className={`font-semibold ${Math.abs(unallocated) < 0.01 ? "text-green-400" : unallocated > 0 ? "text-amber-300" : "text-red-400"}`}>
-                      {Math.abs(unallocated) < 0.01 ? "Fully allocated" : unallocated > 0 ? `$${unallocated.toFixed(2)} unallocated` : `Over by $${Math.abs(unallocated).toFixed(2)}`}
+                    <span className={`font-semibold ${Math.abs(unallocated) < 0.01 ? "text-green-400" : unallocated > 0 ? "text-blue-300" : "text-red-400"}`}>
+                      {Math.abs(unallocated) < 0.01
+                        ? "Fully allocated"
+                        : unallocated > 0
+                          ? `$${unallocated.toFixed(2)} → credit to account`
+                          : `Over by $${Math.abs(unallocated).toFixed(2)}`}
                     </span>
                   </div>
                 ) : (
@@ -1739,6 +1755,21 @@ function PaymentModal({ notification, onClose, onDone }: {
                   </div>
                 )}
               </div>
+
+              {/* Credit / overpayment confirmation */}
+              {creditPosted > 0 && (
+                <div className="mx-2 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-blue-300">${creditPosted.toFixed(2)} posted as credit balance</p>
+                      <p className="text-xs text-blue-300/70 mt-1">
+                        An overpayment of <strong>${creditPosted.toFixed(2)}</strong> has been posted to the customer's Xero account as a credit balance — available to offset future invoices.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Loan Register follow-up */}
               {lrAutoCompleted ? (
