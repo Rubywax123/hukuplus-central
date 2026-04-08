@@ -8,7 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
-  LayoutTemplate,
+  LayoutTemplate, Search, Link2,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -1088,6 +1088,41 @@ function DisbursementModal({ notification, onClose, onDone }: {
   const [result, setResult] = useState<DisbursementResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Xero contact linking (for customers with name mismatches)
+  const [xeroLinkOverrides, setXeroLinkOverrides] = useState<Record<number, string>>({});
+  const [linkingId, setLinkingId] = useState<number | null>(null);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkResults, setLinkResults] = useState<{ contactId: string; name: string; email: string | null }[]>([]);
+  const [linkSearching, setLinkSearching] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
+
+  async function searchXeroContacts(q: string) {
+    if (!q.trim()) return;
+    setLinkSearching(true);
+    try {
+      const r = await fetch(`${BASE}/api/xero/contacts/search?q=${encodeURIComponent(q.trim())}`, { credentials: "include" });
+      if (r.ok) setLinkResults(await r.json());
+    } finally { setLinkSearching(false); }
+  }
+
+  async function saveXeroLink(customerId: number, contactId: string, contactName: string) {
+    setLinkSaving(true);
+    try {
+      const r = await fetch(`${BASE}/api/customers/${customerId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xeroContactId: contactId }),
+      });
+      if (r.ok) {
+        setXeroLinkOverrides(prev => ({ ...prev, [customerId]: contactId }));
+        setLinkingId(null);
+        setLinkSearch("");
+        setLinkResults([]);
+      }
+    } finally { setLinkSaving(false); }
+  }
+
   const { data: bankAccounts = [] } = useQuery<BankAccount[]>({
     queryKey: ["disbursement-bank-accounts"],
     queryFn: async () => {
@@ -1205,30 +1240,116 @@ function DisbursementModal({ notification, onClose, onDone }: {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {candidates.map(c => (
-                      <button key={c.customerId ?? c.xeroContactId}
-                        onClick={() => setSelected(s => s?.customerId === c.customerId && s?.xeroContactId === c.xeroContactId ? null : c)}
-                        className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
-                          selected?.customerId === c.customerId && selected?.xeroContactId === c.xeroContactId
-                            ? "border-emerald-500/50 bg-emerald-500/10"
-                            : "border-white/10 bg-white/5 hover:bg-white/8"
-                        }`}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                          <User className="w-4 h-4 text-white/60" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-white">{c.fullName}</p>
-                          <p className="text-xs text-white/40 mt-0.5">{c.phone || "—"} · ID: {c.nationalId || "—"}</p>
-                          {c.xeroContactId ? (
-                            <p className="text-xs text-emerald-400/70 mt-0.5 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Xero linked</p>
-                          ) : (
-                            <p className="text-xs text-red-400/70 mt-0.5 flex items-center gap-1"><XCircle className="w-3 h-3" />No Xero contact — cannot disburse</p>
+                    {candidates.map(c => {
+                      const effectiveXeroId = c.xeroContactId ?? (c.customerId ? xeroLinkOverrides[c.customerId] ?? null : null);
+                      const isSelected = selected?.customerId === c.customerId && selected?.xeroContactId === effectiveXeroId;
+                      const isLinking = linkingId === c.customerId;
+                      const effectiveCandidate: PaymentCandidate = { ...c, xeroContactId: effectiveXeroId };
+                      return (
+                        <div key={c.customerId ?? c.xeroContactId} className="space-y-0">
+                          <button
+                            onClick={() => {
+                              if (!effectiveXeroId) return;
+                              setSelected(s => s?.customerId === c.customerId ? null : effectiveCandidate);
+                            }}
+                            className={`w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                              isSelected
+                                ? "border-emerald-500/50 bg-emerald-500/10"
+                                : effectiveXeroId
+                                  ? "border-white/10 bg-white/5 hover:bg-white/8 cursor-pointer"
+                                  : "border-white/10 bg-white/5 cursor-default"
+                            } ${isLinking ? "rounded-b-none border-b-0" : ""}`}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
+                              <User className="w-4 h-4 text-white/60" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-white">{c.fullName}</p>
+                              <p className="text-xs text-white/40 mt-0.5">{c.phone || "—"} · ID: {c.nationalId || "—"}</p>
+                              {effectiveXeroId ? (
+                                <p className="text-xs text-emerald-400/70 mt-0.5 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />Xero linked
+                                  {xeroLinkOverrides[c.customerId!] && <span className="text-emerald-400/50">(just linked)</span>}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-red-400/70 mt-0.5 flex items-center gap-1"><XCircle className="w-3 h-3" />No Xero contact — cannot disburse</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {isSelected && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                              {!effectiveXeroId && c.customerId != null && (
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    if (isLinking) {
+                                      setLinkingId(null); setLinkSearch(""); setLinkResults([]);
+                                    } else {
+                                      setLinkingId(c.customerId);
+                                      setLinkSearch(c.fullName);
+                                      setLinkResults([]);
+                                      setTimeout(() => searchXeroContacts(c.fullName), 50);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium bg-blue-500/15 border border-blue-500/30 text-blue-300 hover:bg-blue-500/25 transition-all"
+                                >
+                                  <Link2 className="w-3 h-3" />
+                                  {isLinking ? "Cancel" : "Link Xero"}
+                                </button>
+                              )}
+                            </div>
+                          </button>
+
+                          {/* Inline Xero contact search panel */}
+                          {isLinking && c.customerId != null && (
+                            <div className="border border-white/10 border-t-blue-500/30 rounded-b-xl bg-[#12122a] px-4 py-3 space-y-3">
+                              <p className="text-[11px] text-blue-300/80 font-medium">
+                                Search Xero for the correct contact — name may differ from Central.
+                              </p>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={linkSearch}
+                                  onChange={e => setLinkSearch(e.target.value)}
+                                  onKeyDown={e => e.key === "Enter" && searchXeroContacts(linkSearch)}
+                                  placeholder="e.g. Saineti Richard Makuvaza"
+                                  className="flex-1 bg-white/5 border border-white/15 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-blue-500/50 placeholder:text-white/20"
+                                />
+                                <button
+                                  onClick={() => searchXeroContacts(linkSearch)}
+                                  disabled={linkSearching || !linkSearch.trim()}
+                                  className="px-3 py-2 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:bg-blue-500/30 disabled:opacity-40 transition-all"
+                                >
+                                  {linkSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                                </button>
+                              </div>
+
+                              {linkResults.length > 0 && (
+                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                  {linkResults.map(contact => (
+                                    <button
+                                      key={contact.contactId}
+                                      disabled={linkSaving}
+                                      onClick={() => saveXeroLink(c.customerId!, contact.contactId, contact.name)}
+                                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/5 hover:bg-blue-500/15 border border-white/10 hover:border-blue-500/30 text-left transition-all group"
+                                    >
+                                      <div>
+                                        <p className="text-sm font-medium text-white group-hover:text-blue-200">{contact.name}</p>
+                                        {contact.email && <p className="text-[11px] text-white/40">{contact.email}</p>}
+                                      </div>
+                                      {linkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" /> : <Link2 className="w-3.5 h-3.5 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {!linkSearching && linkResults.length === 0 && linkSearch.trim() && (
+                                <p className="text-xs text-white/30 text-center py-1">No Xero contacts found — try a different name or surname only.</p>
+                              )}
+                            </div>
                           )}
                         </div>
-                        {selected?.customerId === c.customerId && selected?.xeroContactId === c.xeroContactId && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" />}
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
