@@ -135,7 +135,9 @@ export default function XeroIntegrationPage() {
     },
   });
 
-  const pendingInvoices = invoices?.filter((i) => !i.imported) ?? [];
+  // "Pending" = needs to be pushed to the Loan Register — only AUTHORISED/PARTIAL
+  // PAID+not-imported are historical invoices that predate Central; no action needed, so excluded.
+  const pendingInvoices = invoices?.filter((i) => !i.imported && i.xeroStatus !== "PAID") ?? [];
   const importedInvoices = invoices?.filter((i) => i.imported) ?? [];
 
   if (statusLoading) {
@@ -333,8 +335,8 @@ export default function XeroIntegrationPage() {
           <div className="mt-4 flex items-start gap-2 text-xs text-muted-foreground/60 px-1">
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <p>
-              "Sync Now" pushes all pending invoices to the Loan Register in one pass. The automated sync also runs every 5 minutes.
-              Imported invoices were matched by Xero Invoice ID against your agreements records.
+              Only <strong className="text-muted-foreground/80">AUTHORISED</strong> and <strong className="text-muted-foreground/80">PARTIAL</strong> invoices are pushed to the Loan Register.
+              PAID invoices require no action and are not shown. "Sync Now" processes all pending invoices in one pass; the automated sync also runs every 5 minutes.
             </p>
           </div>
         </motion.div>
