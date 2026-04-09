@@ -3,6 +3,7 @@ import { eq, ilike, or, desc, sql } from "drizzle-orm";
 import { db, pool, customersTable, agreementsTable, branchesTable, retailersTable } from "@workspace/db";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
+import { apiKeyOrSession } from "../middlewares/staffAuthMiddleware";
 
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -21,9 +22,8 @@ function normalisePhone(p: string): string | null {
   return s || null;
 }
 
-// ── List customers (admin only) ───────────────────────────────────────────────
-router.get("/customers", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+// ── List customers ────────────────────────────────────────────────────────────
+router.get("/customers", apiKeyOrSession, async (req, res): Promise<void> => {
 
   const search         = (req.query.search as string || "").trim();
   const incompleteOnly = req.query.incompleteOnly === "true";
@@ -96,9 +96,7 @@ router.get("/customers", async (req, res): Promise<void> => {
 });
 
 // ── Get single customer with agreement history ────────────────────────────────
-router.get("/customers/:id", async (req, res): Promise<void> => {
-  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
-
+router.get("/customers/:id", apiKeyOrSession, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
 
