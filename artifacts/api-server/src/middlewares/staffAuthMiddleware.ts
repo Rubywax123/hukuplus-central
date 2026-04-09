@@ -45,3 +45,16 @@ export function requireSuperAdmin(req: Request, res: Response, next: NextFunctio
   }
   next();
 }
+
+// Allows Takundwa (and any future trusted app) to call protected endpoints
+// using the x-api-key header, falling back to a normal staff session.
+export function apiKeyOrSession(req: Request, res: Response, next: NextFunction) {
+  const apiKey = req.headers["x-api-key"];
+  if (apiKey && apiKey === process.env.TAKUNDWA_API_KEY) {
+    return next();
+  }
+  if (req.staffUser) {
+    return next();
+  }
+  return res.status(401).json({ error: "Unauthorized" });
+}
