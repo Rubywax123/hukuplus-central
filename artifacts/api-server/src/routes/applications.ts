@@ -5,6 +5,10 @@ import { sendEmail, loanApplicationEmail, drawdownRequestEmail } from "../lib/ma
 import { format, differenceInDays, parseISO } from "date-fns";
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const apiKey = req.headers["x-api-key"];
+  if (apiKey && apiKey === process.env.TAKUNDWA_API_KEY) {
+    return next();
+  }
   if (!(req.session as any)?.staffUser) {
     return res.status(401).json({ error: "Unauthorised" });
   }
