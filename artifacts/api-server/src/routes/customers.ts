@@ -131,6 +131,27 @@ router.get("/customers/:id", apiKeyOrSession, async (req, res): Promise<void> =>
   res.json({ customer, agreements });
 });
 
+// ── Create customer (manual insert) ──────────────────────────────────────────
+router.post("/customers", apiKeyOrSession, async (req, res): Promise<void> => {
+  const { fullName, phone, email, nationalId, address, notes } = req.body;
+  if (!fullName?.trim()) {
+    res.status(400).json({ error: "Full name is required" });
+    return;
+  }
+  const [created] = await db
+    .insert(customersTable)
+    .values({
+      fullName: fullName.trim(),
+      phone:      phone?.trim()      || null,
+      email:      email?.trim()      || null,
+      nationalId: nationalId?.trim() || null,
+      address:    address?.trim()    || null,
+      notes:      notes?.trim()      || null,
+    })
+    .returning();
+  res.status(201).json(created);
+});
+
 // ── Update customer ───────────────────────────────────────────────────────────
 router.put("/customers/:id", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }

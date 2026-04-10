@@ -1016,6 +1016,108 @@ function EnrichModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   );
 }
 
+// ── Create Customer Modal ────────────────────────────────────────────────────
+
+function CreateCustomerModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
+  const [form, setForm] = useState({ fullName: "", phone: "", email: "", nationalId: "", address: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function set(field: string, value: string) {
+    setForm(f => ({ ...f, [field]: value }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.fullName.trim()) { setError("Full name is required."); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/customers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Error ${res.status}`);
+      }
+      const created = await res.json();
+      onCreated(created.id);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = (label: string, key: keyof typeof form, placeholder: string, required = false) => (
+    <div className="space-y-1.5">
+      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        {label}{required && <span className="text-red-400 ml-0.5">*</span>}
+      </label>
+      <input
+        value={form[key]}
+        onChange={e => set(key, e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+      />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md bg-[#0f1117] border border-white/10 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div className="flex items-center gap-2.5">
+            <UserPlus className="w-5 h-5 text-primary" />
+            <h2 className="text-base font-semibold text-white">New Customer</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {field("Full Name", "fullName", "e.g. Tatenda Moyo", true)}
+          {field("Phone", "phone", "+263 77 123 4567")}
+          {field("Email", "email", "tatenda@example.com")}
+          {field("National ID", "nationalId", "63-123456A78")}
+          {field("Address", "address", "12 Borrowdale Rd, Harare")}
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes</label>
+            <textarea
+              value={form.notes}
+              onChange={e => set("notes", e.target.value)}
+              placeholder="Any additional notes…"
+              rows={2}
+              className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none"
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-muted-foreground hover:text-white hover:bg-white/5 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving} className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {saving ? "Saving…" : "Create Customer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Customers Page ─────────────────────────────────────────────────────
 
 export default function CustomersPage() {
@@ -1025,6 +1127,7 @@ export default function CustomersPage() {
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [enrichOpen, setEnrichOpen] = useState(false);
   const [backfillResult, setBackfillResult] = useState<{ enriched: number; total: number } | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
   const queryClient = useQueryClient();
 
@@ -1198,21 +1301,37 @@ export default function CustomersPage() {
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" /> No contact details</span>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <input
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          placeholder="Search by name, phone, national ID or email…"
-          className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-        />
-        {search && (
-          <button onClick={() => handleSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
+      {/* Search + New Customer */}
+      <div className="flex gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            placeholder="Search by name, phone, national ID or email…"
+            className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+          />
+          {search && (
+            <button onClick={() => handleSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 px-4 py-3 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors shrink-0"
+        >
+          <UserPlus className="w-4 h-4" />
+          New Customer
+        </button>
       </div>
+
+      {showCreate && (
+        <CreateCustomerModal
+          onClose={() => setShowCreate(false)}
+          onCreated={(id) => { setShowCreate(false); setSelectedId(id); queryClient.invalidateQueries({ queryKey: ["customers"] }); }}
+        />
+      )}
 
       {/* Table */}
       <div className="glass-panel rounded-2xl border border-white/5 overflow-hidden">
