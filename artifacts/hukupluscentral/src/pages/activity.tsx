@@ -2722,7 +2722,6 @@ function NewLeadModal({
               <input
                 type="text"
                 inputMode="numeric"
-                pattern="[0-9]*"
                 value={flockSize}
                 onChange={e => setFlockSize(e.target.value.replace(/[^0-9]/g, ""))}
                 placeholder="0"
