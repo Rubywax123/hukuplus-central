@@ -1179,6 +1179,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
           disbursementDate,
           bankAccountCode: bankCode,
           description: description || undefined,
+          storeName: [notification.retailer_name, notification.branch_name].filter(Boolean).join(" — ") || undefined,
         }),
       });
       const data = await r.json();
@@ -1634,6 +1635,7 @@ function PaymentModal({ notification, onClose, onDone }: {
           // will apply this to other outstanding invoices oldest-first, then post
           // any remainder as a Xero Overpayment (credit balance on account).
           creditAmount: unallocated > 0.01 ? Math.round(unallocated * 100) / 100 : 0,
+          storeName: [notification.retailer_name, notification.branch_name].filter(Boolean).join(" — ") || undefined,
         }),
       });
       const data = await r.json();

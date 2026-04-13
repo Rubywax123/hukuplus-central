@@ -80,6 +80,7 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
     disbursementDate,
     bankAccountCode,
     description,
+    storeName,
   } = req.body;
 
   if (!notificationId || !xeroContactId || !loanAmount || !bankAccountCode) {
@@ -99,7 +100,8 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
     return;
   }
 
-  const lineDescription = description || `Loan disbursement — ${customerName || "Customer"}`;
+  const storeLabel = storeName ? ` [${storeName}]` : "";
+  const lineDescription = description || `Loan disbursement — ${customerName || "Customer"}${storeLabel}`;
   const txDate = disbursementDate || new Date().toISOString().split("T")[0];
 
   const bankTxPayload = {
@@ -115,7 +117,7 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
       },
     ],
     BankAccount: { Code: bankAccountCode },
-    Reference: `Disbursement — ${customerName || ""}`,
+    Reference: `Disbursement — ${customerName || ""}${storeLabel}`,
   };
 
   const xeroRes = await fetch(

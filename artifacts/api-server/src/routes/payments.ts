@@ -275,6 +275,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     markLoanComplete,
     customerId,
     creditAmount,  // Any payment remainder after invoice allocations
+    storeName,
   } = req.body as {
     notificationId: number;
     xeroContactId: string;
@@ -284,6 +285,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     markLoanComplete?: boolean;
     customerId?: number | null;
     creditAmount?: number;
+    storeName?: string;
   };
 
   if (!allocations?.length || !bankAccountCode || !paymentDate) {
@@ -297,15 +299,18 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
   const errors: string[] = [];
   const applied: string[] = [];
 
+  const storeLabel = storeName ? ` [${storeName}]` : "";
+
   // Apply each allocation as a Xero payment
   for (const alloc of allocations) {
     if (!alloc.amount || alloc.amount <= 0) continue;
 
-    const payload = {
+    const payload: Record<string, any> = {
       Invoice: { InvoiceID: alloc.invoiceId },
       Account: { Code: bankAccountCode },
       Date: paymentDate,
       Amount: alloc.amount,
+      ...(storeLabel ? { Reference: storeLabel.trim().slice(1, -1) } : {}),
     };
 
     const r = await fetch("https://api.xero.com/api.xro/2.0/Payments", {
@@ -353,6 +358,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
               Account: { Code: bankAccountCode },
               Date: paymentDate,
               Amount: Math.round(apply * 100) / 100,
+              ...(storeName ? { Reference: storeName } : {}),
             }),
           });
           if (payRes.ok) {
@@ -398,7 +404,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
             BankAccount: { Code: bankAccountCode },
             LineAmountTypes: "Inclusive",
             LineItems: [{
-              Description: "Customer credit — overpayment",
+              Description: `Customer credit — overpayment${storeName ? ` [${storeName}]` : ""}`,
               UnitAmount: creditRemaining,
               AccountCode: accountCode,
             }],
