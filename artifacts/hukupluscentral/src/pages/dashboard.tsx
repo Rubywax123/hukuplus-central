@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -112,12 +112,31 @@ function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, color
 
 function ApplicationsDetailPanel({ type, title, onClose }: { type: "application" | "reapplication"; title: string; onClose: () => void }) {
   const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  const queryClient = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
   const { data, isLoading } = useQuery<ApplicationsDetail>({
     queryKey: ["applications-detail", type],
     queryFn: () => fetch(`${BASE}/api/dashboard/applications-detail?type=${type}`, { credentials: "include" }).then(r => r.json()),
   });
 
   const duplicateSet = new Set((data?.duplicateCustomers ?? []).map(n => n.trim().toLowerCase()));
+
+  async function handleDelete(jobId: string) {
+    setDeleting(jobId);
+    try {
+      await fetch(`${BASE}/api/dashboard/applications/${encodeURIComponent(jobId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      queryClient.invalidateQueries({ queryKey: ["applications-detail", type] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/monthly-metrics"] });
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -171,13 +190,16 @@ function ApplicationsDetailPanel({ type, title, onClose }: { type: "application"
             ) : (
               data?.rows.map((row, i) => {
                 const isDupe = duplicateSet.has((row.customer_name ?? "").trim().toLowerCase());
+                const jobId = row.formitize_job_id;
+                const isConfirming = confirmDelete === jobId;
+                const isDeleting = deleting === jobId;
                 return (
                   <div
-                    key={row.formitize_job_id ?? i}
+                    key={jobId ?? i}
                     className={`p-4 rounded-xl border ${isDupe ? "bg-amber-500/5 border-amber-500/20" : "bg-white/3 border-white/8"}`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold text-white truncate">{row.customer_name ?? "Unknown"}</p>
                           {isDupe && (
@@ -200,9 +222,37 @@ function ApplicationsDetailPanel({ type, title, onClose }: { type: "application"
                           )}
                         </div>
                       </div>
-                      <p className="text-[11px] text-muted-foreground/60 shrink-0 mt-0.5">
-                        {format(new Date(row.created_at), "d MMM, HH:mm")}
-                      </p>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <p className="text-[11px] text-muted-foreground/60">
+                          {format(new Date(row.created_at), "d MMM, HH:mm")}
+                        </p>
+                        {jobId && !isConfirming && (
+                          <button
+                            onClick={() => setConfirmDelete(jobId)}
+                            className="p-1 rounded hover:bg-red-500/10 text-muted-foreground/30 hover:text-red-400 transition-colors"
+                            title="Delete submission"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {isConfirming && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setConfirmDelete(null)}
+                              className="text-[10px] px-2 py-1 rounded border border-white/10 text-muted-foreground hover:text-white transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => jobId && handleDelete(jobId)}
+                              disabled={isDeleting}
+                              className="text-[10px] px-2 py-1 rounded bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 disabled:opacity-50 transition-colors"
+                            >
+                              {isDeleting ? "Deleting…" : "Confirm delete"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {row.form_name && (
                       <p className="text-[10px] text-muted-foreground/40 mt-1.5 truncate">{row.form_name}</p>

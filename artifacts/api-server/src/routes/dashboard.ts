@@ -264,6 +264,38 @@ router.get("/dashboard/applications-detail", async (req, res): Promise<void> => 
   }
 });
 
+// ── Delete a notification (and its unprocessed agreement if present) ──────────
+router.delete("/dashboard/applications/:jobId", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const jobId = req.params.jobId;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Remove the notification
+    const { rowCount: notifDeleted } = await client.query(
+      `DELETE FROM formitize_notifications WHERE formitize_job_id = $1`, [jobId]
+    );
+
+    // Remove the linked agreement only if it is still in raw application status
+    // (never touch anything that has progressed to pending/signed/disbursed)
+    const { rowCount: agreeDeleted } = await client.query(
+      `DELETE FROM agreements
+       WHERE formitize_job_id = $1
+         AND status IN ('application', 'reapplication')`, [jobId]
+    );
+
+    await client.query("COMMIT");
+    res.json({ deleted: true, notifDeleted, agreeDeleted });
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ── Full monthly history: stored snapshots + live current month ───────────────
 router.get("/dashboard/monthly-history", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
