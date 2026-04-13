@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2 } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLocation } from "wouter";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,11 @@ interface ApplicationsDetail {
   duplicateCustomers: string[];
 }
 
+interface LeadsMonthlyStats {
+  thisMonth: { leads: number; conversions: number };
+  lastMonth: { leads: number; conversions: number };
+}
+
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 
 function useMonthlyMetrics() {
@@ -61,6 +67,19 @@ function useMonthlyHistory() {
     queryKey: ["/api/dashboard/monthly-history"],
     queryFn: () => customFetch<MonthSnapshot[]>("/api/dashboard/monthly-history"),
     refetchInterval: 10 * 60 * 1000,
+  });
+}
+
+function useLeadsMonthlyStats() {
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  return useQuery<LeadsMonthlyStats>({
+    queryKey: ["leads-monthly-stats"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/monthly-stats`, { credentials: "include" });
+      if (!r.ok) return { thisMonth: { leads: 0, conversions: 0 }, lastMonth: { leads: 0, conversions: 0 } };
+      return r.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
   });
 }
 
@@ -103,6 +122,64 @@ function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, color
         {onClick && (
           <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view submissions</p>
         )}
+      </GlassCard>
+    </motion.div>
+  );
+}
+
+// ── Leads Pipeline Card ───────────────────────────────────────────────────────
+
+function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefined; delay: number }) {
+  const [, navigate] = useLocation();
+  const leads = stats?.thisMonth.leads ?? 0;
+  const conversions = stats?.thisMonth.conversions ?? 0;
+  const prevLeads = stats?.lastMonth.leads ?? 0;
+  const prevConversions = stats?.lastMonth.conversions ?? 0;
+  const rate = leads > 0 ? Math.round((conversions / leads) * 100) : 0;
+  const prevRate = prevLeads > 0 ? Math.round((prevConversions / prevLeads) * 100) : 0;
+  const d = delta(leads, prevLeads);
+  const rateUp = rate >= prevRate;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
+      <GlassCard
+        className="p-6 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors"
+        onClick={() => navigate("/activity")}
+      >
+        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity bg-violet-400" />
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leads Pipeline</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Field sales this month</p>
+          </div>
+          <div className="p-2 rounded-lg bg-white/5 text-violet-400">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+        </div>
+
+        <h3 className="text-5xl font-display font-bold text-white mt-2">{leads}</h3>
+
+        {/* Conversions row */}
+        <div className="flex items-center gap-2 mt-3">
+          <span className="text-sm font-semibold text-emerald-400">{conversions} converted</span>
+          {leads > 0 && (
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${rateUp ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>
+              {rate}%
+            </span>
+          )}
+          {prevLeads > 0 && (
+            <span className="text-[10px] text-muted-foreground/50 ml-auto">
+              last: {prevLeads} / {prevConversions} ({prevRate}%)
+            </span>
+          )}
+        </div>
+
+        {d && (
+          <p className={`text-xs mt-2 font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
+            {d.label} leads
+          </p>
+        )}
+        <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline</p>
       </GlassCard>
     </motion.div>
   );
@@ -403,6 +480,7 @@ export default function DashboardPage() {
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
   const { data: monthly, isLoading: monthlyLoading } = useMonthlyMetrics();
   const { data: history, isLoading: historyLoading } = useMonthlyHistory();
+  const { data: leadsStats } = useLeadsMonthlyStats();
   const [drillDown, setDrillDown] = useState<"application" | "reapplication" | null>(null);
 
   if (statsLoading || activityLoading || monthlyLoading) {
@@ -434,7 +512,7 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
         <MonthlyMetricCard
           delay={0.08} title="New Applications" subtitle="First-time customer applications"
           value={monthly?.newApplications.current ?? 0} previous={monthly?.newApplications.previous ?? 0}
@@ -452,6 +530,7 @@ export default function DashboardPage() {
           value={monthly?.agreementsIssued.current ?? 0} previous={monthly?.agreementsIssued.previous ?? 0}
           icon={FileCheck} colorClass="text-emerald-400" bgClass="bg-emerald-400"
         />
+        <LeadsPipelineCard stats={leadsStats} delay={0.26} />
       </div>
 
       {/* ── Historical comparison ── */}

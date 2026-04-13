@@ -107,6 +107,35 @@ router.get("/leads/counts", requireStaffAuth, async (req, res): Promise<void> =>
   }
 });
 
+// ─── GET /api/leads/monthly-stats — current + previous month counts ───────────
+
+router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<void> => {
+  const client = await pool.connect();
+  try {
+    const r = await client.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
+          AS this_month_leads,
+        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
+          AS last_month_leads,
+        COUNT(*) FILTER (WHERE status = 'converted'
+          AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
+          AS this_month_conversions,
+        COUNT(*) FILTER (WHERE status = 'converted'
+          AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
+          AS last_month_conversions
+      FROM leads
+    `);
+    const row = r.rows[0];
+    res.json({
+      thisMonth:  { leads: row.this_month_leads,  conversions: row.this_month_conversions },
+      lastMonth:  { leads: row.last_month_leads,  conversions: row.last_month_conversions },
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── GET /api/leads/feed — per-user feed (undismissed unconverted leads) ──────
 
 router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
