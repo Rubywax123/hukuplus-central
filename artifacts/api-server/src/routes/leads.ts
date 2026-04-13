@@ -28,7 +28,7 @@ router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
       `INSERT INTO leads
          (customer_name, phone, retailer_id, branch_id, retailer_name, branch_name, flock_size, notes, submitted_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *, (flock_size * $10) AS estimated_value`,
+       RETURNING *, (flock_size::numeric * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value`,
       [
         customerName.trim(),
         phone.trim(),
@@ -39,7 +39,6 @@ router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
         flockSizeNum,
         notes?.trim() ?? null,
         submittedBy,
-        FLOCK_VALUE_PER_HEAD,
       ]
     );
     res.status(201).json(result.rows[0]);
