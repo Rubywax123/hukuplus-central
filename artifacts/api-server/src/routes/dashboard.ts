@@ -216,6 +216,54 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
   }
 });
 
+// ── Applications detail drill-down ────────────────────────────────────────────
+router.get("/dashboard/applications-detail", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const type = req.query.type as string; // "application" | "reapplication"
+  if (!["application", "reapplication"].includes(type)) {
+    res.status(400).json({ error: "Invalid type" }); return;
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(`
+      SELECT
+        formitize_job_id,
+        form_name,
+        customer_name,
+        customer_phone,
+        customer_id,
+        branch_name,
+        retailer_name,
+        is_duplicate_warning,
+        created_at
+      FROM formitize_notifications
+      WHERE task_type = $1
+        AND created_at >= DATE_TRUNC('month', NOW())
+      ORDER BY customer_name ASC, created_at ASC
+    `, [type]);
+
+    // Group by customer name so the UI can highlight repeat submitters
+    const byCustomer: Record<string, typeof rows> = {};
+    for (const row of rows) {
+      const key = (row.customer_name ?? "Unknown").trim().toLowerCase();
+      if (!byCustomer[key]) byCustomer[key] = [];
+      byCustomer[key].push(row);
+    }
+
+    res.json({
+      total: rows.length,
+      rows,
+      duplicateCustomers: Object.values(byCustomer)
+        .filter(g => g.length > 1)
+        .map(g => (g[0].customer_name ?? "Unknown").trim()),
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // ── Full monthly history: stored snapshots + live current month ───────────────
 router.get("/dashboard/monthly-history", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {

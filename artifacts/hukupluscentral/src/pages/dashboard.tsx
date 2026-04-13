@@ -1,14 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,24 @@ interface MonthSnapshot {
   reApplications: number;
   agreementsIssued: number;
   isLive: boolean;
+}
+
+interface ApplicationRow {
+  formitize_job_id: string | null;
+  form_name: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  customer_id: number | null;
+  branch_name: string | null;
+  retailer_name: string | null;
+  is_duplicate_warning: boolean;
+  created_at: string;
+}
+
+interface ApplicationsDetail {
+  total: number;
+  rows: ApplicationRow[];
+  duplicateCustomers: string[];
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
@@ -58,11 +76,14 @@ function delta(current: number, previous: number) {
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
-function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, colorClass, bgClass, delay }: any) {
+function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, colorClass, bgClass, delay, onClick }: any) {
   const d = delta(value, previous);
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
-      <GlassCard className="p-6 relative overflow-hidden group">
+      <GlassCard
+        className={`p-6 relative overflow-hidden group ${onClick ? "cursor-pointer hover:border-white/20 transition-colors" : ""}`}
+        onClick={onClick}
+      >
         <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity ${bgClass}`} />
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -79,8 +100,121 @@ function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, color
             {d.label}
           </p>
         )}
+        {onClick && (
+          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view submissions</p>
+        )}
       </GlassCard>
     </motion.div>
+  );
+}
+
+// ── Applications Detail Panel ─────────────────────────────────────────────────
+
+function ApplicationsDetailPanel({ type, title, onClose }: { type: "application" | "reapplication"; title: string; onClose: () => void }) {
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  const { data, isLoading } = useQuery<ApplicationsDetail>({
+    queryKey: ["applications-detail", type],
+    queryFn: () => fetch(`${BASE}/api/dashboard/applications-detail?type=${type}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const duplicateSet = new Set((data?.duplicateCustomers ?? []).map(n => n.trim().toLowerCase()));
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-end p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ x: 80, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: 80, opacity: 0 }}
+          transition={{ type: "spring", damping: 28, stiffness: 300 }}
+          className="w-full max-w-lg h-[calc(100vh-2rem)] bg-[#0f1117] border border-white/10 rounded-2xl shadow-2xl flex flex-col"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
+            <div>
+              <h2 className="text-base font-semibold text-white">{title}</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">This month · {data?.total ?? "—"} submissions</p>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Duplicate warning banner */}
+          {(data?.duplicateCustomers.length ?? 0) > 0 && (
+            <div className="mx-4 mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 shrink-0">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-amber-400">Possible resubmissions detected</p>
+                <p className="text-xs text-amber-400/70 mt-0.5">{data!.duplicateCustomers.join(", ")}</p>
+              </div>
+            </div>
+          )}
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+            {isLoading ? (
+              [...Array(6)].map((_, i) => (
+                <div key={i} className="h-16 rounded-xl bg-white/5 animate-pulse" />
+              ))
+            ) : data?.rows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
+                No submissions this month yet.
+              </div>
+            ) : (
+              data?.rows.map((row, i) => {
+                const isDupe = duplicateSet.has((row.customer_name ?? "").trim().toLowerCase());
+                return (
+                  <div
+                    key={row.formitize_job_id ?? i}
+                    className={`p-4 rounded-xl border ${isDupe ? "bg-amber-500/5 border-amber-500/20" : "bg-white/3 border-white/8"}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-white truncate">{row.customer_name ?? "Unknown"}</p>
+                          {isDupe && (
+                            <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                              MULTI
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                          {row.retailer_name && (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <Building2 className="w-3 h-3" />{row.retailer_name}
+                              {row.branch_name ? ` · ${row.branch_name}` : ""}
+                            </span>
+                          )}
+                          {row.customer_phone && (
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <Phone className="w-3 h-3" />{row.customer_phone}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground/60 shrink-0 mt-0.5">
+                        {format(new Date(row.created_at), "d MMM, HH:mm")}
+                      </p>
+                    </div>
+                    {row.form_name && (
+                      <p className="text-[10px] text-muted-foreground/40 mt-1.5 truncate">{row.form_name}</p>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -219,6 +353,7 @@ export default function DashboardPage() {
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
   const { data: monthly, isLoading: monthlyLoading } = useMonthlyMetrics();
   const { data: history, isLoading: historyLoading } = useMonthlyHistory();
+  const [drillDown, setDrillDown] = useState<"application" | "reapplication" | null>(null);
 
   if (statsLoading || activityLoading || monthlyLoading) {
     return <div className="h-96 flex items-center justify-center animate-pulse text-primary">Loading dashboard data...</div>;
@@ -233,6 +368,14 @@ export default function DashboardPage() {
         description="Real-time performance across all loan products and retailers."
       />
 
+      {drillDown && (
+        <ApplicationsDetailPanel
+          type={drillDown}
+          title={drillDown === "application" ? "New Applications — This Month" : "Re-Applications — This Month"}
+          onClose={() => setDrillDown(null)}
+        />
+      )}
+
       {/* ── Monthly this-month summary ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mb-4">
         <div className="flex items-center gap-2">
@@ -246,11 +389,13 @@ export default function DashboardPage() {
           delay={0.08} title="New Applications" subtitle="First-time customer applications"
           value={monthly?.newApplications.current ?? 0} previous={monthly?.newApplications.previous ?? 0}
           icon={UserPlus} colorClass="text-sky-400" bgClass="bg-sky-400"
+          onClick={() => setDrillDown("application")}
         />
         <MonthlyMetricCard
           delay={0.14} title="Re-Applications" subtitle="Returning customer applications"
           value={monthly?.reApplications.current ?? 0} previous={monthly?.reApplications.previous ?? 0}
           icon={RefreshCw} colorClass="text-amber-400" bgClass="bg-amber-400"
+          onClick={() => setDrillDown("reapplication")}
         />
         <MonthlyMetricCard
           delay={0.20} title="Agreements Issued" subtitle="Loan agreements generated this month"
