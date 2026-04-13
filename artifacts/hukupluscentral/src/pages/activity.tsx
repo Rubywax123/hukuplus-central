@@ -2628,14 +2628,14 @@ function NewLeadModal({
       if (branch) { params.set("branchId", branch.value); params.set("branchName", branch.label); }
       params.set("flockSize", String(Math.round(flockNum)));
       if (notes.trim()) params.set("notes", notes.trim());
-      const r = await fetch(`${BASE}/api/leads`, {
+      const r = await fetch(`${window.location.origin}/api/leads`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        credentials: "include",
+        credentials: "same-origin",
         body: params.toString(),
       });
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? "Failed"); }
-      return r.json();
+      if (!r.ok) { const d = await r.json().catch(() => ({ error: "Failed" })); throw new Error(d.error ?? "Failed"); }
+      return r.json().catch(() => ({}));
     },
     onSuccess: () => { onCreated(); onClose(); },
     onError: (e: any) => setError(e?.message || "Submission failed. Please try again."),
