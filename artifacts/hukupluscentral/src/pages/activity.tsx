@@ -8,7 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
-  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard,
+  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -3367,6 +3367,24 @@ function LeadsTab() {
                         <button onClick={() => setConvertingLead(lead)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
                           <CheckCircle2 className="w-3.5 h-3.5" /> File
+                        </button>
+                      )}
+                      {confirmDeleteId === lead.id ? (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <button onClick={() => setConfirmDeleteId(null)}
+                            className="px-2 py-1 text-[10px] text-white/40 hover:text-white/70 transition-colors">
+                            Cancel
+                          </button>
+                          <button onClick={() => deleteMutation.mutate(lead.id)} disabled={deleteMutation.isPending}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-red-500/20 border border-red-500/40 text-red-300 hover:bg-red-500/30 transition-all disabled:opacity-40">
+                            {deleteMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                            Confirm
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteId(lead.id)}
+                          className="p-1.5 rounded-lg text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all mt-0.5">
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
