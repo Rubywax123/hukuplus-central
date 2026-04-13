@@ -2861,12 +2861,16 @@ function ConvertLeadModal({ lead, onClose, onDone }: { lead: Lead; onClose: () =
 
 function LeadsTab() {
   const qc = useQueryClient();
+  const [subTab, setSubTab] = useState<"feed" | "pipeline">("feed");
+  const [showNew, setShowNew] = useState(false);
+  const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  // ── Pipeline state ───────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter] = useState<"unconverted" | "new" | "acknowledged" | "converted" | "all">("unconverted");
   const [retailerFilter, setRetailerFilter] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
-  const [sortAsc, setSortAsc] = useState(false); // false = newest first
-  const [showNew, setShowNew] = useState(false);
-  const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
+  const [sortAsc, setSortAsc] = useState(false);
 
   const { data: rawLeads = [], isLoading, refetch } = useQuery<Lead[]>({
     queryKey: ["leads", statusFilter],

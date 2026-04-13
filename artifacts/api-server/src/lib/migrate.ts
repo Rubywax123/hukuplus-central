@@ -963,6 +963,17 @@ export async function runMigrations() {
         )
     `);
 
+    // ── Lead per-user dismissals (feed read receipts) ────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lead_dismissals (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        staff_email TEXT NOT NULL,
+        dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(lead_id, staff_email)
+      );
+    `);
+
     // ── Leads (field sales prospect recording) ──────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS leads (

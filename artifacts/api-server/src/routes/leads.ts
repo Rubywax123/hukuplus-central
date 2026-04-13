@@ -80,13 +80,71 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
   }
 });
 
-// ─── GET /api/leads/counts — unacknowledged count (for badge) ─────────────────
+// ─── GET /api/leads/counts — global new count (for badge) ─────────────────────
 
-router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> => {
+router.get("/leads/counts", requireStaffAuth, async (req, res): Promise<void> => {
+  const email = (req as any).user?.email ?? (req as any).user?.name ?? "";
   const client = await pool.connect();
   try {
-    const r = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new'`);
-    res.json({ newCount: parseInt(r.rows[0].new_count, 10) });
+    // Per-user feed count: unconverted leads not dismissed by this user
+    const feedR = await client.query(
+      `SELECT COUNT(*) AS feed_count
+       FROM leads l
+       WHERE l.status IN ('new', 'acknowledged')
+         AND NOT EXISTS (
+           SELECT 1 FROM lead_dismissals d
+           WHERE d.lead_id = l.id AND d.staff_email = $1
+         )`,
+      [email]
+    );
+    const globalR = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new'`);
+    res.json({
+      newCount: parseInt(globalR.rows[0].new_count, 10),
+      feedCount: parseInt(feedR.rows[0].feed_count, 10),
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// ─── GET /api/leads/feed — per-user feed (undismissed unconverted leads) ──────
+
+router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
+  const email = (req as any).user?.email ?? (req as any).user?.name ?? "";
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      `SELECT l.*,
+              (l.flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value
+       FROM leads l
+       WHERE l.status IN ('new', 'acknowledged')
+         AND NOT EXISTS (
+           SELECT 1 FROM lead_dismissals d
+           WHERE d.lead_id = l.id AND d.staff_email = $1
+         )
+       ORDER BY l.created_at DESC`,
+      [email]
+    );
+    res.json(result.rows);
+  } finally {
+    client.release();
+  }
+});
+
+// ─── PUT /api/leads/:id/dismiss — mark done in MY feed (per-user) ─────────────
+
+router.put("/leads/:id/dismiss", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  const email = (req as any).user?.email ?? (req as any).user?.name ?? "";
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO lead_dismissals (lead_id, staff_email)
+       VALUES ($1, $2)
+       ON CONFLICT (lead_id, staff_email) DO NOTHING`,
+      [id, email]
+    );
+    res.json({ ok: true });
   } finally {
     client.release();
   }
