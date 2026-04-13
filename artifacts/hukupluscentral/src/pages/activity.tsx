@@ -2648,14 +2648,16 @@ function NewLeadModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <motion.div
         initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="w-full sm:max-w-lg bg-[#1a1a2e] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
+        className="w-full sm:max-w-lg bg-[#1a1a2e] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{ maxHeight: "calc(100dvh - 72px)" }}>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        {/* Header — fixed, never scrolls */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
           <div>
             <h2 className="text-base font-semibold text-foreground">New Lead</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Record a potential customer from the field</p>
@@ -2664,7 +2666,7 @@ function NewLeadModal({
         </div>
 
         {/* Scrollable body */}
-        <div className="px-5 py-4 space-y-4 overflow-y-auto max-h-[80vh]">
+        <div className="flex-1 px-5 py-4 space-y-4 overflow-y-auto">
 
           {/* Customer name */}
           <div>
@@ -2684,6 +2686,7 @@ function NewLeadModal({
                 onChange={e => setPhoneSuffix(e.target.value.replace(/^\+?263/, ""))}
                 placeholder="77 123 4567"
                 inputMode="tel"
+                type="text"
                 className="flex-1 px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
             </div>
             {phoneSuffix && (
@@ -2717,12 +2720,13 @@ function NewLeadModal({
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Flock Size (birds)</label>
               <input
-                type="number" min="0"
-                value={flockSize} onChange={e => setFlockSize(e.target.value)}
-                placeholder="0"
+                type="text"
                 inputMode="numeric"
-                onWheel={e => (e.target as HTMLInputElement).blur()}
-                className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                pattern="[0-9]*"
+                value={flockSize}
+                onChange={e => setFlockSize(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="0"
+                className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
             </div>
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Est. Value @ $2.06/bird</label>
@@ -2739,10 +2743,12 @@ function NewLeadModal({
               placeholder="Any additional context about this lead…"
               className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30 resize-none" />
           </div>
+        </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-
-          <div className="flex justify-end gap-2 pb-2">
+        {/* Footer — always visible, never scrolls away */}
+        <div className="px-5 py-4 border-t border-white/10 shrink-0">
+          {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+          <div className="flex justify-end gap-2">
             <button onClick={onClose} className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
             <button onClick={handleSubmit} disabled={createMutation.isPending}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 transition-all disabled:opacity-40">
