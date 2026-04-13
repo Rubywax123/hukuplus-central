@@ -16,7 +16,8 @@ router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
     res.status(400).json({ error: "customerName and phone are required" });
     return;
   }
-  if (typeof flockSize !== "number" || flockSize < 0) {
+  const flockSizeNum = Number(flockSize ?? 0);
+  if (isNaN(flockSizeNum) || flockSizeNum < 0) {
     res.status(400).json({ error: "flockSize must be a non-negative number" });
     return;
   }
@@ -31,11 +32,11 @@ router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
       [
         customerName.trim(),
         phone.trim(),
-        retailerId ?? null,
-        branchId ?? null,
+        retailerId ? Number(retailerId) : null,
+        branchId ? Number(branchId) : null,
         retailerName ?? null,
         branchName ?? null,
-        flockSize,
+        flockSizeNum,
         notes?.trim() ?? null,
         submittedBy,
         FLOCK_VALUE_PER_HEAD,
