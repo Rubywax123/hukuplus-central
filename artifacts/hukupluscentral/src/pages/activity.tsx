@@ -2474,6 +2474,113 @@ interface Lead {
   created_at: string;
 }
 
+// ── Searchable combobox used inside NewLeadModal ─────────────────────────────
+function SearchableSelect({
+  label,
+  placeholder,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  placeholder: string;
+  options: Array<{ value: string; label: string }>;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const selectedLabel = options.find(o => o.value === value)?.label ?? "";
+
+  const filtered = query.trim()
+    ? options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  // Close when clicking outside
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleSelect = (v: string) => {
+    onChange(v);
+    setOpen(false);
+    setQuery("");
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">{label}</label>
+      <button
+        type="button"
+        onClick={() => { if (!disabled) { setOpen(o => !o); setQuery(""); } }}
+        disabled={disabled}
+        className={cn(
+          "w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm text-left transition-colors",
+          "bg-white/5 border-white/15 focus:outline-none",
+          disabled ? "opacity-40 cursor-not-allowed" : "hover:border-white/25 cursor-pointer",
+          open && "border-amber-500/40 ring-2 ring-amber-500/20"
+        )}
+      >
+        <span className={value ? "text-white" : "text-white/30"}>{value ? selectedLabel : placeholder}</span>
+        <ChevronDown className={cn("w-4 h-4 text-white/40 shrink-0 transition-transform", open && "rotate-180")} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute z-50 mt-1 w-full bg-[#0f1624] border border-white/15 rounded-xl shadow-xl overflow-hidden"
+          >
+            <div className="p-2 border-b border-white/10">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10">
+                <Search className="w-3.5 h-3.5 text-white/40 shrink-0" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder={`Type to search ${options.length} options…`}
+                  className="flex-1 bg-transparent text-sm text-white placeholder:text-white/30 focus:outline-none"
+                />
+                {query && <button onClick={() => setQuery("")}><X className="w-3.5 h-3.5 text-white/40 hover:text-white/70" /></button>}
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="py-4 text-center text-xs text-white/30">No matches for "{query}"</p>
+              ) : (
+                filtered.map(o => (
+                  <button key={o.value} type="button" onClick={() => handleSelect(o.value)}
+                    className={cn(
+                      "w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2",
+                      o.value === value
+                        ? "bg-amber-500/15 text-amber-200"
+                        : "text-white/80 hover:bg-white/5"
+                    )}>
+                    {o.value === value && <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    <span>{o.label}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function NewLeadModal({
   retailers,
   onClose,
@@ -2491,26 +2598,36 @@ function NewLeadModal({
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
 
-  const retailerOptions = Array.from(new Map(retailers.map(r => [r.id, r.name])).entries());
-  const branches = retailers.filter(r => String(r.id) === retailerId);
+  // De-duplicate retailers by id
+  const retailerOptions = Array.from(
+    new Map(retailers.map(r => [r.id, r.name])).entries()
+  ).map(([id, name]) => ({ value: String(id), label: name }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  // Branches filtered to selected retailer
+  const branchOptions = retailers
+    .filter(r => String(r.id) === retailerId)
+    .map(b => ({ value: String(b.branch_id), label: b.branch_name }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
   const flockNum = parseFloat(flockSize) || 0;
   const estimatedValue = flockNum * FLOCK_VALUE;
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const retailer = retailerOptions.find(([id]) => String(id) === retailerId);
-      const branch = branches.find(b => String(b.branch_id) === branchId);
+      const retailer = retailerOptions.find(o => o.value === retailerId);
+      const branch = branchOptions.find(o => o.value === branchId);
       const r = await fetch(`${BASE}/api/leads`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           customerName: customerName.trim(),
-          phone: "+263" + phoneSuffix.replace(/^\+?2?6?3?/, "").trim(),
-          retailerId: retailer ? Number(retailer[0]) : null,
-          branchId: branch ? branch.branch_id : null,
-          retailerName: retailer ? retailer[1] : null,
-          branchName: branch ? branch.branch_name : null,
+          phone: "+263" + phoneSuffix.replace(/^\+?2?6?3?/, "").replace(/\s/g, "").trim(),
+          retailerId: retailer ? Number(retailer.value) : null,
+          branchId: branch ? Number(branch.value) : null,
+          retailerName: retailer?.label ?? null,
+          branchName: branch?.label ?? null,
           flockSize: Math.round(flockNum),
           notes: notes.trim() || null,
         }),
@@ -2530,10 +2647,15 @@ function NewLeadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
-        className="w-full max-w-lg bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <motion.div
+        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+        transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        className="w-full sm:max-w-lg bg-[#1a1a2e] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div>
             <h2 className="text-base font-semibold text-foreground">New Lead</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Record a potential customer from the field</p>
@@ -2541,59 +2663,70 @@ function NewLeadModal({
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="p-6 space-y-4">
+        {/* Scrollable body */}
+        <div className="px-5 py-4 space-y-4 overflow-y-auto max-h-[80vh]">
+
           {/* Customer name */}
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Customer Name *</label>
             <input value={customerName} onChange={e => setCustomerName(e.target.value)}
               placeholder="e.g. John Makucha"
-              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
+              className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
           </div>
 
           {/* Phone with +263 prefix */}
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Phone Number *</label>
             <div className="flex items-center gap-2">
-              <span className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm font-medium shrink-0">+263</span>
-              <input value={phoneSuffix} onChange={e => setPhoneSuffix(e.target.value.replace(/^\+263/, ""))}
+              <span className="px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm font-medium shrink-0">+263</span>
+              <input
+                value={phoneSuffix}
+                onChange={e => setPhoneSuffix(e.target.value.replace(/^\+?263/, ""))}
                 placeholder="77 123 4567"
-                className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
+                inputMode="tel"
+                className="flex-1 px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
             </div>
-            {phoneSuffix && <p className="text-[11px] text-white/30 mt-1">Full number: +263{phoneSuffix.replace(/^\+?263/, "")}</p>}
+            {phoneSuffix && (
+              <p className="text-[11px] text-white/30 mt-1">
+                Full: +263{phoneSuffix.replace(/^\+?263/, "").replace(/\s/g, "")}
+              </p>
+            )}
           </div>
 
-          {/* Retailer + Branch */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Retailer</label>
-              <select value={retailerId} onChange={e => { setRetailerId(e.target.value); setBranchId(""); }}
-                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40">
-                <option value="">— Select —</option>
-                {retailerOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Store / Branch</label>
-              <select value={branchId} onChange={e => setBranchId(e.target.value)} disabled={!retailerId}
-                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 disabled:opacity-50">
-                <option value="">— Select —</option>
-                {branches.map(b => <option key={b.branch_id} value={String(b.branch_id)}>{b.branch_name}</option>)}
-              </select>
-            </div>
-          </div>
+          {/* Retailer — searchable */}
+          <SearchableSelect
+            label="Retailer"
+            placeholder="Type to search retailer…"
+            options={retailerOptions}
+            value={retailerId}
+            onChange={v => { setRetailerId(v); setBranchId(""); }}
+          />
+
+          {/* Store / Branch — searchable, dependent on retailer */}
+          <SearchableSelect
+            label="Store / Branch"
+            placeholder={retailerId ? "Type to search store…" : "Select a retailer first"}
+            options={branchOptions}
+            value={branchId}
+            onChange={setBranchId}
+            disabled={!retailerId || branchOptions.length === 0}
+          />
 
           {/* Flock size + calculated value */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Flock Size (birds)</label>
-              <input type="number" min="0" value={flockSize} onChange={e => setFlockSize(e.target.value)}
+              <input
+                type="number" min="0"
+                value={flockSize} onChange={e => setFlockSize(e.target.value)}
                 placeholder="0"
+                inputMode="numeric"
                 onWheel={e => (e.target as HTMLInputElement).blur()}
-                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
             </div>
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Est. Value @ $2.06/bird</label>
-              <div className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-semibold">
+              <div className="px-3 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-semibold h-[42px] flex items-center">
                 {estimatedValue > 0 ? `$${estimatedValue.toFixed(2)}` : "—"}
               </div>
             </div>
@@ -2604,15 +2737,15 @@ function NewLeadModal({
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Notes (optional)</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
               placeholder="Any additional context about this lead…"
-              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30 resize-none" />
+              className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30 resize-none" />
           </div>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
-          <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+          <div className="flex justify-end gap-2 pb-2">
+            <button onClick={onClose} className="px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
             <button onClick={handleSubmit} disabled={createMutation.isPending}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 transition-all disabled:opacity-40">
               {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
               Submit Lead
             </button>
@@ -2914,7 +3047,7 @@ interface TabDef {
   badgeKey?: string;
 }
 
-const ADMIN_TABS: Tab[] = ["formitize", "loans", "drawdowns", "messages", "leads"];
+const ADMIN_TABS: Tab[] = ["formitize", "loans", "drawdowns", "messages"];
 
 export default function ActivityPage() {
   const { user } = useStaffAuth();
@@ -2968,7 +3101,6 @@ export default function ActivityPage() {
       if (!r.ok) return { newCount: 0 };
       return r.json();
     },
-    enabled: isAdmin,
     refetchInterval: 30_000,
   });
 
