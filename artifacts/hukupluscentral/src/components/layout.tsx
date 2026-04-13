@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, ArrowRightLeft } from "lucide-react";
+import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, ArrowRightLeft, UserPlus } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -295,6 +296,30 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
   });
   const pendingDrawdowns = drawdownPending?.count ?? 0;
 
+  const { data: leadsCount } = useQuery<{ newCount: number; feedCount: number }>({
+    queryKey: ["leads-count"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/counts`, { credentials: "include" });
+      if (!r.ok) return { newCount: 0, feedCount: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+  const leadsFeedCount = leadsCount?.feedCount ?? 0;
+
+  // Combined activity badge: formitize + drawdowns for admins, leads feed for everyone
+  const activityBadge = unreadCount + pendingDrawdowns + leadsFeedCount;
+
+  // Mobile bottom nav items (most essential for field use)
+  const mobileNavItems = [
+    { path: "/",           label: "Home",      Icon: LayoutDashboard },
+    { path: "/customers",  label: "Customers", Icon: ContactRound },
+    { path: "/activity",   label: "Activity",  Icon: Activity,   badge: activityBadge },
+    { path: "/agreements", label: "Kiosk",     Icon: Monitor },
+    { path: "/loan-apps",  label: "Loan Apps", Icon: AppWindow },
+  ];
+
   return (
     <div className="min-h-screen bg-background flex">
       <aside className="w-72 hidden lg:flex flex-col border-r border-white/5 bg-card/30 backdrop-blur-2xl">
@@ -327,7 +352,7 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 px-4 space-y-1">
           {navItems.map((item) => {
             const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
-            const badgeCount = item.badge === "activity" ? unreadCount + pendingDrawdowns : 0;
+            const badgeCount = item.badge === "activity" ? activityBadge : 0;
             return (
               <Link key={item.path} href={item.path} className="block">
                 <div className={`
@@ -394,13 +419,50 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-10 relative">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-10 pb-24 lg:pb-10 relative">
           <div className={`absolute top-0 left-1/4 w-96 h-96 blur-[120px] rounded-full pointer-events-none opacity-20 ${activeAppConfig.dot} transition-all duration-700`} />
           <div className="absolute bottom-1/4 right-0 w-96 h-96 bg-accent/10 blur-[120px] rounded-full pointer-events-none" />
           <div className="relative z-10 max-w-7xl mx-auto">
             {children}
           </div>
         </div>
+
+        {/* ── Mobile bottom navigation bar ──────────────────────────────────── */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-card/90 backdrop-blur-xl border-t border-white/8 safe-area-inset-bottom">
+          <div className="flex items-stretch" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+            {mobileNavItems.map(({ path, label, Icon, badge }) => {
+              const isActive = location === path || (path !== "/" && location.startsWith(path));
+              return (
+                <Link key={path} href={path} className="flex-1">
+                  <div className={cn(
+                    "flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 relative transition-colors",
+                    isActive ? activeAppConfig.text : "text-white/35 hover:text-white/70"
+                  )}>
+                    {/* Active indicator */}
+                    {isActive && (
+                      <motion.div
+                        layoutId="mobile-nav-indicator"
+                        className={`absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full ${activeAppConfig.dot}`}
+                      />
+                    )}
+                    <div className="relative">
+                      <Icon className="w-5 h-5" />
+                      {badge && badge > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-amber-500 text-[9px] font-bold text-black leading-none">
+                          {badge > 99 ? "99+" : badge}
+                        </span>
+                      )}
+                    </div>
+                    <span className={cn(
+                      "text-[10px] font-semibold tracking-tight leading-none",
+                      isActive ? "opacity-100" : "opacity-50"
+                    )}>{label}</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
       </main>
     </div>
   );
