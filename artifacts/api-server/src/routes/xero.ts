@@ -398,6 +398,37 @@ router.get("/xero/pending-invoices", requireStaffAuth, requireSuperAdmin, async 
   }
 });
 
+// ─── GET /xero/tracking-categories — all active categories + options ──────────
+router.get("/xero/tracking-categories", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const auth = await getValidAccessToken();
+  if (!auth) { res.status(503).json({ error: "Xero not connected" }); return; }
+
+  try {
+    const r = await fetch(
+      "https://api.xero.com/api.xro/2.0/TrackingCategories?includeArchived=false",
+      {
+        headers: {
+          Authorization: `Bearer ${auth.accessToken}`,
+          "Xero-tenant-id": auth.tenantId,
+          Accept: "application/json",
+        },
+      }
+    );
+    if (!r.ok) { res.status(502).json({ error: "Xero fetch failed" }); return; }
+    const data = await r.json();
+    const categories = (data.TrackingCategories ?? []).map((cat: any) => ({
+      id: cat.TrackingCategoryID,
+      name: cat.Name,
+      options: (cat.Options ?? [])
+        .filter((o: any) => o.Status === "ACTIVE")
+        .map((o: any) => ({ id: o.TrackingOptionID, name: o.Name })),
+    }));
+    res.json(categories);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /xero/sync-invoices/status — last sync timestamp + counts ────────────
 router.get("/xero/sync-invoices/status", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   const client = await pool.connect();

@@ -1073,32 +1073,45 @@ interface DisbursementResult {
   formitizeTaskUrl: string | null;
 }
 
-// ─── Store selector ────────────────────────────────────────────────────────────
+// ─── Store selector (Xero tracking categories) ────────────────────────────────
 
-interface StoreOption { label: string; retailer: string; branch: string | null; }
+interface XeroTrackingOption { id: string; name: string; categoryId: string; categoryName: string; }
 
-function StoreSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function StoreSelector({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (label: string, categoryId: string, optionId: string) => void;
+}) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
-  const [options, setOptions] = useState<StoreOption[]>([]);
+  const [options, setOptions] = useState<XeroTrackingOption[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch(`${BASE}/api/applications/retailers`, { credentials: "include" })
+    setLoading(true);
+    fetch(`${BASE}/api/xero/tracking-categories`, { credentials: "include" })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: { name: string; branch_name: string }[]) => {
-        setOptions(rows.map(r => ({
-          label: r.branch_name ? `${r.name} — ${r.branch_name}` : r.name,
-          retailer: r.name,
-          branch: r.branch_name || null,
+      .then((cats: { id: string; name: string; options: { id: string; name: string }[] }[]) => {
+        // Prefer the HukuPlus category; fall back to all categories if not found
+        const hukuCat = cats.find(c => c.name.toLowerCase().includes("huku")) ?? cats[0];
+        if (!hukuCat) return;
+        setOptions(hukuCat.options.map(o => ({
+          id: o.id,
+          name: o.name,
+          categoryId: hukuCat.id,
+          categoryName: hukuCat.name,
         })));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { setQuery(value); }, [value]);
 
   const filtered = query.trim()
-    ? options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+    ? options.filter(o => o.name.toLowerCase().includes(query.toLowerCase()))
     : options;
 
   return (
@@ -1106,16 +1119,16 @@ function StoreSelector({ value, onChange }: { value: string; onChange: (v: strin
       <div className="flex items-center gap-2">
         <input
           value={query}
-          onChange={e => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onChange(""); }}
+          onChange={e => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onChange("", "", ""); }}
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 160)}
-          placeholder="Type to search stores…"
+          placeholder={loading ? "Loading Xero stores…" : "Type to search stores…"}
           className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder:text-white/30"
         />
         {value && (
           <button
             type="button"
-            onClick={() => { setQuery(""); onChange(""); }}
+            onClick={() => { setQuery(""); onChange("", "", ""); }}
             className="shrink-0 p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white/70 transition-colors"
           >
             <X className="w-3.5 h-3.5" />
@@ -1124,15 +1137,14 @@ function StoreSelector({ value, onChange }: { value: string; onChange: (v: strin
       </div>
       {open && filtered.length > 0 && (
         <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-[#1a1a2e] border border-white/15 rounded-xl shadow-xl max-h-52 overflow-y-auto">
-          {filtered.slice(0, 25).map(opt => (
+          {filtered.map(opt => (
             <button
-              key={opt.label}
+              key={opt.id}
               type="button"
-              onMouseDown={() => { onChange(opt.label); setQuery(opt.label); setOpen(false); }}
+              onMouseDown={() => { onChange(opt.name, opt.categoryId, opt.id); setQuery(opt.name); setOpen(false); }}
               className="w-full text-left px-3 py-2 text-sm text-white/80 hover:bg-white/8 hover:text-white transition-colors"
             >
-              <span className="font-medium">{opt.retailer}</span>
-              {opt.branch && <span className="text-white/40"> — {opt.branch}</span>}
+              {opt.name}
             </button>
           ))}
         </div>
@@ -1155,6 +1167,8 @@ function DisbursementModal({ notification, onClose, onDone }: {
   const [bankCode, setBankCode] = useState("");
   const [description, setDescription] = useState("");
   const [selectedStore, setSelectedStore] = useState("");
+  const [trackingCategoryId, setTrackingCategoryId] = useState("");
+  const [trackingOptionId, setTrackingOptionId] = useState("");
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<DisbursementResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -1251,6 +1265,8 @@ function DisbursementModal({ notification, onClose, onDone }: {
           bankAccountCode: bankCode,
           description: description || undefined,
           storeName: selectedStore || undefined,
+          trackingCategoryId: trackingCategoryId || undefined,
+          trackingOptionId: trackingOptionId || undefined,
         }),
       });
       const data = await r.json();
@@ -1491,9 +1507,21 @@ function DisbursementModal({ notification, onClose, onDone }: {
 
               <div>
                 <label className="text-xs text-muted-foreground font-medium block mb-1.5">
-                  HukuPlus Store <span className="text-white/30 font-normal">(for Xero)</span>
+                  HukuPlus Store <span className="text-white/30 font-normal">(Xero tracking category)</span>
                 </label>
-                <StoreSelector value={selectedStore} onChange={setSelectedStore} />
+                <StoreSelector
+                  value={selectedStore}
+                  onChange={(label, catId, optId) => {
+                    setSelectedStore(label);
+                    setTrackingCategoryId(catId);
+                    setTrackingOptionId(optId);
+                  }}
+                />
+                {selectedStore && trackingOptionId && (
+                  <p className="text-[11px] text-emerald-400/70 mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Will be assigned in Xero tracking
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1908,9 +1936,12 @@ function PaymentModal({ notification, onClose, onDone }: {
               {/* HukuPlus Store */}
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
-                  HukuPlus Store <span className="text-white/30 font-normal normal-case">(for Xero)</span>
+                  HukuPlus Store <span className="text-white/30 font-normal normal-case">(for Xero reference)</span>
                 </label>
-                <StoreSelector value={selectedStore} onChange={setSelectedStore} />
+                <StoreSelector
+                  value={selectedStore}
+                  onChange={(label) => setSelectedStore(label)}
+                />
               </div>
 
               {/* Payment date & bank account */}

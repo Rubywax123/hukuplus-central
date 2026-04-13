@@ -81,6 +81,8 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
     bankAccountCode,
     description,
     storeName,
+    trackingCategoryId,
+    trackingOptionId,
   } = req.body;
 
   if (!notificationId || !xeroContactId || !loanAmount || !bankAccountCode) {
@@ -104,18 +106,24 @@ router.post("/disbursements/process", requireStaffAuth, requireSuperAdmin, async
   const lineDescription = description || `Loan disbursement — ${customerName || "Customer"}${storeLabel}`;
   const txDate = disbursementDate || new Date().toISOString().split("T")[0];
 
+  const lineItem: Record<string, any> = {
+    Description: lineDescription,
+    Quantity: 1,
+    UnitAmount: amount,
+    AccountCode: "621",
+  };
+
+  if (trackingCategoryId && trackingOptionId) {
+    lineItem.Tracking = [
+      { TrackingCategoryID: trackingCategoryId, TrackingOptionID: trackingOptionId },
+    ];
+  }
+
   const bankTxPayload = {
     Type: "SPEND",
     Contact: { ContactID: xeroContactId },
     Date: txDate,
-    LineItems: [
-      {
-        Description: lineDescription,
-        Quantity: 1,
-        UnitAmount: amount,
-        AccountCode: "621",
-      },
-    ],
+    LineItems: [lineItem],
     BankAccount: { Code: bankAccountCode },
     Reference: `Disbursement — ${customerName || ""}${storeLabel}`,
   };
