@@ -963,6 +963,29 @@ export async function runMigrations() {
         )
     `);
 
+    // ── Leads (field sales prospect recording) ──────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id SERIAL PRIMARY KEY,
+        customer_name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        retailer_id INTEGER REFERENCES retailers(id),
+        branch_id INTEGER REFERENCES branches(id),
+        retailer_name TEXT,
+        branch_name TEXT,
+        flock_size INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'converted')),
+        notes TEXT,
+        submitted_by TEXT,
+        acknowledged_at TIMESTAMPTZ,
+        acknowledged_by TEXT,
+        converted_at TIMESTAMPTZ,
+        converted_customer_id INTEGER REFERENCES customers(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

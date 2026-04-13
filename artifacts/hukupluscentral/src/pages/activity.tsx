@@ -8,7 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
-  LayoutTemplate, Search, Link2,
+  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -2449,10 +2449,463 @@ function WhatsAppTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TAB — LEADS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const FLOCK_VALUE = 2.06;
+
+interface Lead {
+  id: number;
+  customer_name: string;
+  phone: string;
+  retailer_id: number | null;
+  branch_id: number | null;
+  retailer_name: string | null;
+  branch_name: string | null;
+  flock_size: number;
+  estimated_value: number;
+  status: "new" | "acknowledged" | "converted";
+  notes: string | null;
+  submitted_by: string | null;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  converted_at: string | null;
+  converted_customer_name: string | null;
+  created_at: string;
+}
+
+function NewLeadModal({
+  retailers,
+  onClose,
+  onCreated,
+}: {
+  retailers: Array<{ id: number; name: string; branch_id: number; branch_name: string }>;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [customerName, setCustomerName] = useState("");
+  const [phoneSuffix, setPhoneSuffix] = useState("");
+  const [retailerId, setRetailerId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [flockSize, setFlockSize] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState("");
+
+  const retailerOptions = Array.from(new Map(retailers.map(r => [r.id, r.name])).entries());
+  const branches = retailers.filter(r => String(r.id) === retailerId);
+  const flockNum = parseFloat(flockSize) || 0;
+  const estimatedValue = flockNum * FLOCK_VALUE;
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const retailer = retailerOptions.find(([id]) => String(id) === retailerId);
+      const branch = branches.find(b => String(b.branch_id) === branchId);
+      const r = await fetch(`${BASE}/api/leads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          customerName: customerName.trim(),
+          phone: "+263" + phoneSuffix.replace(/^\+?2?6?3?/, "").trim(),
+          retailerId: retailer ? Number(retailer[0]) : null,
+          branchId: branch ? branch.branch_id : null,
+          retailerName: retailer ? retailer[1] : null,
+          branchName: branch ? branch.branch_name : null,
+          flockSize: Math.round(flockNum),
+          notes: notes.trim() || null,
+        }),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? "Failed"); }
+      return r.json();
+    },
+    onSuccess: () => { onCreated(); onClose(); },
+    onError: (e: any) => setError(e.message),
+  });
+
+  const handleSubmit = () => {
+    setError("");
+    if (!customerName.trim()) { setError("Customer name is required"); return; }
+    if (!phoneSuffix.trim()) { setError("Phone number is required"); return; }
+    createMutation.mutate();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+        className="w-full max-w-lg bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">New Lead</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Record a potential customer from the field</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* Customer name */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Customer Name *</label>
+            <input value={customerName} onChange={e => setCustomerName(e.target.value)}
+              placeholder="e.g. John Makucha"
+              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
+          </div>
+
+          {/* Phone with +263 prefix */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Phone Number *</label>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm font-medium shrink-0">+263</span>
+              <input value={phoneSuffix} onChange={e => setPhoneSuffix(e.target.value.replace(/^\+263/, ""))}
+                placeholder="77 123 4567"
+                className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
+            </div>
+            {phoneSuffix && <p className="text-[11px] text-white/30 mt-1">Full number: +263{phoneSuffix.replace(/^\+?263/, "")}</p>}
+          </div>
+
+          {/* Retailer + Branch */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Retailer</label>
+              <select value={retailerId} onChange={e => { setRetailerId(e.target.value); setBranchId(""); }}
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40">
+                <option value="">— Select —</option>
+                {retailerOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Store / Branch</label>
+              <select value={branchId} onChange={e => setBranchId(e.target.value)} disabled={!retailerId}
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 disabled:opacity-50">
+                <option value="">— Select —</option>
+                {branches.map(b => <option key={b.branch_id} value={String(b.branch_id)}>{b.branch_name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Flock size + calculated value */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Flock Size (birds)</label>
+              <input type="number" min="0" value={flockSize} onChange={e => setFlockSize(e.target.value)}
+                placeholder="0"
+                onWheel={e => (e.target as HTMLInputElement).blur()}
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Est. Value @ $2.06/bird</label>
+              <div className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-semibold">
+                {estimatedValue > 0 ? `$${estimatedValue.toFixed(2)}` : "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Notes (optional)</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+              placeholder="Any additional context about this lead…"
+              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30 resize-none" />
+          </div>
+
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+            <button onClick={handleSubmit} disabled={createMutation.isPending}
+              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+              {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              Submit Lead
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ConvertLeadModal({ lead, onClose, onDone }: { lead: Lead; onClose: () => void; onDone: () => void }) {
+  const [, navigate] = useLocation();
+  const [customerSearch, setCustomerSearch] = useState(lead.customer_name);
+  const [candidates, setCandidates] = useState<{ id: number; full_name: string; phone: string | null }[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState("");
+
+  const searchCustomers = async (q: string) => {
+    if (!q.trim()) return;
+    setSearching(true);
+    try {
+      const r = await fetch(`${BASE}/api/customers?search=${encodeURIComponent(q.trim())}`, { credentials: "include" });
+      if (r.ok) setCandidates(await r.json());
+    } finally { setSearching(false); }
+  };
+
+  const convertMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/${lead.id}/convert`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ customerId: selectedId, notes: notes.trim() || null }),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? "Failed"); }
+      return r.json();
+    },
+    onSuccess: () => { onDone(); onClose(); },
+    onError: (e: any) => setError(e.message),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+        className="w-full max-w-md bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">File Lead as Converted</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{lead.customer_name}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-muted-foreground">Link this lead to an existing customer profile, or file without linking.</p>
+
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Search Customer (optional)</label>
+            <div className="flex gap-2">
+              <input value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && searchCustomers(customerSearch)}
+                placeholder="Type name or phone…"
+                className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30" />
+              <button onClick={() => searchCustomers(customerSearch)} disabled={searching}
+                className="px-3 py-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              </button>
+            </div>
+            {candidates.length > 0 && (
+              <div className="mt-2 space-y-1 max-h-36 overflow-y-auto">
+                {candidates.map(c => (
+                  <button key={c.id} onClick={() => setSelectedId(selectedId === c.id ? null : c.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border text-left text-sm transition-all ${selectedId === c.id ? "border-amber-500/50 bg-amber-500/10 text-amber-200" : "border-white/10 bg-white/5 text-white/80 hover:bg-white/8"}`}>
+                    <User className="w-4 h-4 shrink-0 text-muted-foreground" />
+                    <span className="font-medium">{c.full_name}</span>
+                    {c.phone && <span className="text-muted-foreground text-xs ml-auto">{c.phone}</span>}
+                    {selectedId === c.id && <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Notes (optional)</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+              placeholder="Conversion notes…"
+              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 placeholder:text-white/30 resize-none" />
+          </div>
+
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <div className="flex justify-between gap-2 pt-1">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+            <div className="flex gap-2">
+              {selectedId && (
+                <button onClick={() => navigate(`/customers?customerId=${selectedId}`)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-violet-300 bg-violet-500/10 border border-violet-500/25 hover:bg-violet-500/20 transition-all">
+                  <ExternalLink className="w-3.5 h-3.5" />View Profile
+                </button>
+              )}
+              <button onClick={() => convertMutation.mutate()} disabled={convertMutation.isPending}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all disabled:opacity-40">
+                {convertMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                File as Converted
+              </button>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function LeadsTab() {
+  const qc = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<"new" | "acknowledged" | "converted" | "all">("new");
+  const [showNew, setShowNew] = useState(false);
+  const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
+
+  const { data: leads = [], isLoading, refetch } = useQuery<Lead[]>({
+    queryKey: ["leads", statusFilter],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/leads?status=${statusFilter}`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  const { data: retailers = [] } = useQuery<Array<{ id: number; name: string; branch_id: number; branch_name: string }>>({
+    queryKey: ["retailers-for-leads"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/applications/retailers`, { credentials: "include" });
+      if (!r.ok) return [];
+      return r.json();
+    },
+  });
+
+  const acknowledgeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${BASE}/api/leads/${id}/acknowledge`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["leads"] }); qc.invalidateQueries({ queryKey: ["leads-count"] }); },
+  });
+
+  const STATUS_FILTERS = [
+    { value: "new", label: "New", color: "text-amber-300" },
+    { value: "acknowledged", label: "Acknowledged", color: "text-sky-300" },
+    { value: "converted", label: "Converted", color: "text-emerald-300" },
+    { value: "all", label: "All", color: "text-white/60" },
+  ] as const;
+
+  const handleExport = () => {
+    const url = `${BASE}/api/leads/export.csv?status=${statusFilter}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leads-${statusFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+
+  return (
+    <>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <p className="text-sm text-muted-foreground">
+            {leads.length} lead{leads.length !== 1 ? "s" : ""} — {statusFilter === "all" ? "all statuses" : statusFilter}
+          </p>
+          <div className="flex items-center gap-2">
+            <button onClick={handleExport}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors border border-white/10">
+              <Download className="w-3.5 h-3.5" /> Export CSV
+            </button>
+            <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </button>
+            <button onClick={() => setShowNew(true)}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 transition-colors">
+              <UserPlus className="w-3.5 h-3.5" /> New Lead
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-1 flex-wrap">
+          {STATUS_FILTERS.map(f => (
+            <button key={f.value} onClick={() => setStatusFilter(f.value)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${statusFilter === f.value ? "bg-white/15 text-white" : "text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16 text-white/40"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+        ) : leads.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-white/40">
+            <UserPlus className="w-10 h-10 mb-3 opacity-30" />
+            <p className="text-base font-medium">No leads</p>
+            <p className="text-sm mt-1">
+              {statusFilter === "new" ? "No new leads yet — use the New Lead button to record one" : "No leads in this status"}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <AnimatePresence initial={false}>
+              {leads.map(lead => (
+                <motion.div key={lead.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.18 }}
+                  className={`p-4 rounded-xl border transition-colors ${
+                    lead.status === "new"
+                      ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70"
+                      : lead.status === "converted"
+                      ? "bg-emerald-500/[0.03] border-emerald-500/15 opacity-70"
+                      : "bg-white/[0.02] border-white/8"
+                  }`}>
+                  <div className="flex items-start gap-4">
+                    <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${lead.status === "new" ? "bg-amber-500/15 border border-amber-500/25" : lead.status === "converted" ? "bg-emerald-500/15 border border-emerald-500/25" : "bg-white/10 border border-white/15"}`}>
+                      <UserPlus className={`w-4 h-4 ${lead.status === "new" ? "text-amber-400" : lead.status === "converted" ? "text-emerald-400" : "text-white/50"}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${lead.status === "new" ? "bg-amber-500/20 text-amber-200 border border-amber-400/30" : lead.status === "converted" ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25" : "bg-white/10 text-white/50"}`}>
+                          {lead.status === "new" ? "⚡ NEW" : lead.status === "converted" ? "✓ CONVERTED" : "ACKNOWLEDGED"}
+                        </span>
+                        {lead.retailer_name && (
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/15">
+                            {lead.retailer_name}{lead.branch_name ? ` — ${lead.branch_name}` : ""}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm font-semibold text-white">{lead.customer_name}</p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-white/50 flex-wrap">
+                        <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{lead.phone}</span>
+                        {lead.flock_size > 0 && (
+                          <span className="flex items-center gap-1">
+                            🐔 {lead.flock_size} birds · <span className="text-emerald-400/80 font-medium">${Number(lead.estimated_value).toFixed(2)}</span>
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1 ml-auto"><Clock className="w-3 h-3" />{ago(lead.created_at)}</span>
+                      </div>
+                      {lead.submitted_by && (
+                        <p className="text-[11px] text-white/30 mt-0.5">Submitted by {lead.submitted_by}</p>
+                      )}
+                      {lead.notes && <p className="text-xs text-sky-300/60 mt-1 flex items-center gap-1"><FileText className="w-3 h-3" />{lead.notes}</p>}
+                      {lead.status === "converted" && lead.converted_customer_name && (
+                        <p className="text-xs text-emerald-300/60 mt-1">Linked to: {lead.converted_customer_name}</p>
+                      )}
+                      {lead.acknowledged_by && lead.status === "acknowledged" && (
+                        <p className="text-[11px] text-white/25 mt-0.5">Ack by {lead.acknowledged_by} · {lead.acknowledged_at ? fmt(lead.acknowledged_at) : ""}</p>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5 shrink-0 items-end">
+                      {lead.status === "new" && (
+                        <button onClick={() => acknowledgeMutation.mutate(lead.id)} disabled={acknowledgeMutation.isPending}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 border border-sky-500/25 text-sky-300 hover:bg-sky-500/20 transition-all disabled:opacity-40">
+                          <CheckCheck className="w-3.5 h-3.5" /> Acknowledge
+                        </button>
+                      )}
+                      {lead.status !== "converted" && (
+                        <button onClick={() => setConvertingLead(lead)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> File / Convert
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {showNew && (
+          <NewLeadModal retailers={retailers} onClose={() => setShowNew(false)}
+            onCreated={() => { qc.invalidateQueries({ queryKey: ["leads"] }); qc.invalidateQueries({ queryKey: ["leads-count"] }); }} />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {convertingLead && (
+          <ConvertLeadModal lead={convertingLead} onClose={() => setConvertingLead(null)}
+            onDone={() => { qc.invalidateQueries({ queryKey: ["leads"] }); qc.invalidateQueries({ queryKey: ["leads-count"] }); }} />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "formitize" | "loans" | "drawdowns" | "messages" | "whatsapp";
+type Tab = "formitize" | "loans" | "drawdowns" | "messages" | "whatsapp" | "leads";
 
 interface TabDef {
   id: Tab;
@@ -2461,7 +2914,7 @@ interface TabDef {
   badgeKey?: string;
 }
 
-const ADMIN_TABS: Tab[] = ["formitize", "loans", "drawdowns", "messages"];
+const ADMIN_TABS: Tab[] = ["formitize", "loans", "drawdowns", "messages", "leads"];
 
 export default function ActivityPage() {
   const { user } = useStaffAuth();
@@ -2508,15 +2961,28 @@ export default function ActivityPage() {
     refetchInterval: 30_000,
   });
 
+  const { data: leadsCount } = useQuery<{ newCount: number }>({
+    queryKey: ["leads-count"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/counts`, { credentials: "include" });
+      if (!r.ok) return { newCount: 0 };
+      return r.json();
+    },
+    enabled: isAdmin,
+    refetchInterval: 30_000,
+  });
+
   const formitizeBadge = counts?.newTotal ?? 0;
   const drawdownBadge  = ddCount?.count ?? 0;
   const waBadge        = waUnread?.count ?? 0;
+  const leadsBadge     = leadsCount?.newCount ?? 0;
 
   const ALL_TABS: TabDef[] = [
     { id: "formitize",  label: "Formitize",       icon: <Bell className="w-4 h-4" /> },
     { id: "loans",      label: "Loan Requests",   icon: <Egg className="w-4 h-4" /> },
     { id: "drawdowns",  label: "Drawdowns",       icon: <ArrowDownCircle className="w-4 h-4" /> },
     { id: "messages",   label: "Store Messages",  icon: <MessageSquare className="w-4 h-4" /> },
+    { id: "leads",      label: "Leads",            icon: <UserPlus className="w-4 h-4" /> },
     { id: "whatsapp",   label: "WhatsApp",         icon: <MessageCircle className="w-4 h-4" /> },
   ];
 
@@ -2526,6 +2992,7 @@ export default function ActivityPage() {
     if (id === "formitize") return formitizeBadge;
     if (id === "drawdowns") return drawdownBadge;
     if (id === "whatsapp")  return waBadge;
+    if (id === "leads")     return leadsBadge;
     return 0;
   };
 
@@ -2574,6 +3041,7 @@ export default function ActivityPage() {
           {tab === "loans"      && <LoansTab />}
           {tab === "drawdowns"  && <DrawdownsTab />}
           {tab === "messages"   && <MessagesTab />}
+          {tab === "leads"      && <LeadsTab />}
           {tab === "whatsapp"   && <WhatsAppTab />}
         </>
       )}

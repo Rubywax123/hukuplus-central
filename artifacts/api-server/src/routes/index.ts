@@ -18,6 +18,7 @@ import applicationsRouter from "./applications";
 import whatsappRouter from "./whatsapp";
 import paymentsRouter from "./payments";
 import disbursementsRouter from "./disbursements";
+import leadsRouter from "./leads";
 
 const router: IRouter = Router();
 
@@ -40,5 +41,6 @@ router.use(applicationsRouter);
 router.use(whatsappRouter);
 router.use(paymentsRouter);
 router.use(disbursementsRouter);
+router.use(leadsRouter);
 
 export default router;
