@@ -2614,29 +2614,44 @@ function NewLeadModal({
   const estimatedValue = flockNum * FLOCK_VALUE;
 
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       const retailer = retailerOptions.find(o => o.value === retailerId);
       const branch = branchOptions.find(o => o.value === branchId);
-      const r = await fetch(`${BASE}/api/leads`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          customerName: customerName.trim(),
-          phone: "+263" + phoneSuffix.replace(/^\+?2?6?3?/, "").replace(/\s/g, "").trim(),
-          retailerId: retailer ? Number(retailer.value) : null,
-          branchId: branch ? Number(branch.value) : null,
-          retailerName: retailer?.label ?? null,
-          branchName: branch?.label ?? null,
-          flockSize: Math.round(flockNum),
-          notes: notes.trim() || null,
-        }),
+      const rawSuffix = phoneSuffix.replace(/\s/g, "").trim();
+      const cleanSuffix = rawSuffix.startsWith("263") ? rawSuffix.slice(3)
+        : rawSuffix.startsWith("0") ? rawSuffix.slice(1)
+        : rawSuffix;
+      const payload = JSON.stringify({
+        customerName: customerName.trim(),
+        phone: "+263" + cleanSuffix,
+        retailerId: retailer ? Number(retailer.value) : null,
+        branchId: branch ? Number(branch.value) : null,
+        retailerName: retailer?.label ?? null,
+        branchName: branch?.label ?? null,
+        flockSize: Math.round(flockNum),
+        notes: notes.trim() || null,
       });
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? "Failed"); }
-      return r.json();
+      return new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${BASE}/api/leads`);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.withCredentials = true;
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({}); }
+          } else {
+            try { const d = JSON.parse(xhr.responseText); reject(new Error(d.error ?? "Failed")); }
+            catch { reject(new Error("Submission failed. Please try again.")); }
+          }
+        };
+        xhr.onerror = () => reject(new Error("Network error. Please check your connection."));
+        xhr.ontimeout = () => reject(new Error("Request timed out. Please try again."));
+        xhr.timeout = 15000;
+        xhr.send(payload);
+      });
     },
     onSuccess: () => { onCreated(); onClose(); },
-    onError: (e: any) => setError(e.message),
+    onError: (e: any) => setError(e?.message || "Submission failed. Please try again."),
   });
 
   const handleSubmit = () => {
