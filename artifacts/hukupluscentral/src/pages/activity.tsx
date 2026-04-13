@@ -1073,6 +1073,76 @@ interface DisbursementResult {
   formitizeTaskUrl: string | null;
 }
 
+// ─── Store selector ────────────────────────────────────────────────────────────
+
+interface StoreOption { label: string; retailer: string; branch: string | null; }
+
+function StoreSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const [options, setOptions] = useState<StoreOption[]>([]);
+
+  useEffect(() => {
+    fetch(`${BASE}/api/applications/retailers`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: { name: string; branch_name: string }[]) => {
+        setOptions(rows.map(r => ({
+          label: r.branch_name ? `${r.name} — ${r.branch_name}` : r.name,
+          retailer: r.name,
+          branch: r.branch_name || null,
+        })));
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { setQuery(value); }, [value]);
+
+  const filtered = query.trim()
+    ? options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-2">
+        <input
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onChange(""); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 160)}
+          placeholder="Type to search stores…"
+          className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder:text-white/30"
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => { setQuery(""); onChange(""); }}
+            className="shrink-0 p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white/70 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-[#1a1a2e] border border-white/15 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+          {filtered.slice(0, 25).map(opt => (
+            <button
+              key={opt.label}
+              type="button"
+              onMouseDown={() => { onChange(opt.label); setQuery(opt.label); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm text-white/80 hover:bg-white/8 hover:text-white transition-colors"
+            >
+              <span className="font-medium">{opt.retailer}</span>
+              {opt.branch && <span className="text-white/40"> — {opt.branch}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Disbursement modal ────────────────────────────────────────────────────────
+
 function DisbursementModal({ notification, onClose, onDone }: {
   notification: FNotification;
   onClose: () => void;
@@ -1084,6 +1154,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
   const [disbursementDate, setDisbursementDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [bankCode, setBankCode] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedStore, setSelectedStore] = useState("");
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<DisbursementResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -1179,7 +1250,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
           disbursementDate,
           bankAccountCode: bankCode,
           description: description || undefined,
-          storeName: [notification.retailer_name, notification.branch_name].filter(Boolean).join(" — ") || undefined,
+          storeName: selectedStore || undefined,
         }),
       });
       const data = await r.json();
@@ -1419,6 +1490,13 @@ function DisbursementModal({ notification, onClose, onDone }: {
               </div>
 
               <div>
+                <label className="text-xs text-muted-foreground font-medium block mb-1.5">
+                  HukuPlus Store <span className="text-white/30 font-normal">(for Xero)</span>
+                </label>
+                <StoreSelector value={selectedStore} onChange={setSelectedStore} />
+              </div>
+
+              <div>
                 <label className="text-xs text-muted-foreground font-medium block mb-1.5">Description (optional)</label>
                 <input
                   type="text"
@@ -1534,6 +1612,7 @@ function PaymentModal({ notification, onClose, onDone }: {
   const [allocations, setAllocations] = useState<Record<string, string>>({});
   const [paymentDate, setPaymentDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [bankCode, setBankCode] = useState("");
+  const [selectedStore, setSelectedStore] = useState("");
   const [markLoanComplete, setMarkLoanComplete] = useState(true);
   const [resultErrors, setResultErrors] = useState<string[]>([]);
   const [lrAutoCompleted, setLrAutoCompleted] = useState(false);
@@ -1635,7 +1714,7 @@ function PaymentModal({ notification, onClose, onDone }: {
           // will apply this to other outstanding invoices oldest-first, then post
           // any remainder as a Xero Overpayment (credit balance on account).
           creditAmount: unallocated > 0.01 ? Math.round(unallocated * 100) / 100 : 0,
-          storeName: [notification.retailer_name, notification.branch_name].filter(Boolean).join(" — ") || undefined,
+          storeName: selectedStore || undefined,
         }),
       });
       const data = await r.json();
@@ -1824,6 +1903,14 @@ function PaymentModal({ notification, onClose, onDone }: {
                     <span className="text-muted-foreground text-xs">Adjust amounts if needed</span>
                   </div>
                 )}
+              </div>
+
+              {/* HukuPlus Store */}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+                  HukuPlus Store <span className="text-white/30 font-normal normal-case">(for Xero)</span>
+                </label>
+                <StoreSelector value={selectedStore} onChange={setSelectedStore} />
               </div>
 
               {/* Payment date & bank account */}
