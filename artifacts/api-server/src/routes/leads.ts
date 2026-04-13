@@ -225,6 +225,21 @@ router.put("/leads/:id/convert", requireStaffAuth, async (req, res): Promise<voi
   }
 });
 
+// ─── DELETE /api/leads/:id — permanently remove a lead ───────────────────────
+
+router.delete("/leads/:id", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const client = await pool.connect();
+  try {
+    const r = await client.query(`DELETE FROM leads WHERE id = $1 RETURNING id`, [id]);
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found" }); return; }
+    res.json({ ok: true });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── GET /api/leads/export.csv — CSV for Wati (name + phone) ─────────────────
 
 router.get("/leads/export.csv", requireStaffAuth, async (req, res): Promise<void> => {

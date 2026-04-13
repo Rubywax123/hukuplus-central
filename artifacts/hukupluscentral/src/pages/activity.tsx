@@ -2871,6 +2871,7 @@ function LeadsTab() {
   const [showNew, setShowNew] = useState(false);
   const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter] = useState<"unconverted" | "new" | "acknowledged" | "converted" | "all">("unconverted");
@@ -2929,6 +2930,14 @@ function LeadsTab() {
       if (!r.ok) throw new Error("Failed");
     },
     onSuccess: invalidateAll,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${BASE}/api/leads/${id}`, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: () => { setConfirmDeleteId(null); invalidateAll(); },
   });
 
   // ── Derive filter options from fetched leads ─────────────────────────────────
