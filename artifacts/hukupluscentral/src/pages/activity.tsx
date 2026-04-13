@@ -2647,14 +2647,14 @@ function NewLeadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm"
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 64px)" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <motion.div
         initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
         className="w-full sm:max-w-lg bg-[#1a1a2e] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col"
-        style={{ maxHeight: "calc(100dvh - 72px)" }}>
+        style={{ maxHeight: "calc(100dvh - 64px - env(safe-area-inset-bottom))" }}>
 
         {/* Header — fixed, never scrolls */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
