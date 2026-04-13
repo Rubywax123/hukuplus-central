@@ -2861,11 +2861,14 @@ function ConvertLeadModal({ lead, onClose, onDone }: { lead: Lead; onClose: () =
 
 function LeadsTab() {
   const qc = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<"new" | "acknowledged" | "converted" | "all">("new");
+  const [statusFilter, setStatusFilter] = useState<"unconverted" | "new" | "acknowledged" | "converted" | "all">("unconverted");
+  const [retailerFilter, setRetailerFilter] = useState("");
+  const [storeFilter, setStoreFilter] = useState("");
+  const [sortAsc, setSortAsc] = useState(false); // false = newest first
   const [showNew, setShowNew] = useState(false);
   const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
 
-  const { data: leads = [], isLoading, refetch } = useQuery<Lead[]>({
+  const { data: rawLeads = [], isLoading, refetch } = useQuery<Lead[]>({
     queryKey: ["leads", statusFilter],
     queryFn: async () => {
       const r = await fetch(`${BASE}/api/leads?status=${statusFilter}`, { credentials: "include" });
@@ -2892,15 +2895,48 @@ function LeadsTab() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["leads"] }); qc.invalidateQueries({ queryKey: ["leads-count"] }); },
   });
 
+  // ── Derive filter options from fetched leads ─────────────────────────────────
+  const retailerNames = Array.from(new Set(rawLeads.map(l => l.retailer_name).filter(Boolean))) as string[];
+  retailerNames.sort((a, b) => a.localeCompare(b));
+
+  const storeNames = Array.from(new Set(
+    rawLeads
+      .filter(l => !retailerFilter || l.retailer_name === retailerFilter)
+      .map(l => l.branch_name)
+      .filter(Boolean)
+  )) as string[];
+  storeNames.sort((a, b) => a.localeCompare(b));
+
+  // Reset store filter when retailer changes
+  React.useEffect(() => { setStoreFilter(""); }, [retailerFilter]);
+
+  // ── Apply client-side filters + sort ─────────────────────────────────────────
+  const leads = React.useMemo(() => {
+    let list = [...rawLeads];
+    if (retailerFilter) list = list.filter(l => l.retailer_name === retailerFilter);
+    if (storeFilter)    list = list.filter(l => l.branch_name === storeFilter);
+    // API returns newest-first; flip if ascending
+    if (sortAsc) list = list.reverse();
+    return list;
+  }, [rawLeads, retailerFilter, storeFilter, sortAsc]);
+
+  const totalValue = leads.reduce((sum, l) => sum + Number(l.estimated_value ?? 0), 0);
+  const totalBirds = leads.reduce((sum, l) => sum + (l.flock_size ?? 0), 0);
+  const filtersActive = !!(retailerFilter || storeFilter);
+
   const STATUS_FILTERS = [
-    { value: "new", label: "New", color: "text-amber-300" },
-    { value: "acknowledged", label: "Acknowledged", color: "text-sky-300" },
-    { value: "converted", label: "Converted", color: "text-emerald-300" },
-    { value: "all", label: "All", color: "text-white/60" },
+    { value: "unconverted", label: "Active Pipeline" },
+    { value: "new",         label: "New only" },
+    { value: "acknowledged",label: "Acknowledged" },
+    { value: "converted",   label: "Converted" },
+    { value: "all",         label: "All time" },
   ] as const;
 
   const handleExport = () => {
-    const url = `${BASE}/api/leads/export.csv?status=${statusFilter}`;
+    const params = new URLSearchParams({ status: statusFilter });
+    if (retailerFilter) params.set("retailerName", retailerFilter);
+    if (storeFilter)    params.set("branchName", storeFilter);
+    const url = `${BASE}/api/leads/export.csv?${params}`;
     const a = document.createElement("a");
     a.href = url;
     a.download = `leads-${statusFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -2910,17 +2946,27 @@ function LeadsTab() {
   return (
     <>
       <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <p className="text-sm text-muted-foreground">
-            {leads.length} lead{leads.length !== 1 ? "s" : ""} — {statusFilter === "all" ? "all statuses" : statusFilter}
-          </p>
-          <div className="flex items-center gap-2">
+
+        {/* ── Top bar ── */}
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-sm font-medium text-white">
+              {leads.length} lead{leads.length !== 1 ? "s" : ""}
+              {filtersActive && <span className="text-amber-400"> (filtered)</span>}
+            </p>
+            {totalBirds > 0 && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                🐔 {totalBirds.toLocaleString()} birds · <span className="text-emerald-400/80 font-medium">${totalValue.toFixed(2)} est.</span>
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
             <button onClick={handleExport}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors border border-white/10">
               <Download className="w-3.5 h-3.5" /> Export CSV
             </button>
-            <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            <button onClick={() => refetch()} title="Refresh" className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors">
+              <RefreshCw className="w-4 h-4" />
             </button>
             <button onClick={() => setShowNew(true)}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 transition-colors">
@@ -2929,23 +2975,81 @@ function LeadsTab() {
           </div>
         </div>
 
+        {/* ── Status filter strip ── */}
         <div className="flex gap-1 flex-wrap">
           {STATUS_FILTERS.map(f => (
             <button key={f.value} onClick={() => setStatusFilter(f.value)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${statusFilter === f.value ? "bg-white/15 text-white" : "text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium transition-all",
+                statusFilter === f.value ? "bg-white/15 text-white" : "text-white/40 hover:text-white/70 hover:bg-white/5"
+              )}>
               {f.label}
             </button>
           ))}
         </div>
 
+        {/* ── Analysis filters + sort ── */}
+        <div className="flex flex-wrap gap-2 items-end">
+          {/* Retailer filter */}
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Filter by Retailer</label>
+            <select
+              value={retailerFilter}
+              onChange={e => setRetailerFilter(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/12 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+            >
+              <option value="">All retailers</option>
+              {retailerNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          {/* Store filter */}
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">Filter by Store</label>
+            <select
+              value={storeFilter}
+              onChange={e => setStoreFilter(e.target.value)}
+              disabled={storeNames.length === 0}
+              className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/12 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-40"
+            >
+              <option value="">All stores</option>
+              {storeNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          {/* Date sort toggle */}
+          <button
+            onClick={() => setSortAsc(v => !v)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all shrink-0",
+              "bg-white/5 border-white/12 text-white/60 hover:text-white hover:border-white/20"
+            )}
+          >
+            {sortAsc ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {sortAsc ? "Oldest first" : "Newest first"}
+          </button>
+
+          {filtersActive && (
+            <button onClick={() => { setRetailerFilter(""); setStoreFilter(""); }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-red-400/80 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 transition-all shrink-0">
+              <X className="w-3 h-3" /> Clear filters
+            </button>
+          )}
+        </div>
+
+        {/* ── Lead list ── */}
         {isLoading ? (
           <div className="flex items-center justify-center py-16 text-white/40"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
         ) : leads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-white/40">
             <UserPlus className="w-10 h-10 mb-3 opacity-30" />
-            <p className="text-base font-medium">No leads</p>
+            <p className="text-base font-medium">No leads found</p>
             <p className="text-sm mt-1">
-              {statusFilter === "new" ? "No new leads yet — use the New Lead button to record one" : "No leads in this status"}
+              {filtersActive
+                ? "No results for the current filters — try clearing them"
+                : statusFilter === "unconverted"
+                ? "No active leads — use New Lead to record one"
+                : "No leads in this status"}
             </p>
           </div>
         ) : (
@@ -2953,20 +3057,35 @@ function LeadsTab() {
             <AnimatePresence initial={false}>
               {leads.map(lead => (
                 <motion.div key={lead.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.18 }}
-                  className={`p-4 rounded-xl border transition-colors ${
+                  className={cn(
+                    "p-4 rounded-xl border transition-colors",
                     lead.status === "new"
                       ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70"
                       : lead.status === "converted"
                       ? "bg-emerald-500/[0.03] border-emerald-500/15 opacity-70"
                       : "bg-white/[0.02] border-white/8"
-                  }`}>
-                  <div className="flex items-start gap-4">
-                    <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${lead.status === "new" ? "bg-amber-500/15 border border-amber-500/25" : lead.status === "converted" ? "bg-emerald-500/15 border border-emerald-500/25" : "bg-white/10 border border-white/15"}`}>
-                      <UserPlus className={`w-4 h-4 ${lead.status === "new" ? "text-amber-400" : lead.status === "converted" ? "text-emerald-400" : "text-white/50"}`} />
+                  )}>
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                      lead.status === "new" ? "bg-amber-500/15 border border-amber-500/25"
+                        : lead.status === "converted" ? "bg-emerald-500/15 border border-emerald-500/25"
+                        : "bg-white/10 border border-white/15"
+                    )}>
+                      <UserPlus className={cn("w-4 h-4",
+                        lead.status === "new" ? "text-amber-400"
+                          : lead.status === "converted" ? "text-emerald-400"
+                          : "text-white/50"
+                      )} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${lead.status === "new" ? "bg-amber-500/20 text-amber-200 border border-amber-400/30" : lead.status === "converted" ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25" : "bg-white/10 text-white/50"}`}>
+                        <span className={cn(
+                          "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                          lead.status === "new" ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
+                            : lead.status === "converted" ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
+                            : "bg-white/10 text-white/50"
+                        )}>
                           {lead.status === "new" ? "⚡ NEW" : lead.status === "converted" ? "✓ CONVERTED" : "ACKNOWLEDGED"}
                         </span>
                         {lead.retailer_name && (
@@ -2980,20 +3099,28 @@ function LeadsTab() {
                         <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{lead.phone}</span>
                         {lead.flock_size > 0 && (
                           <span className="flex items-center gap-1">
-                            🐔 {lead.flock_size} birds · <span className="text-emerald-400/80 font-medium">${Number(lead.estimated_value).toFixed(2)}</span>
+                            🐔 {lead.flock_size} · <span className="text-emerald-400/80 font-medium">${Number(lead.estimated_value).toFixed(2)}</span>
                           </span>
                         )}
-                        <span className="flex items-center gap-1 ml-auto"><Clock className="w-3 h-3" />{ago(lead.created_at)}</span>
+                        <span className="flex items-center gap-1 ml-auto"><Clock className="w-3 h-3" />
+                          {fmt(lead.created_at)}
+                        </span>
                       </div>
                       {lead.submitted_by && (
                         <p className="text-[11px] text-white/30 mt-0.5">Submitted by {lead.submitted_by}</p>
                       )}
-                      {lead.notes && <p className="text-xs text-sky-300/60 mt-1 flex items-center gap-1"><FileText className="w-3 h-3" />{lead.notes}</p>}
+                      {lead.notes && (
+                        <p className="text-xs text-sky-300/60 mt-1 flex items-center gap-1">
+                          <FileText className="w-3 h-3" />{lead.notes}
+                        </p>
+                      )}
                       {lead.status === "converted" && lead.converted_customer_name && (
-                        <p className="text-xs text-emerald-300/60 mt-1">Linked to: {lead.converted_customer_name}</p>
+                        <p className="text-xs text-emerald-300/60 mt-1">Linked: {lead.converted_customer_name}</p>
                       )}
                       {lead.acknowledged_by && lead.status === "acknowledged" && (
-                        <p className="text-[11px] text-white/25 mt-0.5">Ack by {lead.acknowledged_by} · {lead.acknowledged_at ? fmt(lead.acknowledged_at) : ""}</p>
+                        <p className="text-[11px] text-white/25 mt-0.5">
+                          Ack by {lead.acknowledged_by} · {lead.acknowledged_at ? fmt(lead.acknowledged_at) : ""}
+                        </p>
                       )}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
@@ -3006,7 +3133,7 @@ function LeadsTab() {
                       {lead.status !== "converted" && (
                         <button onClick={() => setConvertingLead(lead)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> File / Convert
+                          <CheckCircle2 className="w-3.5 h-3.5" /> File
                         </button>
                       )}
                     </div>

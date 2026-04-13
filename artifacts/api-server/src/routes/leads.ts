@@ -54,7 +54,16 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     const params: any[] = [];
-    const where = status && status !== "all" ? `WHERE l.status = $${params.push(status)}` : "";
+    let where = "";
+    let orderBy = "ORDER BY CASE l.status WHEN 'new' THEN 0 WHEN 'acknowledged' THEN 1 ELSE 2 END, l.created_at DESC";
+
+    if (status === "unconverted") {
+      where = "WHERE l.status IN ('new', 'acknowledged')";
+      orderBy = "ORDER BY l.created_at DESC";
+    } else if (status && status !== "all") {
+      where = `WHERE l.status = $${params.push(status)}`;
+    }
+
     const result = await client.query(
       `SELECT l.*,
               (l.flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value,
@@ -62,9 +71,7 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
        FROM leads l
        LEFT JOIN customers c ON c.id = l.converted_customer_id
        ${where}
-       ORDER BY
-         CASE l.status WHEN 'new' THEN 0 WHEN 'acknowledged' THEN 1 ELSE 2 END,
-         l.created_at DESC`,
+       ${orderBy}`,
       params
     );
     res.json(result.rows);
@@ -138,9 +145,12 @@ router.get("/leads/export.csv", requireStaffAuth, async (req, res): Promise<void
   const client = await pool.connect();
   try {
     const params: any[] = [];
-    const where = status && status !== "all"
-      ? `WHERE status = $${params.push(status)}`
-      : "WHERE status != 'converted'";
+    let where = "WHERE status != 'converted'";
+    if (status === "unconverted") {
+      where = "WHERE status IN ('new', 'acknowledged')";
+    } else if (status && status !== "all") {
+      where = `WHERE status = $${params.push(status)}`;
+    }
     const r = await client.query(
       `SELECT customer_name, phone, retailer_name, branch_name,
               flock_size, (flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value,
