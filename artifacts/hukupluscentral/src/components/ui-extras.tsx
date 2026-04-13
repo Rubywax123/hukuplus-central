@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Loader2 } from "lucide-react";
 
-export function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function GlassCard({ children, className = "", ...props }: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-card/40 backdrop-blur-xl border border-white/10 shadow-2xl rounded-2xl ${className}`}>
+    <div className={`bg-card/40 backdrop-blur-xl border border-white/10 shadow-2xl rounded-2xl ${className}`} {...props}>
       {children}
     </div>
   );
