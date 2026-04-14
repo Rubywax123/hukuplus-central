@@ -22,7 +22,7 @@ type StaffMember = {
   id: number;
   name: string;
   email: string;
-  role: "super_admin" | "admin" | "staff";
+  role: "super_admin" | "admin" | "staff" | "sales_agent";
   isActive: boolean;
   mustChangePassword: boolean;
   createdAt: string;
@@ -32,12 +32,14 @@ const ROLE_LABELS: Record<string, string> = {
   super_admin: "Principal Admin",
   admin: "Admin",
   staff: "Staff",
+  sales_agent: "Sales Agent",
 };
 
 const ROLE_COLORS: Record<string, "success" | "warning" | "neutral"> = {
   super_admin: "success",
   admin: "warning",
   staff: "neutral",
+  sales_agent: "neutral",
 };
 
 export default function TefcoStaffPage() {
@@ -211,6 +213,7 @@ export default function TefcoStaffPage() {
             >
               <option value="admin">Admin</option>
               <option value="staff">Staff</option>
+              <option value="sales_agent">Sales Agent</option>
             </select>
           </div>
           <div>

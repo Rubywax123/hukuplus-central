@@ -602,6 +602,12 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
                       <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 border border-primary/20 text-primary font-medium">{c.loanProduct}</span>
                     </div>
                   )}
+                  {c.salesRepName && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Sales Agent</span>
+                      <span className="text-sm text-white">{c.salesRepName}</span>
+                    </div>
+                  )}
                   {c.extensionOfficer && (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">Extension Officer</span>
@@ -1354,6 +1360,7 @@ export default function CustomersPage() {
                 <th className="text-left px-4 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Phone</th>
                 <th className="text-left px-4 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">National ID</th>
                 <th className="text-left px-4 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agreements</th>
+                <th className="text-left px-4 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden xl:table-cell">Sales Agent</th>
                 <th className="text-left px-4 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Joined</th>
                 <th className="px-4 py-4" />
               </tr>
@@ -1410,6 +1417,11 @@ export default function CustomersPage() {
                         <FileSignature className="w-3 h-3" />
                         {c.agreementCount}
                       </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm hidden xl:table-cell">
+                      {c.salesRepName
+                        ? <span className="text-white">{c.salesRepName}</span>
+                        : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-4 text-sm text-muted-foreground">{formatDate(c.createdAt)}</td>
                     <td className="px-4 py-4">

@@ -203,6 +203,35 @@ A separate login system at `/portal/login` for retail partners (not Tefco staff)
 - From: operations@marishoma.com
 - Secrets: EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_USER, EMAIL_SMTP_PASS
 
+## Phase 5 — Staff Roles & Sales Agent
+
+### Staff Roles (staff_users table)
+- `super_admin` — Principal Admin: full access including staff management
+- `admin` — Admin: broad operational access
+- `staff` — Standard Staff: operational access, leads-only Activity tab
+- `sales_agent` — Sales Agent: restricted to leads submission (Activity) + My Customers page only
+
+### Agronomist Role (portal_users table)
+- `agronomist` — Portal user tied to a retailer; can submit leads + view own history at `/portal/agronomist`
+- Managed by staff at Customers → Agronomists tab
+
+### Sales Agent Flow
+- Created via Customers → Staff → Add Staff Member (select Sales Agent role)
+- After login, sees only: Activity (leads tab) + My Customers
+- My Customers page (`/my-customers`): shows customers where `sales_rep_name` matches agent's name + all their loan agreements
+- SalesAgentGuard in App.tsx redirects to /activity if they navigate to restricted pages
+
+### Lead Attribution
+- `submitted_by` on leads tracks who submitted: staff by email, agronomists as "Name <email>"
+- Both staff and portal agronomist sessions can POST /api/leads
+
+### Loan Register (customers.tsx)
+- Customer list table has a "Sales Agent" column (shows `sales_rep_name`, xl: breakpoint)
+- Customer detail Application Info section shows "Sales Agent" field explicitly
+
+### New API Routes
+- `GET /api/customers/assigned/mine` — returns customers where sales_rep_name ILIKE agent's name, with agreements
+
 ## Future Roadmap
 
 - Phase 5: APS (Automated Payment System) integration

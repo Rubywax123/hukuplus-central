@@ -95,6 +95,52 @@ router.get("/customers", apiKeyOrSession, async (req, res): Promise<void> => {
   });
 });
 
+// ── Get customers assigned to the logged-in sales agent ──────────────────────
+router.get("/customers/assigned/mine", apiKeyOrSession, async (req, res): Promise<void> => {
+  const agentName = (req as any).staffUser?.name;
+  if (!agentName) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const customers = await db
+    .select()
+    .from(customersTable)
+    .where(ilike(customersTable.salesRepName, `%${agentName}%`))
+    .orderBy(desc(customersTable.createdAt));
+
+  const ids = customers.map(c => c.id);
+  let agreementsMap: Record<number, any[]> = {};
+  if (ids.length) {
+    const agmts = await db
+      .select({
+        id: agreementsTable.id,
+        customerId: agreementsTable.customerId,
+        loanProduct: agreementsTable.loanProduct,
+        loanAmount: agreementsTable.loanAmount,
+        status: agreementsTable.status,
+        createdAt: agreementsTable.createdAt,
+        disbursementDate: agreementsTable.disbursementDate,
+        repaymentDate: agreementsTable.repaymentDate,
+        branchName: branchesTable.name,
+        retailerName: retailersTable.name,
+      })
+      .from(agreementsTable)
+      .leftJoin(branchesTable, eq(agreementsTable.branchId, branchesTable.id))
+      .leftJoin(retailersTable, eq(agreementsTable.retailerId, retailersTable.id))
+      .where(sql`${agreementsTable.customerId} = ANY(ARRAY[${sql.raw(ids.join(","))}]::int[])`)
+      .orderBy(desc(agreementsTable.createdAt));
+    for (const a of agmts) {
+      if (a.customerId != null) {
+        if (!agreementsMap[a.customerId]) agreementsMap[a.customerId] = [];
+        agreementsMap[a.customerId].push(a);
+      }
+    }
+  }
+
+  res.json(customers.map(c => ({ ...c, agreements: agreementsMap[c.id] ?? [] })));
+});
+
 // ── Get single customer with agreement history ────────────────────────────────
 router.get("/customers/:id", apiKeyOrSession, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);

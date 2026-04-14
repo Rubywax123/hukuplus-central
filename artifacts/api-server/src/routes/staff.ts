@@ -117,8 +117,8 @@ router.post("/staff/users", requireStaffAuth, requireSuperAdmin, async (req, res
     res.status(400).json({ error: "name, email, password required" });
     return;
   }
-  if (!["super_admin", "admin", "staff"].includes(role ?? "staff")) {
-    res.status(400).json({ error: "role must be super_admin, admin, or staff" });
+  if (!["super_admin", "admin", "staff", "sales_agent"].includes(role ?? "staff")) {
+    res.status(400).json({ error: "role must be super_admin, admin, staff, or sales_agent" });
     return;
   }
 

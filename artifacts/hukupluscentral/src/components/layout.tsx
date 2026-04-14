@@ -23,6 +23,7 @@ const ROLE_LABELS: Record<string, string> = {
   super_admin: "Principal Admin",
   admin: "Admin",
   staff: "Staff",
+  sales_agent: "Sales Agent",
 };
 
 // ─── Change Password Modal ────────────────────────────────────────────────────
@@ -310,15 +311,29 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
 
   // Combined activity badge: formitize + drawdowns for admins, leads feed for everyone
   const activityBadge = unreadCount + pendingDrawdowns + leadsFeedCount;
+  const isSalesAgent = user?.role === "sales_agent";
+
+  // Sales agents get a stripped-down nav
+  const visibleNavItems = isSalesAgent
+    ? [
+        { path: "/activity",      label: "Activity",     icon: Activity,      badge: "activity" as const },
+        { path: "/my-customers",  label: "My Customers", icon: ContactRound,  badge: undefined },
+      ]
+    : navItems;
 
   // Mobile bottom nav items (most essential for field use)
-  const mobileNavItems = [
-    { path: "/",           label: "Home",      Icon: LayoutDashboard },
-    { path: "/customers",  label: "Customers", Icon: ContactRound },
-    { path: "/activity",   label: "Activity",  Icon: Activity,   badge: activityBadge },
-    { path: "/agreements", label: "Kiosk",     Icon: Monitor },
-    { path: "/loan-apps",  label: "Loan Apps", Icon: AppWindow },
-  ];
+  const mobileNavItems = isSalesAgent
+    ? [
+        { path: "/activity",     label: "Activity",     Icon: Activity,      badge: activityBadge },
+        { path: "/my-customers", label: "My Customers", Icon: ContactRound,  badge: 0 },
+      ]
+    : [
+        { path: "/",           label: "Home",      Icon: LayoutDashboard },
+        { path: "/customers",  label: "Customers", Icon: ContactRound },
+        { path: "/activity",   label: "Activity",  Icon: Activity,   badge: activityBadge },
+        { path: "/agreements", label: "Kiosk",     Icon: Monitor },
+        { path: "/loan-apps",  label: "Loan Apps", Icon: AppWindow },
+      ];
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -350,7 +365,7 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         <div className="h-px bg-white/5 mx-4 my-3" />
 
         <nav className="flex-1 px-4 space-y-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
             const badgeCount = item.badge === "activity" ? activityBadge : 0;
             return (
@@ -374,8 +389,8 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <XeroStatusWidget />
-        <FormitizeStatusWidget />
+        {!isSalesAgent && <XeroStatusWidget />}
+        {!isSalesAgent && <FormitizeStatusWidget />}
 
         <div className="p-6 border-t border-white/5">
           <div className="flex items-center gap-3 px-2 mb-4">
