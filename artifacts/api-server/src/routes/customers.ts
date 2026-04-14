@@ -208,9 +208,10 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
   const {
     fullName, phone, email, nationalId, address, notes, xeroContactId,
     gender, dateOfBirth, maritalStatus, isEmployed, employerName,
-    extensionOfficer, salesRepName, retailerReference, marketType, loanProduct,
+    extensionOfficer, retailerReference, marketType, loanProduct,
     nokName, nokRelationship, nokNationalId, nokPhone, nokEmail, nokAddress,
   } = req.body;
+  // salesRepName is intentionally excluded — it is owned by the LR app and must not be written from Central
 
   const normPhone = phone ? (normalisePhone(phone) ?? phone) : undefined;
 
@@ -230,7 +231,6 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
       ...(isEmployed         !== undefined && { isEmployed }),
       ...(employerName       !== undefined && { employerName }),
       ...(extensionOfficer   !== undefined && { extensionOfficer }),
-      ...(salesRepName       !== undefined && { salesRepName }),
       ...(retailerReference  !== undefined && { retailerReference }),
       ...(marketType         !== undefined && { marketType }),
       ...(loanProduct        !== undefined && { loanProduct }),
