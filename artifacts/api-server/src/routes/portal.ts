@@ -11,6 +11,8 @@ import {
   clearPortalCookie,
 } from "../lib/portalAuth";
 import { requirePortalAuth, requirePortalAdmin } from "../middlewares/portalAuthMiddleware";
+import { requireStaffAuth } from "../middlewares/staffAuthMiddleware";
+import { pool } from "@workspace/db";
 
 const router = Router();
 
@@ -239,6 +241,123 @@ router.delete("/portal/users/:id", async (req, res) => {
   if (!req.isAuthenticated?.()) { res.status(401).json({ error: "Unauthorized" }); return; }
   await db.delete(portalUsersTable).where(eq(portalUsersTable.id, parseInt(req.params.id)));
   res.json({ ok: true });
+});
+
+// ── Agronomist Management (staff-only CRUD) ───────────────────────────────────
+
+router.get("/portal/agronomists", requireStaffAuth, async (_req, res) => {
+  const client = await pool.connect();
+  try {
+    const r = await client.query(`
+      SELECT pu.id, pu.name, pu.email, pu.role, pu.is_active, pu.must_change_password,
+             pu.retailer_id, pu.branch_id, pu.created_at,
+             ret.name AS retailer_name, br.name AS branch_name
+      FROM portal_users pu
+      LEFT JOIN retailers ret ON ret.id = pu.retailer_id
+      LEFT JOIN branches br ON br.id = pu.branch_id
+      WHERE pu.role = 'agronomist'
+      ORDER BY pu.created_at DESC
+    `);
+    res.json(r.rows);
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/portal/agronomists", requireStaffAuth, async (req, res) => {
+  const { name, email, password, retailerId, branchId } = req.body;
+  if (!name || !email || !password || !retailerId) {
+    res.status(400).json({ error: "name, email, password, retailerId required" });
+    return;
+  }
+  const hash = await hashPassword(password);
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `INSERT INTO portal_users (name, email, password_hash, retailer_id, branch_id, role, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, 'agronomist', true)
+       RETURNING id, name, email, role, retailer_id, branch_id, is_active, created_at`,
+      [name.trim(), email.toLowerCase().trim(), hash, parseInt(retailerId), branchId ? parseInt(branchId) : null]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err: any) {
+    if (err.code === "23505") {
+      res.status(409).json({ error: "An account with this email already exists" });
+    } else {
+      throw err;
+    }
+  } finally {
+    client.release();
+  }
+});
+
+router.patch("/portal/agronomists/:id", requireStaffAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, email, password, isActive, retailerId, branchId } = req.body;
+  const client = await pool.connect();
+  try {
+    const sets: string[] = ["updated_at = NOW()"];
+    const params: any[] = [];
+    if (name !== undefined) { params.push(name.trim()); sets.push(`name = $${params.length}`); }
+    if (email !== undefined) { params.push(email.toLowerCase().trim()); sets.push(`email = $${params.length}`); }
+    if (isActive !== undefined) { params.push(isActive); sets.push(`is_active = $${params.length}`); }
+    if (retailerId !== undefined) { params.push(parseInt(retailerId)); sets.push(`retailer_id = $${params.length}`); }
+    if (branchId !== undefined) { params.push(branchId ? parseInt(branchId) : null); sets.push(`branch_id = $${params.length}`); }
+    if (password) {
+      const hash = await hashPassword(password);
+      params.push(hash); sets.push(`password_hash = $${params.length}`);
+      sets.push("must_change_password = true");
+    }
+    params.push(id);
+    await client.query(
+      `UPDATE portal_users SET ${sets.join(", ")} WHERE id = $${params.length} AND role = 'agronomist'`,
+      params
+    );
+    res.json({ ok: true });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/portal/agronomists/:id", requireStaffAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `UPDATE portal_users SET is_active = false, updated_at = NOW() WHERE id = $1 AND role = 'agronomist'`,
+      [id]
+    );
+    res.json({ ok: true });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Agronomist: own submitted leads ──────────────────────────────────────────
+
+router.get("/portal/agronomist/leads", requirePortalAuth, async (req, res) => {
+  const portalUser = req.portalUser!;
+  if (portalUser.role !== "agronomist") {
+    res.status(403).json({ error: "Agronomist access only" });
+    return;
+  }
+  const submittedByPattern = `%<${portalUser.email}>%`;
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `SELECT id, customer_name, phone, retailer_name, branch_name, flock_size,
+              (flock_size::numeric * 2.06) AS estimated_value,
+              status, submitted_by, notes, created_at
+       FROM leads
+       WHERE submitted_by LIKE $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [submittedByPattern]
+    );
+    res.json(r.rows);
+  } finally {
+    client.release();
+  }
 });
 
 export default router;

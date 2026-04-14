@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck } from "lucide-react";
+import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck, Leaf } from "lucide-react";
 import RetailersPage from "@/pages/retailers";
 import TefcoStaffPage from "@/pages/team";
+import AgronomistsPage from "@/pages/team-agronomists";
 import { motion, AnimatePresence } from "framer-motion";
 import { ActiveAppBanner } from "@/components/layout";
 
@@ -1135,16 +1136,17 @@ export default function CustomersPage() {
   const [, navigate] = useLocation();
   const searchStr = useSearch();
   const urlParams = new URLSearchParams(searchStr ?? "");
-  const activeTab = (urlParams.get("tab") ?? "customers") as "customers" | "retailers" | "staff";
+  const activeTab = (urlParams.get("tab") ?? "customers") as "customers" | "retailers" | "staff" | "agronomists";
 
   function switchTab(tab: string) {
     navigate(tab === "customers" ? "/customers" : `/customers?tab=${tab}`);
   }
 
   const TAB_ITEMS = [
-    { id: "customers",  label: "Customers",          icon: Users },
-    { id: "retailers",  label: "Retailers & Stores",  icon: Building2 },
-    { id: "staff",      label: "Tefco Staff",          icon: ShieldCheck },
+    { id: "customers",   label: "Customers",          icon: Users },
+    { id: "retailers",   label: "Retailers & Stores",  icon: Building2 },
+    { id: "staff",       label: "Tefco Staff",          icon: ShieldCheck },
+    { id: "agronomists", label: "Agronomists",          icon: Leaf },
   ] as const;
 
   const tabBar = (
@@ -1224,6 +1226,15 @@ export default function CustomersPage() {
       <div>
         {tabBar}
         <TefcoStaffPage />
+      </div>
+    );
+  }
+
+  if (activeTab === "agronomists") {
+    return (
+      <div>
+        {tabBar}
+        <AgronomistsPage />
       </div>
     );
   }

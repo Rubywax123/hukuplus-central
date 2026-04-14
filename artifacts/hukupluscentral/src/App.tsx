@@ -14,6 +14,7 @@ import PublicSigningPage from "@/pages/public-signing";
 import KioskPage from "@/pages/kiosk";
 import PortalLoginPage from "@/pages/portal-login";
 import PortalDashboardPage from "@/pages/portal-dashboard";
+import PortalAgronomistPage from "@/pages/portal-agronomist";
 import ExecutionCertificatePage from "@/pages/execution-certificate";
 import CustomersPage from "@/pages/customers";
 import ApplicationsPage from "@/pages/applications";
@@ -60,6 +61,7 @@ function Router() {
       {/* Retailer Portal Zone (own auth) */}
       <Route path="/portal/login" component={PortalLoginPage} />
       <Route path="/portal/dashboard" component={PortalDashboardPage} />
+      <Route path="/portal/agronomist" component={PortalAgronomistPage} />
       <Route path="/portal">
         {() => { window.location.replace("/portal/login"); return null; }}
       </Route>

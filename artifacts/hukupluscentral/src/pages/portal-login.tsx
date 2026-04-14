@@ -12,8 +12,11 @@ export default function PortalLoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch("/api/portal/me").then(r => {
-      if (r.ok) setLocation("/portal/dashboard");
+    fetch("/api/portal/me").then(async r => {
+      if (r.ok) {
+        const data = await r.json();
+        setLocation(data.role === "agronomist" ? "/portal/agronomist" : "/portal/dashboard");
+      }
     });
   }, []);
 
@@ -29,7 +32,11 @@ export default function PortalLoginPage() {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Login failed"); return; }
-      setLocation("/portal/dashboard");
+      if (data.role === "agronomist") {
+        setLocation("/portal/agronomist");
+      } else {
+        setLocation("/portal/dashboard");
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {

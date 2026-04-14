@@ -7,10 +7,31 @@ const router = Router();
 const FLOCK_VALUE_PER_HEAD = 2.06;
 
 // ─── POST /api/leads — submit a new lead ─────────────────────────────────────
+// Accepts: staff session OR portal session with role=agronomist
 
-router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
+router.post("/leads", async (req, res): Promise<void> => {
+  const staffUser = (req as any).staffUser;
+  const portalUser = (req as any).portalUser;
+
+  let submittedBy: string;
+  let overrideRetailerId: number | null = null;
+  let overrideBranchId: number | null = null;
+  let overrideRetailerName: string | null = null;
+  let overrideBranchName: string | null = null;
+
+  if (staffUser) {
+    submittedBy = staffUser.email ?? staffUser.name ?? "unknown";
+  } else if (portalUser && portalUser.role === "agronomist") {
+    submittedBy = `${portalUser.name} <${portalUser.email}>`;
+    overrideRetailerId = portalUser.retailerId ?? null;
+    overrideBranchId = portalUser.branchId ?? null;
+    overrideRetailerName = portalUser.retailerName ?? null;
+  } else {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
   const { customerName, phone, retailerId, branchId, retailerName, branchName, flockSize, notes } = req.body;
-  const submittedBy = (req as any).user?.email ?? (req as any).user?.name ?? "unknown";
 
   if (!customerName?.trim() || !phone?.trim()) {
     res.status(400).json({ error: "customerName and phone are required" });
@@ -22,6 +43,11 @@ router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
     return;
   }
 
+  const finalRetailerId = overrideRetailerId ?? (retailerId ? Number(retailerId) : null);
+  const finalBranchId = overrideBranchId ?? (branchId ? Number(branchId) : null);
+  const finalRetailerName = overrideRetailerName ?? retailerName ?? null;
+  const finalBranchName = overrideBranchName ?? branchName ?? null;
+
   const client = await pool.connect();
   try {
     const result = await client.query(
@@ -32,10 +58,10 @@ router.post("/leads", requireStaffAuth, async (req, res): Promise<void> => {
       [
         customerName.trim(),
         phone.trim(),
-        retailerId ? Number(retailerId) : null,
-        branchId ? Number(branchId) : null,
-        retailerName ?? null,
-        branchName ?? null,
+        finalRetailerId,
+        finalBranchId,
+        finalRetailerName,
+        finalBranchName,
         flockSizeNum,
         notes?.trim() ?? null,
         submittedBy,
@@ -83,10 +109,9 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
 // ─── GET /api/leads/counts — global new count (for badge) ─────────────────────
 
 router.get("/leads/counts", requireStaffAuth, async (req, res): Promise<void> => {
-  const email = (req as any).user?.email ?? (req as any).user?.name ?? "";
+  const email = (req as any).staffUser?.email ?? (req as any).user?.email ?? "";
   const client = await pool.connect();
   try {
-    // Per-user feed count: unconverted leads not dismissed by this user
     const feedR = await client.query(
       `SELECT COUNT(*) AS feed_count
        FROM leads l
@@ -139,7 +164,7 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
 // ─── GET /api/leads/feed — per-user feed (undismissed unconverted leads) ──────
 
 router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
-  const email = (req as any).user?.email ?? (req as any).user?.name ?? "";
+  const email = (req as any).staffUser?.email ?? (req as any).user?.email ?? "";
   const client = await pool.connect();
   try {
     const result = await client.query(
@@ -164,7 +189,7 @@ router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
 
 router.put("/leads/:id/dismiss", requireStaffAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
-  const email = (req as any).user?.email ?? (req as any).user?.name ?? "";
+  const email = (req as any).staffUser?.email ?? (req as any).user?.email ?? "";
   const client = await pool.connect();
   try {
     await client.query(
@@ -183,7 +208,7 @@ router.put("/leads/:id/dismiss", requireStaffAuth, async (req, res): Promise<voi
 
 router.put("/leads/:id/acknowledge", requireStaffAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
-  const acknowledgedBy = (req as any).user?.email ?? (req as any).user?.name ?? "unknown";
+  const acknowledgedBy = (req as any).staffUser?.email ?? (req as any).user?.email ?? "unknown";
   const client = await pool.connect();
   try {
     const r = await client.query(
