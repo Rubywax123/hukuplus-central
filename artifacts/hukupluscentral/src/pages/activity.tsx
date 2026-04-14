@@ -563,7 +563,8 @@ function LoanAppRow({ app }: { app: LoanApplication }) {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Status</label>
               <select value={status} onChange={e => setStatus(e.target.value)}
-                className="rounded-lg border border-white/10 bg-white/5 text-white text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                className="rounded-lg border border-white/10 bg-white/5 text-white text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                style={{ colorScheme: 'dark' }}>
                 {Object.entries(LOAN_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </div>
@@ -876,7 +877,8 @@ function ComposeModal({ retailers, onClose, onSent }: { retailers: Retailer[]; o
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Retailer</label>
             <select value={retailerId} onChange={e => { setRetailerId(e.target.value); setBranchId(""); }}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+              style={{ colorScheme: 'dark' }}>
               <option value="">— Select retailer —</option>
               {retailerOptions.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
             </select>
@@ -885,7 +887,8 @@ function ComposeModal({ retailers, onClose, onSent }: { retailers: Retailer[]; o
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Branch (optional)</label>
               <select value={branchId} onChange={e => setBranchId(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                style={{ colorScheme: 'dark' }}>
                 <option value="">All branches</option>
                 {branches.map(b => <option key={b.branch_id} value={String(b.branch_id)}>{b.branch_name}</option>)}
               </select>
@@ -1497,6 +1500,7 @@ function DisbursementModal({ notification, onClose, onDone }: {
                   value={bankCode}
                   onChange={e => setBankCode(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  style={{ colorScheme: 'dark' }}
                 >
                   <option value="">— Select bank account —</option>
                   {bankAccounts.map(b => (
@@ -1961,6 +1965,7 @@ function PaymentModal({ notification, onClose, onDone }: {
                     value={bankCode}
                     onChange={e => setBankCode(e.target.value)}
                     className="w-full bg-white/5 border border-white/15 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-amber-500/50"
+                    style={{ colorScheme: 'dark' }}
                   >
                     <option value="">Select account…</option>
                     {bankAccounts.map(a => (
@@ -3277,6 +3282,7 @@ function LeadsTab() {
               value={retailerFilter}
               onChange={e => setRetailerFilter(e.target.value)}
               className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/12 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+              style={{ colorScheme: 'dark' }}
             >
               <option value="">All retailers</option>
               {retailerNames.map(n => <option key={n} value={n}>{n}</option>)}
@@ -3291,6 +3297,7 @@ function LeadsTab() {
               onChange={e => setStoreFilter(e.target.value)}
               disabled={storeNames.length === 0}
               className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/12 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-40"
+              style={{ colorScheme: 'dark' }}
             >
               <option value="">All stores</option>
               {storeNames.map(n => <option key={n} value={n}>{n}</option>)}
