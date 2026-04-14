@@ -99,15 +99,12 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
   const [totalRetailersResult] = await db.select({ count: sql<number>`count(*)::int` }).from(retailersTable);
   const [totalBranchesResult] = await db.select({ count: sql<number>`count(*)::int` }).from(branchesTable);
   const [totalAgreementsResult] = await db.select({ count: sql<number>`count(*)::int` }).from(agreementsTable);
-  // Pending Signatures: only Novafeeds agreements (managed in this app's kiosk signing
-  // workflow) that haven't been signed or marked as done. Agreements handled directly
-  // in Formitize can be dismissed via "Mark Done" to remove them from this count.
+  // Pending Signatures: all agreements not yet signed and not dismissed via Mark Done.
   const [pendingResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(agreementsTable)
     .where(and(
       eq(agreementsTable.status, "pending"),
-      eq(agreementsTable.loanProduct, "Novafeeds"),
       isNull(agreementsTable.markedDoneAt),
     ));
 
@@ -122,7 +119,7 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
     .select({
       product: agreementsTable.loanProduct,
       total: sql<number>`count(*)::int`,
-      pending: sql<number>`sum(case when status = 'pending' then 1 else 0 end)::int`,
+      pending: sql<number>`sum(case when status = 'pending' and marked_done_at is null then 1 else 0 end)::int`,
       signed: sql<number>`sum(case when status = 'signed' then 1 else 0 end)::int`,
     })
     .from(agreementsTable)
