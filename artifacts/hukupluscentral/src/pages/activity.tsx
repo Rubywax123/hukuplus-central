@@ -1647,6 +1647,7 @@ function PaymentModal({ notification, onClose, onDone }: {
   const [selectedStore, setSelectedStore] = useState("");
   const [markLoanComplete, setMarkLoanComplete] = useState(true);
   const [resultErrors, setResultErrors] = useState<string[]>([]);
+  const [overpaymentErr, setOverpaymentErr] = useState<string | null>(null);
   const [lrAutoCompleted, setLrAutoCompleted] = useState(false);
   const [creditPosted, setCreditPosted] = useState<number>(0);
 
@@ -1757,6 +1758,7 @@ function PaymentModal({ notification, onClose, onDone }: {
       if (data.errors?.length) setResultErrors(data.errors);
       setLrAutoCompleted(!!data.autoCompleted);
       if (data.overpaymentPosted && data.overpaymentAmount > 0) setCreditPosted(data.overpaymentAmount);
+      if (data.overpaymentError) setOverpaymentErr(data.overpaymentError);
       setStep("done");
       onDone();
     },
@@ -2001,6 +2003,19 @@ function PaymentModal({ notification, onClose, onDone }: {
                   </div>
                 )}
               </div>
+
+              {/* Overpayment failed — manual action required */}
+              {overpaymentErr && (
+                <div className="mx-2 p-4 rounded-xl bg-red-500/10 border border-red-500/30">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-red-300">Credit not posted — action required</p>
+                      <p className="text-xs text-red-300/80 mt-1">{overpaymentErr}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Credit / overpayment confirmation */}
               {creditPosted > 0 && (
