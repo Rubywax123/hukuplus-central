@@ -1,19 +1,12 @@
-import { Router, type Request, type Response, type NextFunction } from "express";
+import { Router, type Request, type Response } from "express";
 import { pool } from "@workspace/db";
 import { requirePortalAuth } from "../middlewares/portalAuthMiddleware";
+import { apiKeyOrSession } from "../middlewares/staffAuthMiddleware";
 import { sendEmail, loanApplicationEmail, drawdownRequestEmail } from "../lib/mailer";
 import { format, differenceInDays, parseISO } from "date-fns";
 
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const apiKey = req.headers["x-api-key"];
-  if (apiKey && apiKey === process.env.TAKUNDWA_API_KEY) {
-    return next();
-  }
-  if (!(req.session as any)?.staffUser) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
-  next();
-}
+// Alias so all existing requireAuth usages work without individual changes
+const requireAuth = apiKeyOrSession;
 
 const router = Router();
 const OPS_EMAIL = "operations@marishoma.com";
