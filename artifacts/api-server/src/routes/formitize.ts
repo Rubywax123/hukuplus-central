@@ -1105,9 +1105,20 @@ router.post("/formitize/webhook", async (req, res) => {
     if (hit) customerId = hit.id;
   }
   if (!customerId && normPhone) {
-    const [hit] = await db.select({ id: customersTable.id })
+    const [hit] = await db.select({ id: customersTable.id, fullName: customersTable.fullName })
       .from(customersTable).where(eq(customersTable.phone, normPhone));
-    if (hit) customerId = hit.id;
+    if (hit) {
+      // Require at least one meaningful word in common to avoid mis-linking
+      // (e.g. "Onias Chirambwi" vs "Clement Nherera" share no words — skip).
+      const hitWords   = (hit.fullName ?? "").toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      const formWords  = customerName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      const nameMatch  = hitWords.some(w => formWords.includes(w));
+      if (nameMatch) {
+        customerId = hit.id;
+      } else {
+        console.warn(`[formitize:webhook] Phone ${normPhone} matches customer "${hit.fullName}" but form name is "${customerName}" — skipping phone match to avoid mis-link`);
+      }
+    }
   }
   if (!customerId && nationalIdRaw) {
     const [hit] = await db.select({ id: customersTable.id })
