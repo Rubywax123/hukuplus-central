@@ -302,147 +302,30 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
   let overpaymentAmount = 0;
   let overpaymentError: string | null = null;
 
-  // ── STEP 1: Resolve an AccountCode from the user-selected invoices ───────────
-  // Required for the block-payment overpayment line item. We try each selected
-  // invoice individually (full response includes LineItems), then fall back to
-  // the contact's recent invoices.
-  let accountCode = "";
-
-  for (const alloc of allocations) {
-    if (accountCode) break;
-    try {
-      const invRes = await fetch(
-        `https://api.xero.com/api.xro/2.0/Invoices/${alloc.invoiceId}`,
-        { headers: xeroHeaders(auth) }
-      );
-      if (invRes.ok) {
-        const invData = await invRes.json();
-        for (const li of (invData.Invoices?.[0]?.LineItems ?? [])) {
-          if (li.AccountCode) { accountCode = li.AccountCode; break; }
-        }
-      }
-    } catch { /* non-fatal */ }
-  }
-
-  if (!accountCode && xeroContactId) {
-    try {
-      const recentRes = await fetch(
-        `https://api.xero.com/api.xro/2.0/Invoices?ContactIDs=${xeroContactId}&Statuses=AUTHORISED,PARTIAL,PAID&order=Date DESC&pageSize=20`,
-        { headers: xeroHeaders(auth) }
-      );
-      if (recentRes.ok) {
-        const recentData = await recentRes.json();
-        for (const inv of (recentData.Invoices ?? [])) {
-          if (accountCode) break;
-          try {
-            const singleRes = await fetch(
-              `https://api.xero.com/api.xro/2.0/Invoices/${inv.InvoiceID}`,
-              { headers: xeroHeaders(auth) }
-            );
-            if (singleRes.ok) {
-              const singleData = await singleRes.json();
-              for (const li of (singleData.Invoices?.[0]?.LineItems ?? [])) {
-                if (li.AccountCode) { accountCode = li.AccountCode; break; }
-              }
-            }
-          } catch { /* non-fatal */ }
-        }
-      }
-    } catch { /* non-fatal */ }
-  }
-
-  console.log(`[payment] AccountCode resolved: "${accountCode}" for contact ${xeroContactId}`);
-
-  if (!accountCode) {
-    res.status(422).json({
-      error: "Cannot post payment: no GL account code found on this customer's invoices. Please ensure their invoices in Xero have an account code set, then retry.",
-    });
-    return;
-  }
-
-  // ── STEP 2: Calculate the full block amount ───────────────────────────────────
-  // invoiceTotal = what the user explicitly allocated; creditAmount = the remainder
-  // that was left over after covering selected invoices. Together they equal the
-  // full cash received from the customer.
-  const invoiceTotal = Math.round(
-    allocations.reduce((s: number, a: { amount: number }) => s + (a.amount || 0), 0) * 100
-  ) / 100;
+  // ── STEP 1: Build the list of invoice payments for the batch ─────────────────
+  // BatchPayments creates ONE bank transaction in Xero covering multiple invoices.
+  // This is the correct API for "block payment → allocate to invoices".
+  // No AccountCode is needed for line items — the bank account is used directly.
   const credit = Math.round(((creditAmount ?? 0) > 0.01 ? (creditAmount ?? 0) : 0) * 100) / 100;
-  const totalPayment = Math.round((invoiceTotal + credit) * 100) / 100;
 
-  // ── STEP 3: Post ONE block RECEIVE-OVERPAYMENT to Xero ───────────────────────
-  // This creates a single bank transaction matching the bank-statement entry so
-  // reconciliation is straightforward. Allocations reduce it per-invoice; any
-  // remainder automatically becomes a credit balance on the contact.
-  const blockRes = await fetch("https://api.xero.com/api.xro/2.0/Overpayments", {
-    method: "POST",
-    headers: xeroHeaders(auth),
-    body: JSON.stringify({
-      Type: "RECEIVE-OVERPAYMENT",
-      Contact: { ContactID: xeroContactId },
-      Date: paymentDate,
-      BankAccount: { Code: bankAccountCode },
-      ...(storeName ? { Reference: storeName } : {}),
-      LineAmountTypes: "Inclusive",
-      LineItems: [{
-        Description: storeName ? `Payment received [${storeName}]` : "Payment received",
-        UnitAmount: totalPayment,
-        AccountCode: accountCode,
-      }],
-    }),
-  });
+  type BatchPaymentEntry = { Invoice: { InvoiceID: string }; Amount: number; Date: string };
+  const batchPayments: BatchPaymentEntry[] = [];
 
-  if (!blockRes.ok) {
-    const errText = await blockRes.text();
-    console.error(`[payment] Block payment POST failed: ${errText.slice(0, 300)}`);
-    res.status(502).json({ error: `Failed to post payment to Xero: ${errText.slice(0, 200)}` });
-    return;
-  }
-
-  const blockData = await blockRes.json();
-  const overpaymentId = blockData.Overpayments?.[0]?.OverpaymentID;
-
-  if (!overpaymentId) {
-    res.status(502).json({ error: "Xero returned no OverpaymentID for the block payment" });
-    return;
-  }
-
-  console.log(`[payment] Block payment created: OverpaymentID=${overpaymentId} $${totalPayment} for contact ${xeroContactId}`);
-
-  // ── STEP 4: Allocate to user-selected invoices ────────────────────────────────
   for (const alloc of allocations) {
     if (!alloc.amount || alloc.amount <= 0.005) continue;
-    try {
-      const allocRes = await fetch(
-        `https://api.xero.com/api.xro/2.0/Overpayments/${overpaymentId}/Allocations`,
-        {
-          method: "PUT",
-          headers: xeroHeaders(auth),
-          body: JSON.stringify({
-            Allocations: [{
-              Invoice: { InvoiceID: alloc.invoiceId },
-              Amount: Math.round(alloc.amount * 100) / 100,
-            }],
-          }),
-        }
-      );
-      if (allocRes.ok) {
-        applied.push(alloc.invoiceId);
-      } else {
-        const errText = await allocRes.text();
-        errors.push(`Invoice ${alloc.invoiceId}: ${allocRes.status} — ${errText.slice(0, 200)}`);
-      }
-    } catch (err: any) {
-      errors.push(`Invoice ${alloc.invoiceId}: ${err.message}`);
-    }
+    batchPayments.push({
+      Invoice: { InvoiceID: alloc.invoiceId },
+      Amount: Math.round(alloc.amount * 100) / 100,
+      Date: paymentDate,
+    });
   }
 
-  // ── STEP 5: Apply remaining credit to other outstanding invoices (oldest first) ─
-  // Whatever still cannot be allocated stays as a credit balance automatically.
-  if (credit > 0.01 && xeroContactId) {
-    const appliedSet = new Set(allocations.map(a => a.invoiceId));
-    let creditRemaining = credit;
+  // ── STEP 2: Apply credit to other outstanding invoices within the same batch ──
+  // Oldest first. Whatever cannot be covered stays as a credit balance.
+  let creditRemaining = credit;
+  const creditAppliedSet = new Set(allocations.map(a => a.invoiceId));
 
+  if (credit > 0.01 && xeroContactId) {
     try {
       const otherInvRes = await fetch(
         `https://api.xero.com/api.xro/2.0/Invoices?ContactIDs=${xeroContactId}&Statuses=AUTHORISED,PARTIAL&order=Date ASC&pageSize=50`,
@@ -451,45 +334,145 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
       if (otherInvRes.ok) {
         const otherInvData = await otherInvRes.json();
         const otherInvoices = (otherInvData.Invoices ?? []).filter(
-          (inv: any) => !appliedSet.has(inv.InvoiceID) && parseFloat(String(inv.AmountDue ?? 0)) > 0.005
+          (inv: any) => !creditAppliedSet.has(inv.InvoiceID) && parseFloat(String(inv.AmountDue ?? 0)) > 0.005
         );
         for (const inv of otherInvoices) {
           if (creditRemaining <= 0.005) break;
           const amountDue = parseFloat(String(inv.AmountDue ?? 0));
           const apply = Math.min(creditRemaining, amountDue);
-          try {
-            const applyRes = await fetch(
-              `https://api.xero.com/api.xro/2.0/Overpayments/${overpaymentId}/Allocations`,
-              {
-                method: "PUT",
-                headers: xeroHeaders(auth),
-                body: JSON.stringify({
-                  Allocations: [{
-                    Invoice: { InvoiceID: inv.InvoiceID },
-                    Amount: Math.round(apply * 100) / 100,
-                  }],
-                }),
-              }
-            );
-            if (applyRes.ok) {
-              creditRemaining = Math.round((creditRemaining - apply) * 100) / 100;
-              applied.push(inv.InvoiceID);
-            } else {
-              const errText = await applyRes.text();
-              console.warn(`[payment] Credit allocation to ${inv.InvoiceID} failed: ${errText.slice(0, 120)}`);
-            }
-          } catch { /* non-fatal */ }
+          batchPayments.push({
+            Invoice: { InvoiceID: inv.InvoiceID },
+            Amount: Math.round(apply * 100) / 100,
+            Date: paymentDate,
+          });
+          creditAppliedSet.add(inv.InvoiceID);
+          creditRemaining = Math.round((creditRemaining - apply) * 100) / 100;
         }
       }
     } catch (err: any) {
-      console.warn(`[payment] Credit allocation step failed: ${err.message}`);
+      console.warn(`[payment] Credit invoice lookup failed: ${err.message}`);
+    }
+  }
+
+  // ── STEP 3: POST one BatchPayment to Xero ────────────────────────────────────
+  if (batchPayments.length === 0) {
+    res.status(400).json({ error: "No valid invoice allocations to post" });
+    return;
+  }
+
+  const batchRes = await fetch("https://api.xero.com/api.xro/2.0/BatchPayments", {
+    method: "PUT",
+    headers: xeroHeaders(auth),
+    body: JSON.stringify({
+      BatchPayments: [{
+        Account: { Code: bankAccountCode },
+        ...(storeName ? { Reference: storeName } : {}),
+        Date: paymentDate,
+        Payments: batchPayments,
+      }],
+    }),
+  });
+
+  if (!batchRes.ok) {
+    const errText = await batchRes.text();
+    console.error(`[payment] BatchPayment PUT failed (${batchRes.status}): ${errText.slice(0, 400)}`);
+    res.status(502).json({ error: `Failed to post payment to Xero (${batchRes.status}): ${errText.slice(0, 200)}` });
+    return;
+  }
+
+  const batchData = await batchRes.json();
+  console.log(`[payment] BatchPayment created for contact ${xeroContactId}, ${batchPayments.length} invoice(s), total $${batchPayments.reduce((s, p) => s + p.Amount, 0).toFixed(2)}`);
+
+  // Collect applied invoice IDs from the batch response
+  for (const bp of (batchData.BatchPayments ?? [])) {
+    for (const p of (bp.Payments ?? [])) {
+      if (p.Invoice?.InvoiceID) applied.push(p.Invoice.InvoiceID);
+    }
+  }
+
+  // ── STEP 4: If genuine credit remainder exists, post a Receive Money entry ────
+  // This only happens when there are no more outstanding invoices to absorb the
+  // remaining credit. We post a separate RECEIVE-OVERPAYMENT so the credit sits
+  // against the contact in Xero. AccountCode is needed here; we look it up from
+  // the contact's invoices as a best-effort step.
+  if (creditRemaining > 0.01) {
+    let accountCode = "";
+
+    // Try applied invoices first
+    for (const alloc of allocations) {
+      if (accountCode) break;
+      try {
+        const invRes = await fetch(
+          `https://api.xero.com/api.xro/2.0/Invoices/${alloc.invoiceId}`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (invRes.ok) {
+          const invData = await invRes.json();
+          for (const li of (invData.Invoices?.[0]?.LineItems ?? [])) {
+            if (li.AccountCode) { accountCode = li.AccountCode; break; }
+          }
+        }
+      } catch { /* non-fatal */ }
     }
 
-    // creditRemaining stays on the overpayment as a credit balance — no further action needed
-    if (creditRemaining > 0.01) {
-      overpaymentPosted = true;
-      overpaymentAmount = Math.round(creditRemaining * 100) / 100;
-      console.log(`[payment] $${overpaymentAmount} remains as credit balance on contact ${xeroContactId}`);
+    // Fall back to recent invoices
+    if (!accountCode && xeroContactId) {
+      try {
+        const recentRes = await fetch(
+          `https://api.xero.com/api.xro/2.0/Invoices?ContactIDs=${xeroContactId}&Statuses=AUTHORISED,PARTIAL,PAID&order=Date DESC&pageSize=20`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (recentRes.ok) {
+          const recentData = await recentRes.json();
+          for (const inv of (recentData.Invoices ?? [])) {
+            if (accountCode) break;
+            try {
+              const singleRes = await fetch(
+                `https://api.xero.com/api.xro/2.0/Invoices/${inv.InvoiceID}`,
+                { headers: xeroHeaders(auth) }
+              );
+              if (singleRes.ok) {
+                const singleData = await singleRes.json();
+                for (const li of (singleData.Invoices?.[0]?.LineItems ?? [])) {
+                  if (li.AccountCode) { accountCode = li.AccountCode; break; }
+                }
+              }
+            } catch { /* non-fatal */ }
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    console.log(`[payment] Credit remainder $${creditRemaining} — accountCode="${accountCode}"`);
+
+    if (!accountCode) {
+      overpaymentError = `Credit of $${creditRemaining.toFixed(2)} could not post automatically (no account code found on invoices). Please post a Receive Overpayment of $${creditRemaining.toFixed(2)} for this customer manually in Xero.`;
+    } else {
+      const ovRes = await fetch("https://api.xero.com/api.xro/2.0/Overpayments", {
+        method: "PUT",
+        headers: xeroHeaders(auth),
+        body: JSON.stringify({
+          Type: "RECEIVE-OVERPAYMENT",
+          Contact: { ContactID: xeroContactId },
+          Date: paymentDate,
+          BankAccount: { Code: bankAccountCode },
+          LineAmountTypes: "Inclusive",
+          LineItems: [{
+            Description: `Customer credit — overpayment${storeName ? ` [${storeName}]` : ""}`,
+            UnitAmount: creditRemaining,
+            AccountCode: accountCode,
+          }],
+        }),
+      });
+      if (ovRes.ok) {
+        overpaymentPosted = true;
+        overpaymentAmount = creditRemaining;
+        console.log(`[payment] Credit overpayment of $${creditRemaining} posted for contact ${xeroContactId}`);
+      } else {
+        const errText = await ovRes.text();
+        console.warn(`[payment] Credit overpayment POST failed (${ovRes.status}): ${errText.slice(0, 300)}`);
+        overpaymentError = `Credit of $${creditRemaining.toFixed(2)} could not post to Xero (${ovRes.status}). Please post a Receive Overpayment of $${creditRemaining.toFixed(2)} for this customer manually in Xero.`;
+      }
     }
   }
 
