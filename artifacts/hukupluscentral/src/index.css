@@ -91,3 +91,10 @@
     @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent;
   }
 }
+
+/* Native select dropdowns render with a white OS background on Windows/Chrome.
+   Force option text to dark so it's always legible regardless of colorScheme. */
+select option {
+  color: #111827;
+  background: #ffffff;
+}
