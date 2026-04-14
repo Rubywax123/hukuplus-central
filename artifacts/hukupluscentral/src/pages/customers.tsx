@@ -37,9 +37,24 @@ interface Customer {
   nokPhone: string | null;
   nokEmail: string | null;
   nokAddress: string | null;
+  // Home store
+  retailerId: number | null;
+  branchId: number | null;
+  retailerName: string | null;
+  branchName: string | null;
   createdAt: string;
   updatedAt: string;
   agreementCount: number;
+}
+
+interface RetailerOption {
+  id: number;
+  name: string;
+}
+
+interface BranchOption {
+  id: number;
+  name: string;
 }
 
 interface Agreement {
@@ -358,6 +373,19 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
   const queryClient = useQueryClient();
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
+  const [selectedRetailerId, setSelectedRetailerId] = useState<number | null>(null);
+
+  const { data: retailers = [] } = useQuery<RetailerOption[]>({
+    queryKey: ["retailers-list"],
+    queryFn: () => fetch(`${BASE}/api/retailers`, { credentials: "include" }).then(r => r.json()),
+    enabled: editMode,
+  });
+
+  const { data: branches = [] } = useQuery<BranchOption[]>({
+    queryKey: ["branches-for-retailer", selectedRetailerId],
+    queryFn: () => fetch(`${BASE}/api/retailers/${selectedRetailerId}/branches`, { credentials: "include" }).then(r => r.json()),
+    enabled: editMode && selectedRetailerId != null,
+  });
 
   const { data, isLoading } = useQuery<CustomerDetail>({
     queryKey: ["customer", customerId],
@@ -388,7 +416,10 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
       nationalId: data.customer.nationalId ?? "",
       address: data.customer.address ?? "",
       notes: data.customer.notes ?? "",
+      retailerId: data.customer.retailerId ?? null,
+      branchId: data.customer.branchId ?? null,
     });
+    setSelectedRetailerId(data.customer.retailerId ?? null);
     setEditMode(true);
   };
 
@@ -590,6 +621,59 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
                 </div>
               </div>
             )}
+
+            {/* Home Store */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Building2 className="w-3.5 h-3.5" /> Home Store
+              </p>
+              {editMode ? (
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Retailer</label>
+                    <select
+                      value={editForm.retailerId ?? ""}
+                      onChange={e => {
+                        const rid = e.target.value ? Number(e.target.value) : null;
+                        setSelectedRetailerId(rid);
+                        setEditForm(f => ({ ...f, retailerId: rid, branchId: null }));
+                      }}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50"
+                    >
+                      <option value="">— No retailer —</option>
+                      {retailers.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {selectedRetailerId != null && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Branch / Store</label>
+                      <select
+                        value={editForm.branchId ?? ""}
+                        onChange={e => {
+                          const bid = e.target.value ? Number(e.target.value) : null;
+                          setEditForm(f => ({ ...f, branchId: bid }));
+                        }}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50"
+                      >
+                        <option value="">— No branch —</option>
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm">
+                  {c.retailerName
+                    ? <span className="text-white">{c.retailerName}{c.branchName ? ` — ${c.branchName}` : ""}</span>
+                    : <span className="text-muted-foreground italic">No store assigned</span>
+                  }
+                </p>
+              )}
+            </div>
 
             {/* Application Info */}
             {(c.salesRepName || c.retailerReference || c.marketType || c.loanProduct) && (

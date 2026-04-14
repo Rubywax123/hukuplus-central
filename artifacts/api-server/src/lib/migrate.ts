@@ -1003,6 +1003,10 @@ export async function runMigrations() {
         ADD COLUMN IF NOT EXISTS loan_product TEXT NOT NULL DEFAULT 'HukuPlus';
     `);
 
+    // ── Home store columns on customers (retailer_id + branch_id) ─────────────
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS retailer_id INTEGER REFERENCES retailers(id);`);
+    await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS branch_id   INTEGER REFERENCES branches(id);`);
+
     // ── Data correction: Edna Makonese — New Customer Application (Profeeds Masvingo)
     // Store email masvingo@profeeds.co.zw was not matched by the hardcoded field name list
     // so retailer resolution fell back to Novafeeds; confirmed Profeeds Masvingo ──

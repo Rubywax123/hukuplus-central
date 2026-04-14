@@ -146,7 +146,47 @@ router.get("/customers/:id", apiKeyOrSession, async (req, res): Promise<void> =>
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
 
-  const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, id));
+  const customerRows = await db
+    .select({
+      id: customersTable.id,
+      fullName: customersTable.fullName,
+      nationalId: customersTable.nationalId,
+      phone: customersTable.phone,
+      email: customersTable.email,
+      formitizeCrmId: customersTable.formitizeCrmId,
+      xeroContactId: customersTable.xeroContactId,
+      address: customersTable.address,
+      notes: customersTable.notes,
+      gender: customersTable.gender,
+      dateOfBirth: customersTable.dateOfBirth,
+      maritalStatus: customersTable.maritalStatus,
+      employerName: customersTable.employerName,
+      isEmployed: customersTable.isEmployed,
+      nokName: customersTable.nokName,
+      nokRelationship: customersTable.nokRelationship,
+      nokNationalId: customersTable.nokNationalId,
+      nokPhone: customersTable.nokPhone,
+      nokEmail: customersTable.nokEmail,
+      nokAddress: customersTable.nokAddress,
+      extensionOfficer: customersTable.extensionOfficer,
+      salesRepName: customersTable.salesRepName,
+      retailerReference: customersTable.retailerReference,
+      marketType: customersTable.marketType,
+      loanProduct: customersTable.loanProduct,
+      rawApplicationData: customersTable.rawApplicationData,
+      createdAt: customersTable.createdAt,
+      updatedAt: customersTable.updatedAt,
+      retailerId: customersTable.retailerId,
+      branchId: customersTable.branchId,
+      retailerName: retailersTable.name,
+      branchName: branchesTable.name,
+    })
+    .from(customersTable)
+    .leftJoin(retailersTable, eq(customersTable.retailerId, retailersTable.id))
+    .leftJoin(branchesTable, eq(customersTable.branchId, branchesTable.id))
+    .where(eq(customersTable.id, id));
+
+  const customer = customerRows[0];
   if (!customer) { res.status(404).json({ error: "Customer not found" }); return; }
 
   const agreements = await db
@@ -210,6 +250,7 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
     gender, dateOfBirth, maritalStatus, isEmployed, employerName,
     extensionOfficer, retailerReference, marketType, loanProduct,
     nokName, nokRelationship, nokNationalId, nokPhone, nokEmail, nokAddress,
+    retailerId, branchId,
   } = req.body;
   // salesRepName is intentionally excluded — it is owned by the LR app and must not be written from Central
 
@@ -240,6 +281,8 @@ router.put("/customers/:id", async (req, res): Promise<void> => {
       ...(nokPhone           !== undefined && { nokPhone }),
       ...(nokEmail           !== undefined && { nokEmail }),
       ...(nokAddress         !== undefined && { nokAddress }),
+      ...(retailerId         !== undefined && { retailerId: retailerId === null ? null : Number(retailerId) }),
+      ...(branchId           !== undefined && { branchId:   branchId   === null ? null : Number(branchId) }),
       updatedAt: new Date(),
     })
     .where(eq(customersTable.id, id))

@@ -1,6 +1,8 @@
-import { pgTable, text, serial, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, jsonb, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { retailersTable } from "./retailers";
+import { branchesTable } from "./branches";
 
 export const customersTable = pgTable("customers", {
   id: serial("id").primaryKey(),
@@ -27,6 +29,10 @@ export const customersTable = pgTable("customers", {
   nokPhone: text("nok_phone"),
   nokEmail: text("nok_email"),
   nokAddress: text("nok_address"),
+
+  // Home store — the retailer and branch where the customer shops / applied
+  retailerId: integer("retailer_id").references(() => retailersTable.id),
+  branchId: integer("branch_id").references(() => branchesTable.id),
 
   // Application meta
   // extensionOfficer = the store employee/manager who dealt with the customer at the branch

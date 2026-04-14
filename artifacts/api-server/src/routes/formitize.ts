@@ -1171,6 +1171,18 @@ router.post("/formitize/webhook", async (req, res) => {
         [customerId, ...entries.map(([, v]) => v), JSON.stringify(fieldMap)]
       );
     }
+    // Backfill home store (retailer_id / branch_id) onto the customer record using COALESCE
+    // so a manually-corrected store is never overwritten by an incoming webhook
+    if (retailerId || branchId) {
+      await pool.query(
+        `UPDATE customers
+         SET retailer_id = COALESCE(retailer_id, $2),
+             branch_id   = COALESCE(branch_id, $3),
+             updated_at  = NOW()
+         WHERE id = $1`,
+        [customerId, retailerId ?? null, branchId ?? null]
+      );
+    }
     console.log(`[formitize:webhook] Enriched customer #${customerId} for "${customerName}"`);
   }
 
