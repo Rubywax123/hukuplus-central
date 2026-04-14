@@ -3493,6 +3493,28 @@ export default function ActivityPage() {
     }
   }, [user, isAdmin, tab]);
 
+  // ── Pre-fetch all dropdown data eagerly on page load ─────────────────────────
+  // Child components (tabs + modals) use the same query keys so they get cached
+  // data instantly instead of showing blank dropdowns while fetching.
+  const fetchRetailers = () =>
+    fetch(`${BASE}/api/applications/retailers`, { credentials: "include" }).then(r => r.ok ? r.json() : []);
+  useQuery({ queryKey: ["retailers-list"],     queryFn: fetchRetailers, staleTime: 5 * 60 * 1000 });
+  useQuery({ queryKey: ["retailers-for-leads"], queryFn: fetchRetailers, staleTime: 5 * 60 * 1000 });
+  useQuery({
+    queryKey: ["disbursement-bank-accounts"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/disbursements/bank-accounts`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      return d.bankAccounts ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  useQuery({
+    queryKey: ["bank-accounts"],
+    queryFn: () => fetch(`${BASE}/api/payments/bank-accounts`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: counts } = useQuery<CountsResponse>({
     queryKey: ["notification-counts"],
     queryFn: async () => {

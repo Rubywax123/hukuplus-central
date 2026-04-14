@@ -376,15 +376,16 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
   const [selectedRetailerId, setSelectedRetailerId] = useState<number | null>(null);
 
   const { data: retailers = [] } = useQuery<RetailerOption[]>({
-    queryKey: ["retailers-list"],
+    queryKey: ["retailers-dropdown"],
     queryFn: () => fetch(`${BASE}/api/retailers`, { credentials: "include" }).then(r => r.json()),
-    enabled: editMode,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: branches = [] } = useQuery<BranchOption[]>({
     queryKey: ["branches-for-retailer", selectedRetailerId],
     queryFn: () => fetch(`${BASE}/api/retailers/${selectedRetailerId}/branches`, { credentials: "include" }).then(r => r.json()),
-    enabled: editMode && selectedRetailerId != null,
+    enabled: selectedRetailerId != null,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data, isLoading } = useQuery<CustomerDetail>({
