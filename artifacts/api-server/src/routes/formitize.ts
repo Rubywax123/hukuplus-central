@@ -877,13 +877,26 @@ router.post("/formitize/webhook", async (req, res) => {
     // (e.g. "lupane@profeeds.co.zw" → retailer "profeeds").
     // Search ALL retailers' branches for the correct match; fall back to Novafeeds if nothing found.
     // formtext_3 is used by the re-application form for store name; formtext_5 for standard agreements
-    const storeBranchName = findField("formtext_5", "formtext_3", "storebranch", "store branch", "branchname");
+    // formtext_1 is used by the New Customer Application form for store/branch name
+    const storeBranchName = findField(
+      "formtext_5", "formtext_3", "storebranch", "store branch", "branchname",
+      "storebranch", "formtext_1"
+    );
+
+    // Direct retailer name from form — most reliable signal (e.g. "Retail Company: Profeeds")
+    const explicitRetailerFromForm = findField(
+      "retailcompany", "retail company", "retailercompany", "retailer company",
+      "retailchain", "retail chain", "feedcompany", "feed company",
+      "storechain", "store chain", "company"
+    );
 
     // Extract retailer hint from store email — field name differs between form types:
     // storeemail_1 / sendemail (standard), sendmail / formemail_1 (re-application)
+    // Also try generic "store email" / "storeemail" variants used by some forms
     const storeEmailRaw = (
       fieldMap["storeemail_1"] || fieldMap["sendemail"] ||
-      fieldMap["sendmail"]     || fieldMap["formemail_1"] || ""
+      fieldMap["sendmail"]     || fieldMap["formemail_1"] ||
+      findField("storeemail", "store email", "storemail", "shopmail", "retaileremail") || ""
     ).trim();
     const emailDomain = storeEmailRaw.includes("@") ? storeEmailRaw.split("@")[1] : "";
     const retailerHint = emailDomain.split(".")[0]?.toLowerCase() || ""; // e.g. "profeeds" from "lupane@profeeds.co.zw"
@@ -901,9 +914,24 @@ router.post("/formitize/webhook", async (req, res) => {
       const allBranches = await db.select().from(branchesTable);
       const searchWords = storeBranchName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
-      // Narrow candidates by retailer hint from email domain (reduces false matches)
+      // Narrow candidates — priority order:
+      // 1. Explicit "Retail Company" field from the form (most reliable)
+      // 2. Retailer hint from store email domain
+      // 3. All branches (widest search, highest risk of ambiguous match)
       let candidates = allBranches;
-      if (retailerHint.length > 2) {
+
+      if (explicitRetailerFromForm && explicitRetailerFromForm.length > 2) {
+        const explicitRetailers = await db.select().from(retailersTable)
+          .where(ilike(retailersTable.name, `%${explicitRetailerFromForm}%`));
+        if (explicitRetailers.length === 1) {
+          const narrowed = allBranches.filter(b => b.retailerId === explicitRetailers[0].id);
+          if (narrowed.length > 0) {
+            candidates = narrowed;
+            console.log(`[formitize] Retailer narrowed via explicit form field "${explicitRetailerFromForm}" → ${explicitRetailers[0].name}`);
+          }
+        }
+      } else if (retailerHint.length > 2) {
+        // Narrow candidates by retailer hint from email domain (reduces false matches)
         const hintRetailers = await db.select().from(retailersTable)
           .where(ilike(retailersTable.name, `%${retailerHint}%`));
         if (hintRetailers.length === 1) {
