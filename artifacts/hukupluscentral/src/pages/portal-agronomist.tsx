@@ -27,7 +27,23 @@ interface MyLead {
   estimated_value: number;
   status: string;
   notes: string | null;
+  loan_product: string;
   created_at: string;
+}
+
+const PRODUCTS = [
+  { id: "HukuPlus",     label: "HukuPlus",      color: "text-amber-300",   bg: "bg-amber-500/20 border-amber-500/40",   inactive: "bg-white/5 border-white/10 text-white/50" },
+  { id: "Revolver",     label: "Revolver",       color: "text-blue-300",    bg: "bg-blue-500/20 border-blue-500/40",     inactive: "bg-white/5 border-white/10 text-white/50" },
+  { id: "ChikweretiOne",label: "ChikweretiOne",  color: "text-yellow-300",  bg: "bg-yellow-500/20 border-yellow-500/40", inactive: "bg-white/5 border-white/10 text-white/50" },
+] as const;
+
+function ProductBadge({ product }: { product: string }) {
+  const cfg = PRODUCTS.find(p => p.id === product) ?? PRODUCTS[0];
+  return (
+    <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full border", cfg.color, cfg.bg)}>
+      {cfg.label}
+    </span>
+  );
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -59,7 +75,7 @@ export default function PortalAgronomistPage() {
   const qc = useQueryClient();
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ customerName: "", phone: "", flockSize: "", notes: "" });
+  const [form, setForm] = useState({ customerName: "", phone: "", flockSize: "", notes: "", loanProduct: "HukuPlus" });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -115,6 +131,7 @@ export default function PortalAgronomistPage() {
       phone,
       flockSize: String(flockSizeNum),
       notes: form.notes.trim(),
+      loanProduct: form.loanProduct,
     });
 
     try {
@@ -131,7 +148,7 @@ export default function PortalAgronomistPage() {
         return;
       }
 
-      setForm({ customerName: "", phone: "", flockSize: "", notes: "" });
+      setForm({ customerName: "", phone: "", flockSize: "", notes: "", loanProduct: "HukuPlus" });
       setShowForm(false);
       setSubmitSuccess(true);
       setTimeout(() => setSubmitSuccess(false), 4000);
@@ -328,23 +345,46 @@ export default function PortalAgronomistPage() {
                   />
                 </div>
 
+                {/* Product selector */}
                 <div>
-                  <label className="block text-sm font-medium text-white mb-1.5">Flock Size (number of birds)</label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={form.flockSize}
-                    onChange={e => setForm({ ...form, flockSize: e.target.value })}
-                    placeholder="e.g. 500"
-                    className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
-                  />
-                  {form.flockSize && parseFloat(form.flockSize) > 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Est. value: <span className="text-primary font-medium">${(Math.round(parseFloat(form.flockSize)) * 2.06).toFixed(2)}</span>
-                    </p>
-                  )}
+                  <label className="block text-sm font-medium text-white mb-2">Product *</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {PRODUCTS.map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setForm({ ...form, loanProduct: p.id, flockSize: p.id !== "HukuPlus" ? "" : form.flockSize })}
+                        className={cn(
+                          "py-2.5 rounded-xl text-xs font-semibold border transition-all",
+                          form.loanProduct === p.id ? `${p.color} ${p.bg}` : p.inactive
+                        )}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Flock size — HukuPlus only */}
+                {form.loanProduct === "HukuPlus" && (
+                  <div>
+                    <label className="block text-sm font-medium text-white mb-1.5">Flock Size (number of birds)</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      value={form.flockSize}
+                      onChange={e => setForm({ ...form, flockSize: e.target.value })}
+                      placeholder="e.g. 500"
+                      className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
+                    />
+                    {form.flockSize && parseFloat(form.flockSize) > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Est. value: <span className="text-primary font-medium">${(Math.round(parseFloat(form.flockSize)) * 2.06).toFixed(2)}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-white mb-1.5">Notes (optional)</label>
@@ -408,6 +448,7 @@ export default function PortalAgronomistPage() {
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <h4 className="font-semibold text-white text-sm truncate">{lead.customer_name}</h4>
                         <StatusBadge status={lead.status} />
+                        <ProductBadge product={lead.loan_product ?? "HukuPlus"} />
                       </div>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{lead.phone}</span>

@@ -2466,12 +2466,28 @@ interface Lead {
   estimated_value: number;
   status: "new" | "acknowledged" | "converted";
   notes: string | null;
+  loan_product: string;
   submitted_by: string | null;
   acknowledged_at: string | null;
   acknowledged_by: string | null;
   converted_at: string | null;
   converted_customer_name: string | null;
   created_at: string;
+}
+
+const LEAD_PRODUCTS = [
+  { id: "HukuPlus",      label: "HukuPlus",      color: "text-amber-300",   ring: "ring-amber-500/40",   bg: "bg-amber-500/15 border-amber-500/40" },
+  { id: "Revolver",      label: "Revolver",       color: "text-blue-300",    ring: "ring-blue-500/40",    bg: "bg-blue-500/15 border-blue-500/40" },
+  { id: "ChikweretiOne", label: "ChikweretiOne",  color: "text-yellow-300",  ring: "ring-yellow-500/40",  bg: "bg-yellow-500/15 border-yellow-500/40" },
+] as const;
+
+function LeadProductBadge({ product }: { product?: string }) {
+  const cfg = LEAD_PRODUCTS.find(p => p.id === product) ?? LEAD_PRODUCTS[0];
+  return (
+    <span className={cn("inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border", cfg.color, cfg.bg)}>
+      {cfg.label}
+    </span>
+  );
 }
 
 // ── Searchable combobox used inside NewLeadModal ─────────────────────────────
@@ -2594,6 +2610,7 @@ function NewLeadModal({
   const [phoneSuffix, setPhoneSuffix] = useState("");
   const [retailerId, setRetailerId] = useState("");
   const [branchId, setBranchId] = useState("");
+  const [loanProduct, setLoanProduct] = useState("HukuPlus");
   const [flockSize, setFlockSize] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
@@ -2626,7 +2643,9 @@ function NewLeadModal({
       params.set("phone", "+263" + cleanSuffix);
       if (retailer) { params.set("retailerId", retailer.value); params.set("retailerName", retailer.label); }
       if (branch) { params.set("branchId", branch.value); params.set("branchName", branch.label); }
-      params.set("flockSize", String(Math.round(flockNum)));
+      params.set("loanProduct", loanProduct);
+      if (loanProduct === "HukuPlus") params.set("flockSize", String(Math.round(flockNum)));
+      else params.set("flockSize", "0");
       if (notes.trim()) params.set("notes", notes.trim());
       const r = await fetch(`${window.location.origin}/api/leads`, {
         method: "POST",
@@ -2717,7 +2736,30 @@ function NewLeadModal({
             disabled={!retailerId || branchOptions.length === 0}
           />
 
-          {/* Flock size + calculated value */}
+          {/* Product selector */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Product *</label>
+            <div className="grid grid-cols-3 gap-2">
+              {LEAD_PRODUCTS.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => { setLoanProduct(p.id); if (p.id !== "HukuPlus") setFlockSize(""); }}
+                  className={cn(
+                    "py-2 rounded-lg text-xs font-semibold border transition-all",
+                    loanProduct === p.id
+                      ? `${p.color} ${p.bg}`
+                      : "bg-white/5 border-white/10 text-white/40 hover:text-white/70"
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Flock size + calculated value — HukuPlus only */}
+          {loanProduct === "HukuPlus" && (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Flock Size (birds)</label>
@@ -2736,6 +2778,7 @@ function NewLeadModal({
               </div>
             </div>
           </div>
+          )}
 
           {/* Notes */}
           <div>
@@ -3085,7 +3128,10 @@ function LeadsTab() {
                                 </span>
                               )}
                             </div>
-                            <p className="text-sm font-semibold text-white">{lead.customer_name}</p>
+                            <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                              <p className="text-sm font-semibold text-white">{lead.customer_name}</p>
+                              <LeadProductBadge product={lead.loan_product} />
+                            </div>
                             <div className="flex items-center gap-3 mt-0.5 text-xs text-white/50 flex-wrap">
                               <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{lead.phone}</span>
                               {lead.flock_size > 0 && (
@@ -3328,7 +3374,10 @@ function LeadsTab() {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm font-semibold text-white">{lead.customer_name}</p>
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <p className="text-sm font-semibold text-white">{lead.customer_name}</p>
+                        <LeadProductBadge product={lead.loan_product} />
+                      </div>
                       <div className="flex items-center gap-3 mt-1 text-xs text-white/50 flex-wrap">
                         <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{lead.phone}</span>
                         {lead.flock_size > 0 && (

@@ -347,7 +347,7 @@ router.get("/portal/agronomist/leads", requirePortalAuth, async (req, res) => {
     const r = await client.query(
       `SELECT id, customer_name, phone, retailer_name, branch_name, flock_size,
               (flock_size::numeric * 2.06) AS estimated_value,
-              status, submitted_by, notes, created_at
+              loan_product, status, submitted_by, notes, created_at
        FROM leads
        WHERE submitted_by LIKE $1
        ORDER BY created_at DESC

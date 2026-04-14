@@ -31,7 +31,7 @@ router.post("/leads", async (req, res): Promise<void> => {
     return;
   }
 
-  const { customerName, phone, retailerId, branchId, retailerName, branchName, flockSize, notes } = req.body;
+  const { customerName, phone, retailerId, branchId, retailerName, branchName, flockSize, notes, loanProduct } = req.body;
 
   if (!customerName?.trim() || !phone?.trim()) {
     res.status(400).json({ error: "customerName and phone are required" });
@@ -42,6 +42,8 @@ router.post("/leads", async (req, res): Promise<void> => {
     res.status(400).json({ error: "flockSize must be a non-negative number" });
     return;
   }
+  const VALID_PRODUCTS = ["HukuPlus", "Revolver", "ChikweretiOne"];
+  const finalProduct = VALID_PRODUCTS.includes(loanProduct) ? loanProduct : "HukuPlus";
 
   const finalRetailerId = overrideRetailerId ?? (retailerId ? Number(retailerId) : null);
   const finalBranchId = overrideBranchId ?? (branchId ? Number(branchId) : null);
@@ -52,8 +54,8 @@ router.post("/leads", async (req, res): Promise<void> => {
   try {
     const result = await client.query(
       `INSERT INTO leads
-         (customer_name, phone, retailer_id, branch_id, retailer_name, branch_name, flock_size, notes, submitted_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         (customer_name, phone, retailer_id, branch_id, retailer_name, branch_name, flock_size, notes, submitted_by, loan_product)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *, (flock_size::numeric * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value`,
       [
         customerName.trim(),
@@ -65,6 +67,7 @@ router.post("/leads", async (req, res): Promise<void> => {
         flockSizeNum,
         notes?.trim() ?? null,
         submittedBy,
+        finalProduct,
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -281,20 +284,21 @@ router.get("/leads/export.csv", requireStaffAuth, async (req, res): Promise<void
     const r = await client.query(
       `SELECT customer_name, phone, retailer_name, branch_name,
               flock_size, (flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value,
-              submitted_by, created_at
+              loan_product, submitted_by, created_at
        FROM leads ${where}
        ORDER BY created_at DESC`,
       params
     );
 
     const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const header = ["Name", "Phone", "Retailer", "Store", "Flock Size", "Est. Value ($)", "Submitted By", "Date"].join(",");
+    const header = ["Name", "Phone", "Retailer", "Store", "Product", "Flock Size", "Est. Value ($)", "Submitted By", "Date"].join(",");
     const rows = r.rows.map(row =>
       [
         escape(row.customer_name),
         escape(row.phone),
         escape(row.retailer_name ?? ""),
         escape(row.branch_name ?? ""),
+        escape(row.loan_product ?? "HukuPlus"),
         row.flock_size,
         Number(row.estimated_value).toFixed(2),
         escape(row.submitted_by ?? ""),

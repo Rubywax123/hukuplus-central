@@ -997,6 +997,12 @@ export async function runMigrations() {
       );
     `);
 
+    // Add loan_product to leads table
+    await client.query(`
+      ALTER TABLE leads
+        ADD COLUMN IF NOT EXISTS loan_product TEXT NOT NULL DEFAULT 'HukuPlus';
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
