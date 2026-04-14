@@ -302,6 +302,29 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
   let overpaymentAmount = 0;
   let overpaymentError: string | null = null;
 
+  // ── STEP 0: Resolve bank AccountID from code ──────────────────────────────────
+  // BatchPayments requires the AccountID (UUID) — the Code alone isn't accepted.
+  // We look up the account by code and extract the UUID before building the batch.
+  let resolvedBankAccountId: string | null = null;
+  try {
+    const acctRes = await fetch(
+      `https://api.xero.com/api.xro/2.0/Accounts?where=Code%3D%3D%22${encodeURIComponent(bankAccountCode)}%22`,
+      { headers: xeroHeaders(auth) }
+    );
+    if (acctRes.ok) {
+      const acctData = await acctRes.json();
+      resolvedBankAccountId = acctData.Accounts?.[0]?.AccountID ?? null;
+    }
+  } catch { /* non-fatal — fall back below */ }
+
+  if (!resolvedBankAccountId) {
+    console.error(`[payment] Could not resolve bank AccountID for code "${bankAccountCode}"`);
+    res.status(422).json({ error: `Bank account "${bankAccountCode}" not found in Xero. Please verify the account exists and retry.` });
+    return;
+  }
+
+  console.log(`[payment] Bank account "${bankAccountCode}" resolved to AccountID ${resolvedBankAccountId}`);
+
   // ── STEP 1: Build the list of invoice payments for the batch ─────────────────
   // BatchPayments creates ONE bank transaction in Xero covering multiple invoices.
   // This is the correct API for "block payment → allocate to invoices".
@@ -365,7 +388,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     headers: xeroHeaders(auth),
     body: JSON.stringify({
       BatchPayments: [{
-        Account: { Code: bankAccountCode },
+        Account: { AccountID: resolvedBankAccountId },
         ...(storeName ? { Reference: storeName } : {}),
         Date: paymentDate,
         Payments: batchPayments,
