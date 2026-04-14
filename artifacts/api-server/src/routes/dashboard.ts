@@ -99,12 +99,15 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
   const [totalRetailersResult] = await db.select({ count: sql<number>`count(*)::int` }).from(retailersTable);
   const [totalBranchesResult] = await db.select({ count: sql<number>`count(*)::int` }).from(branchesTable);
   const [totalAgreementsResult] = await db.select({ count: sql<number>`count(*)::int` }).from(agreementsTable);
-  // Pending Signatures: all agreements not yet signed and not dismissed via Mark Done.
+  // Pending Signatures: Novafeeds only — these are the agreements signed in the kiosk.
+  // Other products come from Formitize and don't require kiosk signing.
+  // "Mark Done" dismisses an agreement from this count.
   const [pendingResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(agreementsTable)
     .where(and(
       eq(agreementsTable.status, "pending"),
+      eq(agreementsTable.loanProduct, "Novafeeds"),
       isNull(agreementsTable.markedDoneAt),
     ));
 
