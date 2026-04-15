@@ -588,6 +588,10 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processing_error TEXT;`);
     await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;`);
 
+    // ── delinquency warning on formitize_notifications ─────────────────────
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS is_delinquent_warning BOOLEAN NOT NULL DEFAULT false;`);
+    await client.query(`ALTER TABLE formitize_notifications ADD COLUMN IF NOT EXISTS delinquent_match TEXT;`);
+
     // ── Extended customer profile fields (from application form) ──────────
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS gender TEXT;`);
     await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS date_of_birth TEXT;`);

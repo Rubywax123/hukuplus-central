@@ -92,6 +92,8 @@ interface FNotification {
   xero_bank_transaction_id: string | null;
   disbursed_at: string | null;
   is_duplicate_warning: boolean;
+  is_delinquent_warning: boolean;
+  delinquent_match: string | null;
   processing_error: string | null;
   processed_at: string | null;
   status: "new" | "actioned";
@@ -155,6 +157,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${typeBadge.bg} ${typeBadge.text}`}>{typeLabel}</span>
           {isNew && isActionable && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/30">⚡ ACTION REQUIRED</span>}
           {isNew && !isActionable && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-white/50">NEW</span>}
+          {n.is_delinquent_warning && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600/40 text-red-200 border border-red-500/60 animate-pulse">🚨 DELINQUENT ALERT</span>}
           {n.is_duplicate_warning && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">⚠ POSSIBLE DUPLICATE</span>}
           {n.processing_error && isNew && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300 border border-orange-500/25">RETRY NEEDED</span>}
         </div>
@@ -1789,6 +1792,19 @@ function PaymentModal({ notification, onClose, onDone }: {
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Delinquency alert banner */}
+        {notification.is_delinquent_warning && (
+          <div className="mx-6 mt-4 flex items-start gap-3 p-3 rounded-lg bg-red-700/20 border border-red-500/50">
+            <AlertTriangle className="w-4 h-4 text-red-300 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-red-200">🚨 Delinquent customer alert</p>
+              <p className="text-xs text-red-300/80 mt-0.5">
+                {notification.delinquent_match ?? "This customer or their next-of-kin appears on the delinquent list in the Loan Register. Do not process until reviewed by management."}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Duplicate warning banner */}
         {notification.is_duplicate_warning && (

@@ -445,6 +445,67 @@ function parseFormContext(formName: string, trackingCategory?: string): {
   return { product, formType };
 }
 
+// ─── Delinquency check — cached LR fetch + name matching ─────────────────────
+const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
+const LR_KEY = process.env.HUKUPLUS_API_KEY;
+
+let _delinquentCache: { names: Array<{ full: string; words: string[] }>; fetchedAt: number } | null = null;
+const DELINQUENT_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+async function fetchDelinquentNames(): Promise<Array<{ full: string; words: string[] }>> {
+  const now = Date.now();
+  if (_delinquentCache && now - _delinquentCache.fetchedAt < DELINQUENT_TTL_MS) {
+    return _delinquentCache.names;
+  }
+  if (!LR_KEY) return [];
+  try {
+    const res = await fetch(`${LR_URL}/api/central/loans`, {
+      headers: { Authorization: `Bearer ${LR_KEY}` },
+    });
+    if (!res.ok) return _delinquentCache?.names ?? [];
+    const raw = await res.json();
+    const loans: any[] = Array.isArray(raw) ? raw : (raw?.loans ?? raw?.data ?? []);
+    const delinquent = loans.filter(l => String(l.status ?? "").toLowerCase() === "delinquent");
+    const names: Array<{ full: string; words: string[] }> = [];
+    for (const l of delinquent) {
+      const given   = String(l.clientGivenName   ?? "").trim();
+      const surname = String(l.clientSurname      ?? "").trim();
+      if (!given && !surname) continue;
+      // Store both orderings so reversed-name entries still match
+      for (const full of [`${given} ${surname}`, `${surname} ${given}`]) {
+        const norm  = full.toLowerCase().trim();
+        const words = norm.split(/\s+/).filter(w => w.length > 2);
+        if (words.length) names.push({ full: norm, words });
+      }
+    }
+    _delinquentCache = { names, fetchedAt: now };
+    console.log(`[delinquency] Cache refreshed — ${delinquent.length} delinquent loans indexed`);
+    return names;
+  } catch (err: any) {
+    console.warn(`[delinquency] Fetch failed: ${err.message}`);
+    return _delinquentCache?.names ?? [];
+  }
+}
+
+/** Returns the matched delinquent name (as stored in LR) or null if no match. */
+function checkDelinquent(
+  formName: string,
+  delinquentNames: Array<{ full: string; words: string[] }>
+): string | null {
+  const norm      = formName.toLowerCase().trim();
+  const formWords = norm.split(/\s+/).filter(w => w.length > 2);
+  if (formWords.length === 0) return null;
+  for (const entry of delinquentNames) {
+    const common = formWords.filter(w => entry.words.includes(w));
+    if (common.length >= 2) return entry.full;
+    // Also catch single-surname match if both names only have one meaningful word
+    if (formWords.length === 1 && entry.words.length === 1 && formWords[0] === entry.words[0]) {
+      return entry.full;
+    }
+  }
+  return null;
+}
+
 // ─── Upsert a notification record for every inbound Formitize submission ──────
 async function upsertNotification(params: {
   jobId: string | null;
@@ -458,6 +519,8 @@ async function upsertNotification(params: {
   retailerName?: string | null;
   paymentAmount?: number | null;
   status?: "new" | "actioned";
+  isDelinquentWarning?: boolean;
+  delinquentMatch?: string | null;
 }) {
   try {
     // Detect near-duplicate payments: same customer + amount + product within 72h
@@ -479,21 +542,24 @@ async function upsertNotification(params: {
       }
     }
 
-    const initialStatus = params.status ?? "new";
+    const initialStatus       = params.status ?? "new";
+    const isDelinquent        = params.isDelinquentWarning ?? false;
+    const delinquentMatch     = params.delinquentMatch ?? null;
 
     if (params.jobId) {
       // ON CONFLICT DO NOTHING — the unique index on formitize_job_id prevents duplicates.
       // customer_id is included in the initial INSERT so it's captured on first arrival.
       const res = await pool.query(
         `INSERT INTO formitize_notifications
-           (formitize_job_id, form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           (formitize_job_id, form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning, is_delinquent_warning, delinquent_match, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (formitize_job_id) WHERE formitize_job_id IS NOT NULL DO NOTHING`,
         [params.jobId, params.formName, params.taskType, params.product,
          params.customerName, params.customerId ?? null,
          params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
-         params.paymentAmount ?? null, isDuplicateWarning, initialStatus]
+         params.paymentAmount ?? null, isDuplicateWarning,
+         isDelinquent, delinquentMatch, initialStatus]
       );
       // If the row already existed (conflict skipped), backfill customer_id if it was missing
       if (res.rowCount === 0 && params.customerId) {
@@ -505,13 +571,14 @@ async function upsertNotification(params: {
     } else {
       await pool.query(
         `INSERT INTO formitize_notifications
-           (form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+           (form_name, task_type, product, customer_name, customer_id, customer_phone, branch_name, retailer_name, payment_amount, is_duplicate_warning, is_delinquent_warning, delinquent_match, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [params.formName, params.taskType, params.product,
          params.customerName, params.customerId ?? null,
          params.customerPhone ?? null,
          params.branchName ?? null, params.retailerName ?? null,
-         params.paymentAmount ?? null, isDuplicateWarning, initialStatus]
+         params.paymentAmount ?? null, isDuplicateWarning,
+         isDelinquent, delinquentMatch, initialStatus]
       );
     }
   } catch (err) {
@@ -733,7 +800,20 @@ router.post("/formitize/webhook", async (req, res) => {
 
     // Document uploads appear in Activity queue so staff can review and action them.
     const notifStatus = "new";
-    await upsertNotification({ jobId, formName: rawFormName, taskType: formType, product, customerName, customerId: activityCustomerId, paymentAmount, branchName, retailerName, status: notifStatus });
+
+    // Delinquency check — flag if the applicant is a known delinquent customer
+    const delinquentNamesActivity = await fetchDelinquentNames();
+    const delinqMatchActivity     = checkDelinquent(customerName, delinquentNamesActivity);
+    if (delinqMatchActivity) {
+      console.warn(`[delinquency] MATCH on form "${rawFormName}" — customer "${customerName}" matches delinquent record "${delinqMatchActivity}"`);
+    }
+
+    await upsertNotification({
+      jobId, formName: rawFormName, taskType: formType, product, customerName,
+      customerId: activityCustomerId, paymentAmount, branchName, retailerName, status: notifStatus,
+      isDelinquentWarning: !!delinqMatchActivity,
+      delinquentMatch: delinqMatchActivity ? `Applicant: ${delinqMatchActivity}` : null,
+    });
 
     console.log(`[formitize:webhook] Stored as activity (status=${notifStatus}) — ${rawFormName}`);
     res.status(200).json({ ok: true, stored: "activity", product, formType });
@@ -1328,6 +1408,28 @@ router.post("/formitize/webhook", async (req, res) => {
   const appUrl = process.env.APP_URL || "https://huku-plus-central.replit.app";
   const signingUrl = `${appUrl}/sign/${signingToken}`;
 
+  // ── Delinquency safety check ─────────────────────────────────────────────
+  // Flag if the applicant OR the next-of-kin is a known delinquent customer.
+  const delinquentNamesApp = await fetchDelinquentNames();
+  let isDelinquentWarning  = false;
+  let delinquentMatch: string | null = null;
+
+  const applicantDelinq = checkDelinquent(customerName, delinquentNamesApp);
+  if (applicantDelinq) {
+    isDelinquentWarning = true;
+    delinquentMatch     = `Applicant matches delinquent record: "${applicantDelinq}"`;
+    console.warn(`[delinquency] APPLICANT MATCH — "${customerName}" → "${applicantDelinq}" on ${rawFormName}`);
+  }
+
+  if (!isDelinquentWarning && nokName) {
+    const nokDelinq = checkDelinquent(nokName, delinquentNamesApp);
+    if (nokDelinq) {
+      isDelinquentWarning = true;
+      delinquentMatch     = `Next-of-kin "${nokName}" matches delinquent record: "${nokDelinq}"`;
+      console.warn(`[delinquency] NOK MATCH — "${nokName}" → "${nokDelinq}" on ${rawFormName} (applicant: ${customerName})`);
+    }
+  }
+
   await upsertNotification({
     jobId,
     formName: rawFormName,
@@ -1338,6 +1440,8 @@ router.post("/formitize/webhook", async (req, res) => {
     customerPhone: customerPhone ?? null,
     branchName: resolvedBranchName || null,
     retailerName: resolvedRetailerName || null,
+    isDelinquentWarning,
+    delinquentMatch,
   });
 
   console.log(`[formitize:webhook] Created ${formType} #${agreement.id} — ${product} — ${customerName}`);
