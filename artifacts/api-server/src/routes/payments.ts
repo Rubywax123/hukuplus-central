@@ -304,26 +304,46 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
 
   // ── STEP 0: Resolve bank AccountID from code ──────────────────────────────────
   // BatchPayments requires the AccountID (UUID) — the Code alone isn't accepted.
-  // We look up the account by code and extract the UUID before building the batch.
+  // We MUST filter by Type=="BANK" here to avoid matching a revenue/income account
+  // that happens to share the same code (which Xero will reject with a ValidationException).
   let resolvedBankAccountId: string | null = null;
+  let resolvedBankAccountName: string | null = null;
   try {
     const acctRes = await fetch(
-      `https://api.xero.com/api.xro/2.0/Accounts?where=Code%3D%3D%22${encodeURIComponent(bankAccountCode)}%22`,
+      `https://api.xero.com/api.xro/2.0/Accounts?where=Type%3D%3D%22BANK%22%20AND%20Code%3D%3D%22${encodeURIComponent(bankAccountCode)}%22`,
       { headers: xeroHeaders(auth) }
     );
     if (acctRes.ok) {
       const acctData = await acctRes.json();
-      resolvedBankAccountId = acctData.Accounts?.[0]?.AccountID ?? null;
+      const matched = acctData.Accounts?.[0];
+      resolvedBankAccountId   = matched?.AccountID ?? null;
+      resolvedBankAccountName = matched?.Name ?? null;
+      // If no BANK match, try without type filter as a fallback and log a warning
+      if (!resolvedBankAccountId) {
+        const fallbackRes = await fetch(
+          `https://api.xero.com/api.xro/2.0/Accounts?where=Code%3D%3D%22${encodeURIComponent(bankAccountCode)}%22`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          const fallback = fallbackData.Accounts?.[0];
+          if (fallback) {
+            console.warn(`[payment] Code "${bankAccountCode}" matched a non-BANK account (Type=${fallback.Type}, Name=${fallback.Name}) — this will likely fail BatchPayments validation`);
+            resolvedBankAccountId   = fallback.AccountID ?? null;
+            resolvedBankAccountName = fallback.Name ?? null;
+          }
+        }
+      }
     }
   } catch { /* non-fatal — fall back below */ }
 
   if (!resolvedBankAccountId) {
     console.error(`[payment] Could not resolve bank AccountID for code "${bankAccountCode}"`);
-    res.status(422).json({ error: `Bank account "${bankAccountCode}" not found in Xero. Please verify the account exists and retry.` });
+    res.status(422).json({ error: `Bank account "${bankAccountCode}" not found in Xero. Please verify the account code is correct and the account is a Bank type account.` });
     return;
   }
 
-  console.log(`[payment] Bank account "${bankAccountCode}" resolved to AccountID ${resolvedBankAccountId}`);
+  console.log(`[payment] Bank account "${bankAccountCode}" (${resolvedBankAccountName}) resolved to AccountID ${resolvedBankAccountId}`);
 
   // ── STEP 1: Build the list of invoice payments for the batch ─────────────────
   // BatchPayments creates ONE bank transaction in Xero covering multiple invoices.
