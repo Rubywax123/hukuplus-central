@@ -232,9 +232,27 @@ A separate login system at `/portal/login` for retail partners (not Tefco staff)
 ### New API Routes
 - `GET /api/customers/assigned/mine` — returns customers where sales_rep_name ILIKE agent's name, with agreements
 
+## Pending Configuration (action required)
+
+### Wati Webhook Registration
+Wati must be told where to forward inbound customer messages. Without this, messages are not logged to Central.
+1. Log into Wati at app.wati.io
+2. Go to Settings → API (or Integrations → Webhook)
+3. Paste this URL as the webhook endpoint:
+   `https://huku-plus-central.replit.app/api/whatsapp/webhook`
+4. Save
+
+Both env vars are already set:
+- `WATI_API_URL` = https://live-mt-server.wati.io/10123607
+- `WATI_API_TOKEN` = (set in secrets)
+
+Once registered, all inbound WhatsApp messages will appear in the WhatsApp tab in Activity and be logged to the database for ML purposes.
+
 ## Future Roadmap
 
 - Phase 5: APS (Automated Payment System) integration
 - Phase 6: AI/ML credit decision layer
-- WhatsApp Business API (dedicated number) for automated 1:1 customer messaging
+- WhatsApp template automation — trigger outbound messages from activity queue events (payment processed, application received, disbursement sent)
+- "Send WhatsApp" button on activity notification cards
+- Customer phone → Wati contact auto-linking
 - AI analysis of captured conversation and application data
