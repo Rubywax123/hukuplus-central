@@ -1594,6 +1594,60 @@ router.get("/formitize/explore", requireStaffAuth, requireSuperAdmin, async (req
   res.json(results);
 });
 
+// ─── PATCH /api/formitize/notifications/:id/reassign ─────────────────────────
+// Allows staff to correct the retailer/branch on a notification and its linked agreement.
+router.patch("/formitize/notifications/:id/reassign", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid notification id" }); return; }
+
+  const { retailerId, branchId, retailerName, branchName } = req.body as {
+    retailerId?: number;
+    branchId?: number;
+    retailerName?: string;
+    branchName?: string;
+  };
+
+  if (!retailerName) { res.status(400).json({ error: "retailerName is required" }); return; }
+
+  const client = await pool.connect();
+  try {
+    // Update the notification's display names
+    await client.query(
+      `UPDATE formitize_notifications
+       SET retailer_name = $1, branch_name = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [retailerName, branchName ?? null, id]
+    );
+
+    // Also update the linked agreement if one exists
+    if (retailerId || branchId) {
+      const notifRow = await client.query(
+        `SELECT formitize_job_id FROM formitize_notifications WHERE id = $1`,
+        [id]
+      );
+      const jobId = notifRow.rows[0]?.formitize_job_id;
+      if (jobId) {
+        const setParts: string[] = [];
+        const params: any[] = [];
+        if (retailerId) { params.push(retailerId); setParts.push(`retailer_id = $${params.length}`); }
+        if (branchId)   { params.push(branchId);   setParts.push(`branch_id = $${params.length}`);   }
+        if (setParts.length > 0) {
+          params.push(jobId);
+          await client.query(
+            `UPDATE agreements SET ${setParts.join(", ")} WHERE formitize_job_id = $${params.length}`,
+            params
+          );
+        }
+      }
+    }
+
+    console.log(`[notifications] Reassigned id=${id} → ${retailerName} / ${branchName ?? "no branch"}`);
+    res.json({ ok: true });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── POST /api/formitize/notifications/mark-all ───────────────────────────────
 router.post("/formitize/notifications/mark-all", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { product, task_type } = req.body as { product?: string; task_type?: string };

@@ -8,7 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
-  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2,
+  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -115,7 +115,7 @@ const FILE_DOC_TYPES = [
   { value: "Other",         label: "Other"          },
 ];
 
-function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile }: {
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
@@ -123,9 +123,80 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
   onProcessDisbursement?: () => void;
   onFileCRM?: (note: string) => void;
   onViewProfile?: () => void;
+  onReassigned?: (retailerName: string, branchName: string | null) => void;
 }) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
+
+  // ── Branch reassign state ─────────────────────────────────────────
+  const [showReassign, setShowReassign] = useState(false);
+  const [rRetailers, setRRetailers] = useState<Array<{ id: number; name: string }>>([]);
+  const [rBranches, setRBranches] = useState<Array<{ id: number; name: string }>>([]);
+  const [rRetailerId, setRRetailerId] = useState("");
+  const [rBranchId, setRBranchId] = useState("");
+  const [rSaving, setRSaving] = useState(false);
+  const [rError, setRError] = useState<string | null>(null);
+
+  const openReassign = async () => {
+    setShowReassign(true);
+    setRError(null);
+    setRBranchId("");
+    try {
+      const res = await fetch(`${BASE}/api/retailers`, { credentials: "include" });
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.retailers ?? []);
+      setRRetailers(list);
+      // Pre-select current retailer if we can match by name
+      const current = list.find((r: any) => r.name === n.retailer_name);
+      if (current) {
+        setRRetailerId(String(current.id));
+        const bRes = await fetch(`${BASE}/api/retailers/${current.id}/branches`, { credentials: "include" });
+        const bData = await bRes.json();
+        setRBranches(Array.isArray(bData) ? bData : (bData.branches ?? []));
+        const currentBranch = (Array.isArray(bData) ? bData : (bData.branches ?? [])).find((b: any) => b.name === n.branch_name);
+        if (currentBranch) setRBranchId(String(currentBranch.id));
+      }
+    } catch { setRError("Failed to load retailers"); }
+  };
+
+  const onRetailerChange = async (id: string) => {
+    setRRetailerId(id);
+    setRBranchId("");
+    setRBranches([]);
+    if (!id) return;
+    try {
+      const res = await fetch(`${BASE}/api/retailers/${id}/branches`, { credentials: "include" });
+      const data = await res.json();
+      setRBranches(Array.isArray(data) ? data : (data.branches ?? []));
+    } catch { /* ignore */ }
+  };
+
+  const saveReassign = async () => {
+    const retailer = rRetailers.find(r => String(r.id) === rRetailerId);
+    const branch   = rBranches.find(b => String(b.id) === rBranchId);
+    if (!retailer) { setRError("Please select a retailer"); return; }
+    setRSaving(true); setRError(null);
+    try {
+      const res = await fetch(`${BASE}/api/formitize/notifications/${n.id}/reassign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          retailerId: retailer.id,
+          branchId: branch?.id ?? undefined,
+          retailerName: retailer.name,
+          branchName: branch?.name ?? null,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
+      setShowReassign(false);
+      onReassigned?.(retailer.name, branch?.name ?? null);
+    } catch (e: any) {
+      setRError(e.message);
+    } finally {
+      setRSaving(false);
+    }
+  };
   const colors = PRODUCT_COLORS[n.product] ?? PRODUCT_COLORS["HukuPlus"];
   const typeBadge = TYPE_BADGE[n.task_type] ?? { bg: "bg-white/10", text: "text-white/60" };
   const isNew = n.status === "new";
@@ -164,7 +235,27 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
         <p className="text-sm font-medium text-white truncate">{n.form_name}</p>
         <div className="flex items-center gap-3 mt-1.5 text-xs text-white/50 flex-wrap">
           {n.customer_name && <span className="flex items-center gap-1"><User className="w-3 h-3" />{n.customer_name}</span>}
-          {n.retailer_name && <span className="flex items-center gap-1"><Store className="w-3 h-3" />{n.retailer_name}{n.branch_name ? ` — ${n.branch_name}` : ""}</span>}
+          {n.retailer_name
+            ? <span className="flex items-center gap-1 group">
+                <Store className="w-3 h-3" />
+                {n.retailer_name}{n.branch_name ? ` — ${n.branch_name}` : ""}
+                <button
+                  onClick={e => { e.stopPropagation(); showReassign ? setShowReassign(false) : openReassign(); }}
+                  className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity ml-0.5 text-white/40 hover:text-amber-300"
+                  title="Reassign retailer / branch"
+                >
+                  <Pencil className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            : <button
+                onClick={e => { e.stopPropagation(); showReassign ? setShowReassign(false) : openReassign(); }}
+                className="flex items-center gap-1 text-white/30 hover:text-amber-300 transition-colors"
+                title="Assign retailer / branch"
+              >
+                <Store className="w-3 h-3" /><span className="italic">Assign store</span>
+                <Pencil className="w-2.5 h-2.5 ml-0.5" />
+              </button>
+          }
           <span className="flex items-center gap-1 ml-auto"><Clock className="w-3 h-3" />{ago(n.created_at)}</span>
         </div>
         {n.customer_phone && <p className="text-xs text-white/30 mt-1">{n.customer_phone}</p>}
@@ -240,6 +331,57 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
         </button>
       </div>
     </div>
+
+      {/* Inline branch reassign panel */}
+      {showReassign && (
+        <div className="w-full mt-3 pt-3 border-t border-white/10">
+          <p className="text-xs font-semibold text-white/60 uppercase tracking-wide mb-2">Reassign retailer / branch</p>
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="flex-1 min-w-[160px]">
+              <label className="text-[10px] text-white/40 uppercase tracking-wide block mb-1">Retailer</label>
+              <select
+                value={rRetailerId}
+                onChange={e => onRetailerChange(e.target.value)}
+                className="w-full bg-white/5 border border-white/15 rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-amber-500/50"
+                style={{ colorScheme: "dark" }}
+              >
+                <option value="">— Select retailer —</option>
+                {rRetailers.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+              </select>
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <label className="text-[10px] text-white/40 uppercase tracking-wide block mb-1">Branch</label>
+              <select
+                value={rBranchId}
+                onChange={e => setRBranchId(e.target.value)}
+                disabled={!rRetailerId || rBranches.length === 0}
+                className="w-full bg-white/5 border border-white/15 rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-amber-500/50 disabled:opacity-40"
+                style={{ colorScheme: "dark" }}
+              >
+                <option value="">— Select branch —</option>
+                {rBranches.map(b => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                onClick={saveReassign}
+                disabled={rSaving || !rRetailerId}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 border border-amber-500/40 text-amber-200 hover:bg-amber-500/30 disabled:opacity-40 transition-all"
+              >
+                {rSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                Save
+              </button>
+              <button
+                onClick={() => setShowReassign(false)}
+                className="px-2 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 text-white/40 hover:text-white/60 transition-all"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+          {rError && <p className="text-xs text-red-400 mt-1.5">{rError}</p>}
+        </div>
+      )}
 
       {/* Inline file-to-CRM picker — expands below the main row */}
       {showFilePicker && onFileCRM && (
@@ -433,6 +575,7 @@ function FormitizeTab() {
                 onProcessDisbursement={DISBURSEMENT_TYPES.has(n.task_type) ? () => setDisbursementNotification(n) : undefined}
                 onFileCRM={DISBURSEMENT_TYPES.has(n.task_type) ? (note) => markOneMutation.mutate({ id: n.id, status: "actioned", notes: note }) : undefined}
                 onViewProfile={n.customer_id ? () => navigate(`/customers?customerId=${n.customer_id}`) : undefined}
+                onReassigned={() => qc.invalidateQueries({ queryKey: ["notifications"] })}
               />
             ))}
           </AnimatePresence>
