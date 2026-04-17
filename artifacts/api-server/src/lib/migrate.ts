@@ -1041,6 +1041,42 @@ export async function runMigrations() {
         AND (retailer_name ILIKE '%novafeed%' OR description ILIKE '%novafeeds%');
     `);
 
+    // ── Remove phantom "Main Branch" for Profeeds ────────────────────────────
+    // "Main Branch" (id=1) was created during initial setup and does not represent
+    // a real location. Reassign the two known Kwekwe applications, null out any
+    // remaining references, then delete the branch so it no longer pollutes matching.
+    await client.query(`
+      -- Reassign Tafadzwa Munengwa and Shingirayi Mavhunga → Kwekwe
+      UPDATE agreements
+      SET branch_id = (
+        SELECT b.id FROM branches b
+        JOIN retailers r ON r.id = b.retailer_id
+        WHERE r.name ILIKE '%profeed%' AND b.name ILIKE '%kwekwe%'
+        LIMIT 1
+      )
+      WHERE id IN (3451, 3452)
+        AND branch_id = (SELECT id FROM branches WHERE name = 'Main Branch' AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1) LIMIT 1);
+    `);
+    await client.query(`
+      -- Null out any remaining agreements still pointing at "Main Branch"
+      UPDATE agreements
+      SET branch_id = NULL
+      WHERE branch_id = (
+        SELECT id FROM branches WHERE name = 'Main Branch'
+          AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1)
+        LIMIT 1
+      );
+    `);
+    await client.query(`
+      -- Delete the phantom branch now that all references are cleared
+      DELETE FROM branches
+      WHERE name = 'Main Branch'
+        AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1)
+        AND NOT EXISTS (
+          SELECT 1 FROM agreements WHERE branch_id = branches.id
+        );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
