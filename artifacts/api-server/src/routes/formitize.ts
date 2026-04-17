@@ -1023,19 +1023,48 @@ router.post("/formitize/webhook", async (req, res) => {
       // Fold repeated consecutive chars for fuzzy match: "blufhill" ≈ "bluff hill"
       const fold = (s: string) => s.toLowerCase().replace(/\s+/g, "").replace(/(.)\1+/g, "$1");
 
-      // Exact → word-contains → fold-normalized match
+      // Exact → scored word-contains → fold-normalized match
+      // Scoring: prefer branches that match MORE words AND longer/more-distinctive words.
+      // "Kwekwe Main" should match "Kwekwe" (7-char word) over "Main Branch" (4-char "main" only).
       let matched = candidates.find(b => b.name.toLowerCase() === storeBranchName.toLowerCase());
+
       if (!matched && searchWords.length > 0) {
-        matched = candidates.find(b => {
+        // Score each candidate: sum of lengths of all matched search words
+        const scored = candidates.map(b => {
           const bn = b.name.toLowerCase();
-          return searchWords.some(w => bn.includes(w));
-        });
+          const matchedWords = searchWords.filter(w => bn.includes(w));
+          const score = matchedWords.reduce((sum, w) => sum + w.length, 0);
+          return { branch: b, score };
+        }).filter(x => x.score > 0);
+
+        if (scored.length > 0) {
+          scored.sort((a, b) => b.score - a.score);
+          matched = scored[0].branch;
+          if (scored.length > 1 && scored[0].score === scored[1].score) {
+            // Tie-break: prefer the candidate whose name is most similar in length to the search term
+            const tiedCandidates = scored.filter(x => x.score === scored[0].score);
+            const searchLen = storeBranchName.length;
+            tiedCandidates.sort((a, b) =>
+              Math.abs(a.branch.name.length - searchLen) - Math.abs(b.branch.name.length - searchLen)
+            );
+            matched = tiedCandidates[0].branch;
+          }
+        }
       }
+
       if (!matched && searchWords.length > 0) {
-        matched = candidates.find(b => {
+        // Fold-normalised fallback (handles "blufhill" ≈ "bluff hill" etc.)
+        const foldScored = candidates.map(b => {
           const foldedBranch = fold(b.name);
-          return searchWords.some(w => foldedBranch.includes(fold(w)) || fold(w).includes(foldedBranch));
-        });
+          const matchedWords = searchWords.filter(w => foldedBranch.includes(fold(w)) || fold(w).includes(foldedBranch));
+          const score = matchedWords.reduce((sum, w) => sum + w.length, 0);
+          return { branch: b, score };
+        }).filter(x => x.score > 0);
+
+        if (foldScored.length > 0) {
+          foldScored.sort((a, b) => b.score - a.score);
+          matched = foldScored[0].branch;
+        }
       }
 
       if (matched) {
