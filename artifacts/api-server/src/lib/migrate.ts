@@ -1068,12 +1068,25 @@ export async function runMigrations() {
       );
     `);
     await client.query(`
+      -- Null out any customers still pointing at "Main Branch"
+      UPDATE customers
+      SET branch_id = NULL
+      WHERE branch_id = (
+        SELECT id FROM branches WHERE name = 'Main Branch'
+          AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1)
+        LIMIT 1
+      );
+    `);
+    await client.query(`
       -- Delete the phantom branch now that all references are cleared
       DELETE FROM branches
       WHERE name = 'Main Branch'
         AND retailer_id = (SELECT id FROM retailers WHERE name ILIKE '%profeed%' LIMIT 1)
         AND NOT EXISTS (
           SELECT 1 FROM agreements WHERE branch_id = branches.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM customers WHERE branch_id = branches.id
         );
     `);
 
