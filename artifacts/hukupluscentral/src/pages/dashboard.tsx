@@ -221,9 +221,6 @@ function ReapplyConversionCard({ data, delay, onClick }: { data: ConversionData 
   const reapplied = data?.reapplied ?? 0;
   const rate = data?.rate ?? 0;
   const notYet = paid - reapplied;
-  const rateColor = rate >= 60 ? "text-emerald-400" : rate >= 35 ? "text-amber-400" : "text-rose-400";
-  const rateBarColor = rate >= 60 ? "bg-emerald-500" : rate >= 35 ? "bg-amber-500" : "bg-rose-500";
-
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
       <GlassCard
@@ -241,24 +238,32 @@ function ReapplyConversionCard({ data, delay, onClick }: { data: ConversionData 
           </div>
         </div>
 
-        {/* Big rate number */}
-        <div className="flex items-end gap-3 mt-2">
-          <h3 className={`text-5xl font-display font-bold ${rateColor}`}>{rate}%</h3>
-          <span className="text-sm text-muted-foreground mb-1.5">conversion rate</span>
+        {/* Big number — loans paid (mirrors the leads count in Leads Pipeline) */}
+        <h3 className="text-5xl font-display font-bold text-white mt-2">{paid}</h3>
+
+        {/* Re-applied row with rate badge */}
+        <div className="flex items-center gap-2 mt-3">
+          <span className="text-sm font-semibold text-emerald-400">{reapplied} re-applied ✓</span>
+          {paid > 0 && (
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+              rate >= 60 ? "bg-emerald-500/15 text-emerald-300" :
+              rate >= 35 ? "bg-amber-500/15 text-amber-300" :
+              "bg-rose-500/15 text-rose-300"
+            }`}>
+              {rate}%
+            </span>
+          )}
+          {notYet > 0 && (
+            <span className="text-[10px] text-muted-foreground/50 ml-auto">
+              {notYet} not yet
+            </span>
+          )}
         </div>
 
-        {/* Progress bar */}
-        <div className="mt-3 h-1.5 rounded-full bg-white/10 overflow-hidden">
-          <div className={`h-full rounded-full transition-all duration-700 ${rateBarColor}`} style={{ width: `${rate}%` }} />
-        </div>
-
-        {/* Counts row */}
-        <div className="flex items-center gap-4 mt-3">
-          <span className="text-xs text-muted-foreground">{paid} paid</span>
-          <span className="text-xs font-semibold text-emerald-400">{reapplied} re-applied ✓</span>
-          {notYet > 0 && <span className="text-xs font-semibold text-orange-400">{notYet} not yet</span>}
-        </div>
-        <p className="text-[10px] text-muted-foreground/40 mt-2">Click to view customers</p>
+        <p className={`text-xs mt-2 font-medium ${notYet > 0 ? "text-orange-400" : "text-emerald-400"}`}>
+          {notYet > 0 ? `${notYet} still to follow up` : "All customers re-applied!"}
+        </p>
+        <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view customers</p>
       </GlassCard>
     </motion.div>
   );
