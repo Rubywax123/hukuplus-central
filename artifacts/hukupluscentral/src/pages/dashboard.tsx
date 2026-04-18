@@ -127,9 +127,9 @@ function delta(current: number, previous: number) {
 function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, colorClass, bgClass, delay, onClick }: any) {
   const d = delta(value, previous);
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
+    <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
       <GlassCard
-        className={`p-6 relative overflow-hidden group ${onClick ? "cursor-pointer hover:border-white/20 transition-colors" : ""}`}
+        className={`p-6 h-full flex flex-col relative overflow-hidden group ${onClick ? "cursor-pointer hover:border-white/20 transition-colors" : ""}`}
         onClick={onClick}
       >
         <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity ${bgClass}`} />
@@ -143,14 +143,16 @@ function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, color
           </div>
         </div>
         <h3 className="text-5xl font-display font-bold text-white mt-2">{value}</h3>
-        {d && (
-          <p className={`text-xs mt-3 font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
-            {d.label}
-          </p>
-        )}
-        {onClick && (
-          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view submissions</p>
-        )}
+        <div className="mt-auto pt-3">
+          {d && (
+            <p className={`text-xs font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
+              {d.label}
+            </p>
+          )}
+          {onClick && (
+            <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view submissions</p>
+          )}
+        </div>
       </GlassCard>
     </motion.div>
   );
@@ -170,9 +172,9 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
   const rateUp = rate >= prevRate;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
+    <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
       <GlassCard
-        className="p-6 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors"
+        className="p-6 h-full flex flex-col relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors"
         onClick={() => navigate("/activity")}
       >
         <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity bg-violet-400" />
@@ -203,12 +205,14 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
           )}
         </div>
 
-        {d && (
-          <p className={`text-xs mt-2 font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
-            {d.label} leads
-          </p>
-        )}
-        <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline</p>
+        <div className="mt-auto pt-2">
+          {d && (
+            <p className={`text-xs font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
+              {d.label} leads
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline</p>
+        </div>
       </GlassCard>
     </motion.div>
   );
@@ -221,10 +225,13 @@ function ReapplyConversionCard({ data, delay, onClick }: { data: ConversionData 
   const reapplied = data?.reapplied ?? 0;
   const rate = data?.rate ?? 0;
   const notYet = paid - reapplied;
+  const rateColor = rate >= 60 ? "text-emerald-400" : rate >= 35 ? "text-amber-400" : "text-rose-400";
+  const rateBadge = rate >= 60 ? "bg-emerald-500/15 text-emerald-300" : rate >= 35 ? "bg-amber-500/15 text-amber-300" : "bg-rose-500/15 text-rose-300";
+
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
+    <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
       <GlassCard
-        className="p-6 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors"
+        className="p-6 h-full flex flex-col relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors"
         onClick={onClick}
       >
         <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity bg-orange-400" />
@@ -238,32 +245,29 @@ function ReapplyConversionCard({ data, delay, onClick }: { data: ConversionData 
           </div>
         </div>
 
-        {/* Big number — loans paid (mirrors the leads count in Leads Pipeline) */}
-        <h3 className="text-5xl font-display font-bold text-white mt-2">{paid}</h3>
+        {/* Big rate % — mirrors the large number on the other cards */}
+        <h3 className={`text-5xl font-display font-bold mt-2 ${rateColor}`}>{rate}%</h3>
 
-        {/* Re-applied row with rate badge */}
+        {/* Secondary row — re-applied count + paid badge; mirrors "X converted  Y%" row on Leads */}
         <div className="flex items-center gap-2 mt-3">
           <span className="text-sm font-semibold text-emerald-400">{reapplied} re-applied ✓</span>
           {paid > 0 && (
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-              rate >= 60 ? "bg-emerald-500/15 text-emerald-300" :
-              rate >= 35 ? "bg-amber-500/15 text-amber-300" :
-              "bg-rose-500/15 text-rose-300"
-            }`}>
-              {rate}%
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${rateBadge}`}>
+              {paid} paid
             </span>
           )}
           {notYet > 0 && (
-            <span className="text-[10px] text-muted-foreground/50 ml-auto">
-              {notYet} not yet
-            </span>
+            <span className="text-[10px] text-muted-foreground/50 ml-auto">{notYet} not yet</span>
           )}
         </div>
 
-        <p className={`text-xs mt-2 font-medium ${notYet > 0 ? "text-orange-400" : "text-emerald-400"}`}>
-          {notYet > 0 ? `${notYet} still to follow up` : "All customers re-applied!"}
-        </p>
-        <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view customers</p>
+        {/* Delta-position line — mirrors "+X vs last month" row on other cards */}
+        <div className="mt-auto pt-2">
+          <p className={`text-xs font-medium ${notYet > 0 ? "text-orange-400" : "text-emerald-400"}`}>
+            {notYet > 0 ? `${notYet} still to follow up` : "All customers re-applied!"}
+          </p>
+          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view customers</p>
+        </div>
       </GlassCard>
     </motion.div>
   );
@@ -747,7 +751,7 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-10 items-stretch">
         <MonthlyMetricCard
           delay={0.08} title="New Applications" subtitle="First-time customer applications"
           value={monthly?.newApplications.current ?? 0} previous={monthly?.newApplications.previous ?? 0}
