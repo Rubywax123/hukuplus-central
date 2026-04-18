@@ -264,6 +264,81 @@ router.get("/dashboard/applications-detail", async (req, res): Promise<void> => 
   }
 });
 
+// ── Re-application conversion: paid this month → re-applied? ─────────────────
+// "Paid" = agreements with status='completed' whose repayment_date falls in the
+// current calendar month.  Re-applied = that same customer has a 'reapplication'
+// notification recorded this month (via Formitize webhook).
+router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const currentYM = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(`
+      WITH completed_this_month AS (
+        SELECT DISTINCT ON (COALESCE(a.customer_id::text, lower(trim(a.customer_name))))
+          a.id                                               AS agreement_id,
+          a.customer_id,
+          COALESCE(c.full_name, a.customer_name)            AS full_name,
+          COALESCE(c.phone,     a.customer_phone)           AS phone,
+          c.national_id,
+          c.nok_phone,
+          a.repayment_date,
+          a.loan_product,
+          r.name                                            AS retailer_name,
+          b.name                                            AS branch_name
+        FROM agreements a
+        LEFT JOIN customers c ON c.id = a.customer_id
+        LEFT JOIN retailers r ON r.id = a.retailer_id
+        LEFT JOIN branches b ON b.id = a.branch_id
+        WHERE a.status = 'completed'
+          AND (
+            (a.repayment_date IS NOT NULL AND a.repayment_date LIKE $1 || '%')
+            OR (a.repayment_date IS NULL  AND to_char(a.created_at, 'YYYY-MM') = $1)
+          )
+        ORDER BY COALESCE(a.customer_id::text, lower(trim(a.customer_name))), a.id DESC
+      ),
+      reapplied_this_month AS (
+        SELECT DISTINCT customer_id
+        FROM formitize_notifications
+        WHERE task_type = 'reapplication'
+          AND created_at >= DATE_TRUNC('month', NOW())
+          AND customer_id IS NOT NULL
+      )
+      SELECT
+        cm.*,
+        (rm.customer_id IS NOT NULL) AS reapplied
+      FROM completed_this_month cm
+      LEFT JOIN reapplied_this_month rm ON rm.customer_id = cm.customer_id
+      ORDER BY cm.reapplied DESC, cm.full_name ASC
+    `, [currentYM]);
+
+    const paid      = rows.length;
+    const reapplied = rows.filter((r: any) => r.reapplied).length;
+    const rate      = paid > 0 ? Math.round((reapplied / paid) * 100) : 0;
+
+    res.json({
+      paid,
+      reapplied,
+      rate,
+      customers: rows.map((r: any) => ({
+        customer_id:   r.customer_id,
+        full_name:     r.full_name,
+        phone:         r.phone,
+        national_id:   r.national_id,
+        nok_phone:     r.nok_phone,
+        retailer_name: r.retailer_name,
+        branch_name:   r.branch_name,
+        loan_product:  r.loan_product,
+        repayment_date: r.repayment_date,
+        reapplied:     r.reapplied,
+      })),
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // ── Delete a notification (and its unprocessed agreement if present) ──────────
 router.delete("/dashboard/applications/:jobId", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }

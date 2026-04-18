@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -52,6 +52,26 @@ interface LeadsMonthlyStats {
   lastMonth: { leads: number; conversions: number };
 }
 
+interface ConversionCustomer {
+  customer_id: number | null;
+  full_name: string;
+  phone: string | null;
+  national_id: string | null;
+  nok_phone: string | null;
+  retailer_name: string | null;
+  branch_name: string | null;
+  loan_product: string | null;
+  repayment_date: string | null;
+  reapplied: boolean;
+}
+
+interface ConversionData {
+  paid: number;
+  reapplied: number;
+  rate: number;
+  customers: ConversionCustomer[];
+}
+
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 
 function useMonthlyMetrics() {
@@ -79,6 +99,15 @@ function useLeadsMonthlyStats() {
       if (!r.ok) return { thisMonth: { leads: 0, conversions: 0 }, lastMonth: { leads: 0, conversions: 0 } };
       return r.json();
     },
+    refetchInterval: 5 * 60 * 1000,
+  });
+}
+
+function useReapplicationConversion() {
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  return useQuery<ConversionData>({
+    queryKey: ["reapplication-conversion"],
+    queryFn: () => fetch(`${BASE}/api/dashboard/reapplication-conversion`, { credentials: "include" }).then(r => r.json()),
     refetchInterval: 5 * 60 * 1000,
   });
 }
@@ -182,6 +211,197 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
         <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline</p>
       </GlassCard>
     </motion.div>
+  );
+}
+
+// ── Re-Apply Conversion Card ──────────────────────────────────────────────────
+
+function ReapplyConversionCard({ data, delay, onClick }: { data: ConversionData | undefined; delay: number; onClick: () => void }) {
+  const paid = data?.paid ?? 0;
+  const reapplied = data?.reapplied ?? 0;
+  const rate = data?.rate ?? 0;
+  const notYet = paid - reapplied;
+  const rateColor = rate >= 60 ? "text-emerald-400" : rate >= 35 ? "text-amber-400" : "text-rose-400";
+  const rateBarColor = rate >= 60 ? "bg-emerald-500" : rate >= 35 ? "bg-amber-500" : "bg-rose-500";
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
+      <GlassCard
+        className="p-6 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-colors"
+        onClick={onClick}
+      >
+        <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity bg-orange-400" />
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Re-Apply Conversion</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Paid loans → re-applied this month</p>
+          </div>
+          <div className="p-2 rounded-lg bg-white/5 text-orange-400">
+            <RotateCcw className="w-5 h-5" />
+          </div>
+        </div>
+
+        {/* Big rate number */}
+        <div className="flex items-end gap-3 mt-2">
+          <h3 className={`text-5xl font-display font-bold ${rateColor}`}>{rate}%</h3>
+          <span className="text-sm text-muted-foreground mb-1.5">conversion rate</span>
+        </div>
+
+        {/* Progress bar */}
+        <div className="mt-3 h-1.5 rounded-full bg-white/10 overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-700 ${rateBarColor}`} style={{ width: `${rate}%` }} />
+        </div>
+
+        {/* Counts row */}
+        <div className="flex items-center gap-4 mt-3">
+          <span className="text-xs text-muted-foreground">{paid} paid</span>
+          <span className="text-xs font-semibold text-emerald-400">{reapplied} re-applied ✓</span>
+          {notYet > 0 && <span className="text-xs font-semibold text-orange-400">{notYet} not yet</span>}
+        </div>
+        <p className="text-[10px] text-muted-foreground/40 mt-2">Click to view customers</p>
+      </GlassCard>
+    </motion.div>
+  );
+}
+
+// ── Re-Apply Conversion Drill-Down Panel ──────────────────────────────────────
+
+function ReapplyConversionPanel({ data, monthLabel, onClose }: { data: ConversionData; monthLabel: string; onClose: () => void }) {
+  const [tab, setTab] = useState<"not_yet" | "reapplied">("not_yet");
+
+  const notYet    = data.customers.filter(c => !c.reapplied);
+  const reapplied = data.customers.filter(c => c.reapplied);
+  const shown     = tab === "not_yet" ? notYet : reapplied;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-end p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ x: 80, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: 80, opacity: 0 }}
+          transition={{ type: "spring", damping: 28, stiffness: 300 }}
+          className="w-full max-w-lg h-[calc(100vh-2rem)] bg-[#0f1117] border border-white/10 rounded-2xl shadow-2xl flex flex-col"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
+            <div>
+              <h2 className="text-base font-semibold text-white">Re-Apply Conversion</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">{monthLabel} · {data.paid} paid · {data.rate}% converted</p>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-2 px-4 pt-4 shrink-0">
+            <button
+              onClick={() => setTab("not_yet")}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-colors ${
+                tab === "not_yet"
+                  ? "bg-orange-500/20 text-orange-300 border border-orange-500/30"
+                  : "bg-white/5 text-muted-foreground hover:bg-white/10"
+              }`}
+            >
+              Not yet re-applied · {notYet.length}
+            </button>
+            <button
+              onClick={() => setTab("reapplied")}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-colors ${
+                tab === "reapplied"
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  : "bg-white/5 text-muted-foreground hover:bg-white/10"
+              }`}
+            >
+              Re-applied ✓ · {reapplied.length}
+            </button>
+          </div>
+
+          {/* Context banner */}
+          {tab === "not_yet" && notYet.length > 0 && (
+            <div className="mx-4 mt-3 flex items-start gap-2.5 p-3 rounded-xl bg-orange-500/10 border border-orange-500/20 shrink-0">
+              <Phone className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-orange-400/80">
+                These customers settled their loan this month but haven't re-applied yet. Reach out to bring them back.
+              </p>
+            </div>
+          )}
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+            {shown.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
+                {tab === "not_yet" ? "All paid customers have already re-applied!" : "No re-applications recorded yet this month."}
+              </div>
+            ) : (
+              shown.map((c, i) => (
+                <div
+                  key={c.customer_id ?? i}
+                  className={`p-4 rounded-xl border ${
+                    tab === "not_yet"
+                      ? "bg-orange-500/5 border-orange-500/15"
+                      : "bg-emerald-500/5 border-emerald-500/15"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-white truncate">{c.full_name}</p>
+
+                      {/* Phones — prominent for follow-up */}
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+                        {c.phone && (
+                          <a href={`tel:${c.phone}`} className="flex items-center gap-1 text-[12px] font-medium text-sky-400 hover:text-sky-300 transition-colors">
+                            <Phone className="w-3 h-3" />{c.phone}
+                          </a>
+                        )}
+                        {c.nok_phone && c.nok_phone !== c.phone && (
+                          <a href={`tel:${c.nok_phone}`} className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-white transition-colors">
+                            <Phone className="w-3 h-3" />NOK: {c.nok_phone}
+                          </a>
+                        )}
+                      </div>
+
+                      {/* Branch / loan info */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1.5">
+                        {(c.retailer_name || c.branch_name) && (
+                          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <Building2 className="w-3 h-3" />
+                            {c.retailer_name}{c.branch_name ? ` · ${c.branch_name}` : ""}
+                          </span>
+                        )}
+                        {c.loan_product && (
+                          <span className="text-[11px] text-muted-foreground">{c.loan_product}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* National ID + paid date */}
+                    <div className="flex flex-col items-end gap-1 shrink-0 text-right">
+                      {c.national_id && (
+                        <span className="text-[10px] text-muted-foreground/50 font-mono">{c.national_id}</span>
+                      )}
+                      {c.repayment_date && (
+                        <span className="text-[11px] text-muted-foreground/60">
+                          paid {c.repayment_date.slice(0, 10)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -481,7 +701,9 @@ export default function DashboardPage() {
   const { data: monthly, isLoading: monthlyLoading } = useMonthlyMetrics();
   const { data: history, isLoading: historyLoading } = useMonthlyHistory();
   const { data: leadsStats } = useLeadsMonthlyStats();
+  const { data: conversionData } = useReapplicationConversion();
   const [drillDown, setDrillDown] = useState<"application" | "reapplication" | null>(null);
+  const [showConversion, setShowConversion] = useState(false);
 
   if (statsLoading || activityLoading || monthlyLoading) {
     return <div className="h-96 flex items-center justify-center animate-pulse text-primary">Loading dashboard data...</div>;
@@ -504,6 +726,14 @@ export default function DashboardPage() {
         />
       )}
 
+      {showConversion && conversionData && (
+        <ReapplyConversionPanel
+          data={conversionData}
+          monthLabel={monthLabel}
+          onClose={() => setShowConversion(false)}
+        />
+      )}
+
       {/* ── Monthly this-month summary ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mb-4">
         <div className="flex items-center gap-2">
@@ -512,7 +742,7 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-10">
         <MonthlyMetricCard
           delay={0.08} title="New Applications" subtitle="First-time customer applications"
           value={monthly?.newApplications.current ?? 0} previous={monthly?.newApplications.previous ?? 0}
@@ -531,6 +761,7 @@ export default function DashboardPage() {
           icon={FileCheck} colorClass="text-emerald-400" bgClass="bg-emerald-400"
         />
         <LeadsPipelineCard stats={leadsStats} delay={0.26} />
+        <ReapplyConversionCard data={conversionData} delay={0.32} onClick={() => setShowConversion(true)} />
       </div>
 
       {/* ── Historical comparison ── */}
