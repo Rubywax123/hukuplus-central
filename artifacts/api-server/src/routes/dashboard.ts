@@ -272,7 +272,10 @@ router.get("/dashboard/applications-detail", async (req, res): Promise<void> => 
 router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
 
-  const currentYM = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  // Rolling 30-day window — gives every customer equal time regardless of
+  // when in the month they paid off, and captures cross-month behaviour.
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const cutoffISO = cutoff.toISOString();
 
   // ── 1. Fetch completed loans from the Loan Register ───────────────────────
   const loans = await fetchLRLoans();
@@ -284,10 +287,10 @@ router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void
   const completedLoans = loans.filter((l: any) =>
     l.status === "completed" &&
     l.completedAt &&
-    String(l.completedAt).startsWith(currentYM)
+    String(l.completedAt) >= cutoffISO
   );
 
-  // ── 2. Fetch this month's re-application notifications from Central ───────
+  // ── 2. Fetch re-application notifications in the same rolling window ──────
   const client = await pool.connect();
   let reappRows: any[] = [];
   try {
@@ -301,8 +304,8 @@ router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void
       FROM formitize_notifications fn
       LEFT JOIN customers c ON c.id = fn.customer_id
       WHERE fn.task_type = 'reapplication'
-        AND fn.created_at >= DATE_TRUNC('month', NOW())
-    `);
+        AND fn.created_at >= $1
+    `, [cutoffISO]);
     reappRows = rows;
   } finally {
     client.release();
