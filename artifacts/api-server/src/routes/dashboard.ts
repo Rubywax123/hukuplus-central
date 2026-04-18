@@ -272,9 +272,9 @@ router.get("/dashboard/applications-detail", async (req, res): Promise<void> => 
 router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
 
-  // Rolling 30-day window — gives every customer equal time regardless of
+  // Rolling 60-day window — gives every customer equal time regardless of
   // when in the month they paid off, and captures cross-month behaviour.
-  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
   const cutoffISO = cutoff.toISOString();
 
   // ── 1. Fetch completed loans from the Loan Register ───────────────────────

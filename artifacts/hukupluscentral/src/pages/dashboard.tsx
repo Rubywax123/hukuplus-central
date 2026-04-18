@@ -234,7 +234,7 @@ function ReapplyConversionCard({ data, delay, onClick }: { data: ConversionData 
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Re-Apply Conversion</p>
-            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Loans paid → re-applied · rolling 30 days</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Loans paid → re-applied · rolling 60 days</p>
           </div>
           <div className="p-2 rounded-lg bg-white/5 text-orange-400">
             <RotateCcw className="w-5 h-5" />
@@ -294,7 +294,7 @@ function ReapplyConversionPanel({ data, monthLabel, onClose }: { data: Conversio
           <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
             <div>
               <h2 className="text-base font-semibold text-white">Re-Apply Conversion</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Rolling 30 days · {data.paid} paid · {data.rate}% converted</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Rolling 60 days · {data.paid} paid · {data.rate}% converted</p>
             </div>
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground transition-colors">
               <X className="w-4 h-4" />
