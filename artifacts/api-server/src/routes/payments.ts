@@ -433,15 +433,19 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     }
   }
 
-  // ── STEP 4: If genuine credit remainder exists, post a Receive Money entry ────
+  // ── STEP 4: If genuine credit remainder exists, post a Receive Overpayment ────
   // This only happens when there are no more outstanding invoices to absorb the
-  // remaining credit. We post a separate RECEIVE-OVERPAYMENT so the credit sits
-  // against the contact in Xero. AccountCode is needed here; we look it up from
-  // the contact's invoices as a best-effort step.
+  // remaining credit. We post a RECEIVE-OVERPAYMENT so the credit sits against
+  // the contact in Xero as available credit for future invoices.
+  //
+  // AccountCode resolution strategy (most-to-least reliable):
+  //   1. Look at line items of the invoices we just paid
+  //   2. Look at line items of recent invoices for this contact (any status)
+  //   3. Last resort: find any REVENUE-type account in the org's chart of accounts
   if (creditRemaining > 0.01) {
     let accountCode = "";
 
-    // Try applied invoices first
+    // Strategy 1: line items of the invoices in this payment
     for (const alloc of allocations) {
       if (accountCode) break;
       try {
@@ -458,7 +462,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
       } catch { /* non-fatal */ }
     }
 
-    // Fall back to recent invoices
+    // Strategy 2: line items of recent invoices for this contact
     if (!accountCode && xeroContactId) {
       try {
         const recentRes = await fetch(
@@ -486,11 +490,48 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
       } catch { /* non-fatal */ }
     }
 
-    console.log(`[payment] Credit remainder $${creditRemaining} — accountCode="${accountCode}"`);
+    // Strategy 3: last resort — find any active REVENUE account in the org
+    if (!accountCode) {
+      try {
+        const acctRes = await fetch(
+          `https://api.xero.com/api.xro/2.0/Accounts?where=Type%3D%3D%22REVENUE%22%20AND%20Status%3D%3D%22ACTIVE%22&pageSize=10`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (acctRes.ok) {
+          const acctData = await acctRes.json();
+          const firstRevenue = acctData.Accounts?.[0];
+          if (firstRevenue?.Code) {
+            accountCode = firstRevenue.Code;
+            console.log(`[payment] AccountCode fallback: using REVENUE account "${accountCode}" (${firstRevenue.Name})`);
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Strategy 4: try SALES type if still nothing
+    if (!accountCode) {
+      try {
+        const acctRes = await fetch(
+          `https://api.xero.com/api.xro/2.0/Accounts?where=Type%3D%3D%22SALES%22%20AND%20Status%3D%3D%22ACTIVE%22&pageSize=10`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (acctRes.ok) {
+          const acctData = await acctRes.json();
+          const firstSales = acctData.Accounts?.[0];
+          if (firstSales?.Code) {
+            accountCode = firstSales.Code;
+            console.log(`[payment] AccountCode fallback: using SALES account "${accountCode}" (${firstSales.Name})`);
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    console.log(`[payment] Credit remainder $${creditRemaining} — accountCode="${accountCode}" resolvedBankId=${resolvedBankAccountId}`);
 
     if (!accountCode) {
-      overpaymentError = `Credit of $${creditRemaining.toFixed(2)} could not post automatically (no account code found on invoices). Please post a Receive Overpayment of $${creditRemaining.toFixed(2)} for this customer manually in Xero.`;
+      overpaymentError = `Credit of $${creditRemaining.toFixed(2)} could not post automatically — no income account code could be found in Xero. Please manually post a Receive Overpayment of $${creditRemaining.toFixed(2)} for this customer in Xero.`;
     } else {
+      // Use AccountID for BankAccount (same as BatchPayments — Code alone is unreliable)
       const ovRes = await fetch("https://api.xero.com/api.xro/2.0/Overpayments", {
         method: "PUT",
         headers: xeroHeaders(auth),
@@ -498,7 +539,7 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
           Type: "RECEIVE-OVERPAYMENT",
           Contact: { ContactID: xeroContactId },
           Date: paymentDate,
-          BankAccount: { Code: bankAccountCode },
+          BankAccount: { AccountID: resolvedBankAccountId },
           LineAmountTypes: "Inclusive",
           LineItems: [{
             Description: `Customer credit — overpayment${storeName ? ` [${storeName}]` : ""}`,
@@ -510,11 +551,11 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
       if (ovRes.ok) {
         overpaymentPosted = true;
         overpaymentAmount = creditRemaining;
-        console.log(`[payment] Credit overpayment of $${creditRemaining} posted for contact ${xeroContactId}`);
+        console.log(`[payment] RECEIVE-OVERPAYMENT of $${creditRemaining} posted for contact ${xeroContactId} (accountCode=${accountCode})`);
       } else {
         const errText = await ovRes.text();
-        console.warn(`[payment] Credit overpayment POST failed (${ovRes.status}): ${errText.slice(0, 300)}`);
-        overpaymentError = `Credit of $${creditRemaining.toFixed(2)} could not post to Xero (${ovRes.status}). Please post a Receive Overpayment of $${creditRemaining.toFixed(2)} for this customer manually in Xero.`;
+        console.warn(`[payment] RECEIVE-OVERPAYMENT PUT failed (${ovRes.status}): ${errText.slice(0, 400)}`);
+        overpaymentError = `Credit of $${creditRemaining.toFixed(2)} could not post to Xero (${ovRes.status}). Please manually post a Receive Overpayment of $${creditRemaining.toFixed(2)} for this customer in Xero. Error: ${errText.slice(0, 150)}`;
       }
     }
   }
