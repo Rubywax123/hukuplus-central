@@ -414,23 +414,11 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
     const invoiceTotal = invoiceAllocs.reduce((s, a) => s + a.amount, 0);
     const fullAmount   = Math.round((invoiceTotal + creditRemaining) * 100) / 100;
 
-    // ── Step 1: Find Accounts-Receivable account code ─────────────────────────
-    // RECEIVE-OVERPAYMENT line items require the AR account code.
-    let arAccountCode = "200"; // sensible default — override if Xero returns one
-    try {
-      const arRes = await fetch(
-        "https://api.xero.com/api.xro/2.0/Accounts?Type=RECEIVABLE",
-        { headers: xeroHeaders(auth) }
-      );
-      if (arRes.ok) {
-        const arData = await arRes.json();
-        const code = arData.Accounts?.[0]?.Code;
-        if (code) { arAccountCode = code; }
-      }
-    } catch { /* keep default */ }
-    console.log(`[payment] Overpayment flow: full=$${fullAmount}, invoices=$${invoiceTotal.toFixed(2)}, credit=$${creditRemaining.toFixed(2)}, AR code=${arAccountCode}`);
+    console.log(`[payment] Overpayment flow: full=$${fullAmount}, invoices=$${invoiceTotal.toFixed(2)}, credit=$${creditRemaining.toFixed(2)}`);
 
     // ── Step 2: Post RECEIVE-OVERPAYMENT bank transaction ─────────────────────
+    // For RECEIVE-OVERPAYMENT Xero handles all AR coding internally — do NOT
+    // include an AccountCode in the LineItems or Xero returns ValidationException.
     const btRes = await fetch("https://api.xero.com/api.xro/2.0/BankTransactions", {
       method: "PUT",
       headers: xeroHeaders(auth),
@@ -445,7 +433,6 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
           LineItems: [{
             Description: storeName ? `Payment — ${storeName}` : "Customer overpayment",
             UnitAmount:  fullAmount,
-            AccountCode: arAccountCode,
             Quantity: 1,
           }],
         }],
