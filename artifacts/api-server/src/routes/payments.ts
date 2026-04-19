@@ -412,11 +412,35 @@ router.post("/payments/process", requireStaffAuth, requireSuperAdmin, async (req
 
     const invoiceTotal = invoiceAllocs.reduce((s, a) => s + a.amount, 0);
     const fullAmount   = Math.round((invoiceTotal + creditRemaining) * 100) / 100;
-    const [firstAlloc, ...restAllocs] = invoiceAllocs;
 
-    console.log(`[payment] Overpayment flow: full=$${fullAmount}, invoices=$${invoiceTotal.toFixed(2)}, credit=$${creditRemaining}, first=${firstAlloc.invoiceId}`);
+    // ── Live-check which invoices still have an outstanding balance ────────────
+    // The UI invoice list may be stale (e.g. a previous attempt already paid them).
+    // We re-fetch each invoice's current AmountDue before posting.
+    const liveOutstanding: InvoiceAlloc[] = [];
+    for (const alloc of invoiceAllocs) {
+      try {
+        const checkRes = await fetch(`https://api.xero.com/api.xro/2.0/Invoices/${alloc.invoiceId}`, { headers: xeroHeaders(auth) });
+        if (checkRes.ok) {
+          const checkData = await checkRes.json();
+          const amountDue = parseFloat(String(checkData.Invoices?.[0]?.AmountDue ?? 0));
+          if (amountDue > 0.005) liveOutstanding.push(alloc);
+          else console.log(`[payment] Invoice ${alloc.invoiceId} already paid (AmountDue=${amountDue}) — skipping`);
+        }
+      } catch { liveOutstanding.push(alloc); /* keep on error — let Xero validate */ }
+    }
 
-    // Step 1: Pay first invoice for the full amount → ONE bank entry + overpayment
+    if (liveOutstanding.length === 0) {
+      // All invoices are already paid — this payment was likely processed in a prior attempt.
+      res.status(409).json({
+        error: `All selected invoices for this customer are already marked as paid in Xero. This payment may have already been processed. Please check the customer's account in Xero before retrying.`,
+      });
+      return;
+    }
+
+    const [firstAlloc, ...restAllocs] = liveOutstanding;
+    console.log(`[payment] Overpayment flow: full=$${fullAmount}, live outstanding=${liveOutstanding.length}/${invoiceAllocs.length} invoices, credit=$${creditRemaining}, first=${firstAlloc.invoiceId}`);
+
+    // Step 1: Pay first live-outstanding invoice for the full amount → ONE bank entry + overpayment
     const payRes = await fetch("https://api.xero.com/api.xro/2.0/Payments", {
       method: "PUT",
       headers: xeroHeaders(auth),
