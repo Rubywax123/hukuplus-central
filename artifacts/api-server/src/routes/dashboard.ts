@@ -272,10 +272,14 @@ router.get("/dashboard/applications-detail", async (req, res): Promise<void> => 
 router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
 
-  // Rolling 60-day window — gives every customer equal time regardless of
-  // when in the month they paid off, and captures cross-month behaviour.
-  const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-  const cutoffISO = cutoff.toISOString();
+  // Re-applications: rolling 60-day window — only recent re-apps count.
+  // Completed loans: rolling 12-month window — any customer who finished a
+  // loan in the past year and comes back is counted as a conversion, regardless
+  // of how long they took to return (e.g. Fidelis, Oct completion).
+  const reappCutoff     = new Date(Date.now() - 60  * 24 * 60 * 60 * 1000);
+  const completedCutoff = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+  const reappCutoffISO     = reappCutoff.toISOString();
+  const completedCutoffISO = completedCutoff.toISOString();
 
   // ── 1. Fetch completed loans from the Loan Register ───────────────────────
   const loans = await fetchLRLoans();
@@ -287,7 +291,7 @@ router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void
   const completedLoans = loans.filter((l: any) =>
     l.status === "completed" &&
     l.completedAt &&
-    String(l.completedAt) >= cutoffISO
+    String(l.completedAt) >= completedCutoffISO
   );
 
   // ── 2. Fetch re-application notifications in the same rolling window ──────
@@ -305,7 +309,7 @@ router.get("/dashboard/reapplication-conversion", async (req, res): Promise<void
       LEFT JOIN customers c ON c.id = fn.customer_id
       WHERE fn.task_type = 'reapplication'
         AND fn.created_at >= $1
-    `, [cutoffISO]);
+    `, [reappCutoffISO]);
     reappRows = rows;
   } finally {
     client.release();
