@@ -162,13 +162,14 @@ function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, color
 
 function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefined; delay: number }) {
   const [, navigate] = useLocation();
-  const leads = stats?.thisMonth.leads ?? 0;
-  const conversions = stats?.thisMonth.conversions ?? 0;
-  const prevLeads = stats?.lastMonth.leads ?? 0;
+  const totalLeads     = stats?.thisMonth.leads ?? 0;
+  const conversions    = stats?.thisMonth.conversions ?? 0;
+  const remaining      = Math.max(0, totalLeads - conversions);
+  const prevLeads      = stats?.lastMonth.leads ?? 0;
   const prevConversions = stats?.lastMonth.conversions ?? 0;
-  const rate = leads > 0 ? Math.round((conversions / leads) * 100) : 0;
-  const prevRate = prevLeads > 0 ? Math.round((prevConversions / prevLeads) * 100) : 0;
-  const d = delta(leads, prevLeads);
+  const rate     = totalLeads > 0 ? Math.round((conversions / totalLeads) * 100) : 0;
+  const prevRate = prevLeads  > 0 ? Math.round((prevConversions / prevLeads) * 100) : 0;
+  const d = delta(totalLeads, prevLeads);
   const rateUp = rate >= prevRate;
 
   return (
@@ -181,19 +182,20 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leads Pipeline</p>
-            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Field sales this month</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Field sales this month · {totalLeads} total</p>
           </div>
           <div className="p-2 rounded-lg bg-white/5 text-violet-400">
             <TrendingUp className="w-5 h-5" />
           </div>
         </div>
 
-        <h3 className="text-5xl font-display font-bold text-white mt-2">{leads}</h3>
+        {/* Big number = remaining unconverted leads */}
+        <h3 className="text-5xl font-display font-bold text-white mt-2">{remaining}</h3>
 
         {/* Conversions row */}
         <div className="flex items-center gap-2 mt-3">
           <span className="text-sm font-semibold text-emerald-400">{conversions} converted</span>
-          {leads > 0 && (
+          {totalLeads > 0 && (
             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${rateUp ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>
               {rate}%
             </span>
