@@ -586,12 +586,20 @@ async function upsertNotification(params: {
       isNewNotification = true;
     }
 
-    // Auto-convert any matching open lead when a new application comes in
+    // Auto-convert leads + sync contact to Wati when a new application arrives
     if (isNewNotification && (params.taskType === "application" || params.taskType === "reapplication")) {
       await autoConvertMatchingLead({
         customerName: params.customerName ?? null,
         customerId:   params.customerId   ?? null,
         formName:     params.formName     ?? null,
+      });
+      await upsertWatiContact({
+        customerName: params.customerName  ?? null,
+        formPhone:    params.customerPhone ?? null,
+        customerId:   params.customerId    ?? null,
+        product:      params.product       ?? null,
+        taskType:     params.taskType      ?? null,
+        branchName:   params.branchName    ?? null,
       });
     }
   } catch (err) {
@@ -665,6 +673,82 @@ async function autoConvertMatchingLead(params: {
     console.log(`[formitize:leads] Auto-converted lead #${leadId} → ${customerName ?? customerPhone}`);
   } catch (err: any) {
     console.warn(`[formitize:leads] Auto-convert failed: ${err.message}`);
+  }
+}
+
+// ─── Sync application/re-application to Wati contact list ────────────────────
+// Pushes the customer's name + phone to Wati so the number is available for
+// future WhatsApp broadcasts, templates, and campaigns.
+// For re-applications the form phone is often the store's — we prefer the phone
+// stored against the customer record in Central if a customerId is available.
+
+async function upsertWatiContact(params: {
+  customerName:  string | null;
+  formPhone:     string | null;   // may be store phone for re-apps
+  customerId:    number | null;
+  product:       string | null;
+  taskType:      string | null;
+  branchName:    string | null;
+}) {
+  const WATI_URL   = (process.env.WATI_API_URL   ?? "").replace(/\/$/, "");
+  const WATI_TOKEN = process.env.WATI_API_TOKEN  ?? "";
+  if (!WATI_URL || !WATI_TOKEN || !params.customerName) return;
+
+  // ── 1. Resolve best phone — prefer customer DB record ─────────────────────
+  let rawPhone = params.formPhone;
+  if (params.customerId) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT phone FROM customers WHERE id = $1 LIMIT 1`,
+        [params.customerId]
+      );
+      if (rows[0]?.phone) rawPhone = rows[0].phone;
+    } catch { /* fall back to form phone */ }
+  }
+  if (!rawPhone) return;
+
+  // ── 2. Normalise to Wati international format (digits, Zimbabwe +263) ─────
+  const digits = rawPhone.replace(/\D/g, "");
+  let watiPhone: string;
+  if (digits.length === 12 && digits.startsWith("263")) {
+    watiPhone = digits;                        // already full international
+  } else if (digits.length === 10 && digits.startsWith("0")) {
+    watiPhone = "263" + digits.slice(1);       // 07xxxxxxxx → 2637xxxxxxxx
+  } else if (digits.length === 9) {
+    watiPhone = "263" + digits;                // 7xxxxxxxx  → 2637xxxxxxxx
+  } else {
+    console.warn(`[formitize:wati] Cannot normalise phone "${rawPhone}" — skipping`);
+    return;
+  }
+
+  // ── 3. POST to Wati addContact ─────────────────────────────────────────────
+  try {
+    const body = {
+      name: params.customerName,
+      customParams: [
+        { name: "product",  value: params.product   ?? "" },
+        { name: "type",     value: params.taskType  ?? "" },
+        { name: "branch",   value: params.branchName ?? "" },
+      ],
+    };
+
+    const r = await fetch(`${WATI_URL}/api/v1/addContact/${watiPhone}`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${WATI_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (r.ok) {
+      console.log(`[formitize:wati] Contact upserted — ${params.customerName} (${watiPhone})`);
+    } else {
+      const text = await r.text();
+      console.warn(`[formitize:wati] addContact ${r.status}: ${text.slice(0, 200)}`);
+    }
+  } catch (err: any) {
+    console.warn(`[formitize:wati] addContact error: ${err.message}`);
   }
 }
 
