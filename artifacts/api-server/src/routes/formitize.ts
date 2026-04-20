@@ -632,7 +632,7 @@ async function autoConvertMatchingLead(params: {
       if (rows.length > 0) leadId = rows[0].id;
     }
 
-    // 2. Name match (case-insensitive exact) — fallback
+    // 2a. Name match — exact (case-insensitive)
     if (!leadId && customerName) {
       const { rows } = await pool.query(
         `SELECT id FROM leads
@@ -641,6 +641,24 @@ async function autoConvertMatchingLead(params: {
          ORDER BY created_at DESC
          LIMIT 1`,
         [customerName]
+      );
+      if (rows.length > 0) leadId = rows[0].id;
+    }
+
+    // 2b. Name match — token-sorted (handles reversed first/last name order)
+    // e.g. "Chikwanda Alex" from Formitize matches "Alex Chikwanda" in leads
+    if (!leadId && customerName) {
+      const sortedTokens = customerName.trim().toLowerCase().split(/\s+/).sort().join(" ");
+      const { rows } = await pool.query(
+        `SELECT id FROM leads
+         WHERE status != 'converted'
+           AND array_to_string(
+                 ARRAY(SELECT unnest(string_to_array(LOWER(TRIM(customer_name)), ' ')) ORDER BY 1),
+                 ' '
+               ) = $1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [sortedTokens]
       );
       if (rows.length > 0) leadId = rows[0].id;
     }
