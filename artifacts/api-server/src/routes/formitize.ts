@@ -589,10 +589,9 @@ async function upsertNotification(params: {
     // Auto-convert any matching open lead when a new application comes in
     if (isNewNotification && (params.taskType === "application" || params.taskType === "reapplication")) {
       await autoConvertMatchingLead({
-        customerName:  params.customerName  ?? null,
-        customerPhone: params.customerPhone ?? null,
-        customerId:    params.customerId    ?? null,
-        formName:      params.formName      ?? null,
+        customerName: params.customerName ?? null,
+        customerId:   params.customerId   ?? null,
+        formName:     params.formName     ?? null,
       });
     }
   } catch (err) {
@@ -604,66 +603,50 @@ async function upsertNotification(params: {
 // Runs after a notification is saved. Matches open leads by normalised phone or
 // exact name, and flips their status to 'converted' automatically.
 
+// Jaccard token-overlap score between two name strings (0–1).
+// Tokens are lowercased and sorted so "Alex Chikwanda" == "Chikwanda Alex" == 1.0
+function nameScore(a: string, b: string): number {
+  const tA = new Set(a.trim().toLowerCase().split(/\s+/));
+  const tB = new Set(b.trim().toLowerCase().split(/\s+/));
+  const common = [...tA].filter(t => tB.has(t)).length;
+  const union  = new Set([...tA, ...tB]).size;
+  return union === 0 ? 0 : common / union;
+}
+
 async function autoConvertMatchingLead(params: {
   customerName: string | null;
-  customerPhone: string | null;
   customerId: number | null;
   formName: string | null;
 }) {
-  const { customerName, customerPhone, customerId, formName } = params;
+  const { customerName, customerId, formName } = params;
+  if (!customerName) return;
+
   try {
-    // Normalise phone: digits only, last 9 characters (local Zim number)
-    const normPhone = customerPhone
-      ? customerPhone.replace(/\D/g, "").slice(-9)
-      : null;
+    // Fetch all unconverted leads and score them by name similarity.
+    // Phone is deliberately excluded — re-application forms often contain the
+    // store's phone, not the customer's, making phone an unreliable signal.
+    const { rows: leads } = await pool.query(
+      `SELECT id, customer_name FROM leads WHERE status != 'converted' ORDER BY created_at DESC`
+    );
 
-    let leadId: number | null = null;
+    let bestId:    number | null = null;
+    let bestScore: number        = 0;
 
-    // 1. Phone match — most reliable
-    if (normPhone && normPhone.length >= 7) {
-      const { rows } = await pool.query(
-        `SELECT id FROM leads
-         WHERE status != 'converted'
-           AND RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 9) = $1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [normPhone]
-      );
-      if (rows.length > 0) leadId = rows[0].id;
+    for (const lead of leads) {
+      const score = nameScore(customerName, lead.customer_name ?? "");
+      if (score > bestScore) { bestScore = score; bestId = lead.id; }
     }
 
-    // 2a. Name match — exact (case-insensitive)
-    if (!leadId && customerName) {
-      const { rows } = await pool.query(
-        `SELECT id FROM leads
-         WHERE status != 'converted'
-           AND LOWER(TRIM(customer_name)) = LOWER(TRIM($1))
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [customerName]
-      );
-      if (rows.length > 0) leadId = rows[0].id;
+    // Require at least 0.6 Jaccard similarity (60% token overlap).
+    // Handles exact, reversed, and middle-name variations without false-positives.
+    const THRESHOLD = 0.6;
+    if (!bestId || bestScore < THRESHOLD) {
+      console.log(`[formitize:leads] No lead match for "${customerName}" (best score=${bestScore.toFixed(2)})`);
+      return;
     }
 
-    // 2b. Name match — token-sorted (handles reversed first/last name order)
-    // e.g. "Chikwanda Alex" from Formitize matches "Alex Chikwanda" in leads
-    if (!leadId && customerName) {
-      const sortedTokens = customerName.trim().toLowerCase().split(/\s+/).sort().join(" ");
-      const { rows } = await pool.query(
-        `SELECT id FROM leads
-         WHERE status != 'converted'
-           AND array_to_string(
-                 ARRAY(SELECT unnest(string_to_array(LOWER(TRIM(customer_name)), ' ')) ORDER BY 1),
-                 ' '
-               ) = $1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [sortedTokens]
-      );
-      if (rows.length > 0) leadId = rows[0].id;
-    }
-
-    if (!leadId) return; // No matching open lead
+    const leadId = bestId;
+    console.log(`[formitize:leads] Matched lead #${leadId} for "${customerName}" (score=${bestScore.toFixed(2)})`);
 
     const autoNote = `Auto-converted from Formitize application${formName ? ` (${formName})` : ""}.`;
     await pool.query(
