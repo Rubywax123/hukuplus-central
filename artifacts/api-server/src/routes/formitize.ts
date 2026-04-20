@@ -546,6 +546,8 @@ async function upsertNotification(params: {
     const isDelinquent        = params.isDelinquentWarning ?? false;
     const delinquentMatch     = params.delinquentMatch ?? null;
 
+    let isNewNotification = false;
+
     if (params.jobId) {
       // ON CONFLICT DO NOTHING — the unique index on formitize_job_id prevents duplicates.
       // customer_id is included in the initial INSERT so it's captured on first arrival.
@@ -561,8 +563,9 @@ async function upsertNotification(params: {
          params.paymentAmount ?? null, isDuplicateWarning,
          isDelinquent, delinquentMatch, initialStatus]
       );
+      isNewNotification = (res.rowCount ?? 0) > 0;
       // If the row already existed (conflict skipped), backfill customer_id if it was missing
-      if (res.rowCount === 0 && params.customerId) {
+      if (!isNewNotification && params.customerId) {
         await pool.query(
           `UPDATE formitize_notifications SET customer_id = $1 WHERE formitize_job_id = $2 AND customer_id IS NULL`,
           [params.customerId, params.jobId]
@@ -580,9 +583,87 @@ async function upsertNotification(params: {
          params.paymentAmount ?? null, isDuplicateWarning,
          isDelinquent, delinquentMatch, initialStatus]
       );
+      isNewNotification = true;
+    }
+
+    // Auto-convert any matching open lead when a new application comes in
+    if (isNewNotification && (params.taskType === "application" || params.taskType === "reapplication")) {
+      await autoConvertMatchingLead({
+        customerName:  params.customerName  ?? null,
+        customerPhone: params.customerPhone ?? null,
+        customerId:    params.customerId    ?? null,
+        formName:      params.formName      ?? null,
+      });
     }
   } catch (err) {
     console.error("[formitize:webhook] Failed to upsert notification:", err);
+  }
+}
+
+// ─── Auto-convert leads when an application / re-application arrives ─────────
+// Runs after a notification is saved. Matches open leads by normalised phone or
+// exact name, and flips their status to 'converted' automatically.
+
+async function autoConvertMatchingLead(params: {
+  customerName: string | null;
+  customerPhone: string | null;
+  customerId: number | null;
+  formName: string | null;
+}) {
+  const { customerName, customerPhone, customerId, formName } = params;
+  try {
+    // Normalise phone: digits only, last 9 characters (local Zim number)
+    const normPhone = customerPhone
+      ? customerPhone.replace(/\D/g, "").slice(-9)
+      : null;
+
+    let leadId: number | null = null;
+
+    // 1. Phone match — most reliable
+    if (normPhone && normPhone.length >= 7) {
+      const { rows } = await pool.query(
+        `SELECT id FROM leads
+         WHERE status != 'converted'
+           AND RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 9) = $1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [normPhone]
+      );
+      if (rows.length > 0) leadId = rows[0].id;
+    }
+
+    // 2. Name match (case-insensitive exact) — fallback
+    if (!leadId && customerName) {
+      const { rows } = await pool.query(
+        `SELECT id FROM leads
+         WHERE status != 'converted'
+           AND LOWER(TRIM(customer_name)) = LOWER(TRIM($1))
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [customerName]
+      );
+      if (rows.length > 0) leadId = rows[0].id;
+    }
+
+    if (!leadId) return; // No matching open lead
+
+    const autoNote = `Auto-converted from Formitize application${formName ? ` (${formName})` : ""}.`;
+    await pool.query(
+      `UPDATE leads
+       SET status               = 'converted',
+           converted_at         = NOW(),
+           converted_customer_id = $2,
+           notes                = CASE
+                                    WHEN notes IS NULL OR notes = '' THEN $3
+                                    ELSE notes || ' ' || $3
+                                  END,
+           updated_at           = NOW()
+       WHERE id = $1`,
+      [leadId, customerId ?? null, autoNote]
+    );
+    console.log(`[formitize:leads] Auto-converted lead #${leadId} → ${customerName ?? customerPhone}`);
+  } catch (err: any) {
+    console.warn(`[formitize:leads] Auto-convert failed: ${err.message}`);
   }
 }
 
