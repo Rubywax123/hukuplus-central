@@ -80,7 +80,10 @@ function BranchCard({ branch, retailerId }: { branch: any; retailerId: number })
   const handleDelete = () => {
     deleteMutation.mutate(
       { retailerId, branchId: branch.id },
-      { onSuccess: () => invalidate() }
+      {
+        onSuccess: () => invalidate(),
+        onError: () => {}, // error shown inline below
+      }
     );
   };
 
@@ -103,17 +106,30 @@ function BranchCard({ branch, retailerId }: { branch: any; retailerId: number })
   }
 
   if (confirmDelete) {
+    const deleteErr = deleteMutation.isError
+      ? ((deleteMutation.error as any)?.message || "Delete failed")
+      : null;
     return (
       <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-lg space-y-2">
         <p className="text-xs text-red-300 font-medium">Delete "{branch.name}"?</p>
-        <p className="text-xs text-muted-foreground">This cannot be undone.</p>
-        <div className="flex gap-2">
-          <button onClick={handleDelete} disabled={deleteMutation.isPending}
-            className="px-3 py-1.5 rounded-md bg-red-500/30 text-red-300 text-xs font-semibold hover:bg-red-500/40 transition-colors disabled:opacity-50">
-            {deleteMutation.isPending ? "Deleting…" : "Delete"}
+        {deleteErr
+          ? <p className="text-xs text-amber-400">{deleteErr}</p>
+          : <p className="text-xs text-muted-foreground">This cannot be undone.</p>
+        }
+        {!deleteErr && (
+          <div className="flex gap-2">
+            <button onClick={handleDelete} disabled={deleteMutation.isPending}
+              className="px-3 py-1.5 rounded-md bg-red-500/30 text-red-300 text-xs font-semibold hover:bg-red-500/40 transition-colors disabled:opacity-50">
+              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+            </button>
+            <button onClick={() => setConfirmDelete(false)} className="text-xs text-muted-foreground hover:text-white px-2 transition-colors">Cancel</button>
+          </div>
+        )}
+        {deleteErr && (
+          <button onClick={() => { deleteMutation.reset(); setConfirmDelete(false); }} className="text-xs text-muted-foreground hover:text-white px-2 transition-colors">
+            Close
           </button>
-          <button onClick={() => setConfirmDelete(false)} className="text-xs text-muted-foreground hover:text-white px-2 transition-colors">Cancel</button>
-        </div>
+        )}
       </div>
     );
   }

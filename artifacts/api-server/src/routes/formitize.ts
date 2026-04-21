@@ -1158,7 +1158,25 @@ router.post("/formitize/webhook", async (req, res) => {
 
     if (storeBranchName) {
       const allBranches = await db.select().from(branchesTable);
-      const searchWords = storeBranchName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      // Strip generic noise words that appear in raw form values but never in branch names
+      const NOISE_WORDS = new Set(["branch", "store", "shop", "main", "outlet", "centre", "center", "unit", "site", "head"]);
+      const searchWords = storeBranchName.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !NOISE_WORDS.has(w));
+
+      // Edit-distance-1 helper: handles single-character typos ("chivhu" ≈ "chivu")
+      const editDist1 = (a: string, b: string): boolean => {
+        if (a === b) return true;
+        if (Math.abs(a.length - b.length) > 1) return false;
+        if (a.length === b.length) {
+          let diffs = 0;
+          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diffs++;
+          return diffs <= 1;
+        }
+        const [long, short] = a.length > b.length ? [a, b] : [b, a];
+        for (let i = 0; i < long.length; i++) {
+          if (long.slice(0, i) + long.slice(i + 1) === short) return true;
+        }
+        return false;
+      };
 
       // Narrow candidates — priority order:
       // 1. Explicit "Retail Company" field from the form (most reliable)
@@ -1230,6 +1248,24 @@ router.post("/formitize/webhook", async (req, res) => {
         if (foldScored.length > 0) {
           foldScored.sort((a, b) => b.score - a.score);
           matched = foldScored[0].branch;
+        }
+      }
+
+      // Edit-distance-1 fuzzy fallback — catches single-char typos/extra chars
+      // e.g. "chivhu" in the form vs "chivu" in the DB
+      if (!matched && searchWords.length > 0) {
+        const fuzzyScored = candidates.map(b => {
+          const branchWords = b.name.toLowerCase().split(/\s+/);
+          const score = searchWords.reduce((sum, sw) => {
+            const hit = branchWords.some(bw => editDist1(sw, bw));
+            return sum + (hit ? sw.length : 0);
+          }, 0);
+          return { branch: b, score };
+        }).filter(x => x.score > 0);
+        if (fuzzyScored.length > 0) {
+          fuzzyScored.sort((a, b) => b.score - a.score);
+          matched = fuzzyScored[0].branch;
+          console.log(`[formitize] Fuzzy-matched branch "${storeBranchName}" → "${matched.name}" (edit-distance-1)`);
         }
       }
 

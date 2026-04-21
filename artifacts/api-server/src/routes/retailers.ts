@@ -263,7 +263,18 @@ router.delete("/retailers/:retailerId/branches/:branchId", async (req, res): Pro
     res.status(400).json({ error: params.error.message });
     return;
   }
-  await db.delete(branchesTable).where(eq(branchesTable.id, params.data.branchId));
+  try {
+    await db.delete(branchesTable).where(eq(branchesTable.id, params.data.branchId));
+  } catch (err: any) {
+    // PostgreSQL FK violation code 23503
+    if (err?.code === "23503") {
+      res.status(422).json({
+        error: "Cannot delete — this branch has customers, agreements, or users linked to it. Reassign them first, or rename the branch instead.",
+      });
+      return;
+    }
+    throw err;
+  }
   pushToRevolver();
   res.sendStatus(204);
 });
