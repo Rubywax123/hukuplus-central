@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, whatsappMessagesTable } from "@workspace/db";
+import { db, pool, whatsappMessagesTable } from "@workspace/db";
 import { eq, desc, sql, and, isNotNull } from "drizzle-orm";
 
 const router = Router();
@@ -44,11 +44,27 @@ router.post("/whatsapp/webhook", async (req, res): Promise<void> => {
   }
 
   // Inbound customer message
+  // Prefer the customer name stored in Central over the WhatsApp profile name
+  const rawWaId  = body.waId ?? "";
+  const rawPhone = rawWaId.replace(/\D/g, "");
+  let resolvedName: string | null = body.senderName ?? body.messageContact?.name ?? null;
+  if (rawPhone) {
+    try {
+      const { rows: cRows } = await pool.query(
+        `SELECT full_name FROM customers
+          WHERE RIGHT(REGEXP_REPLACE(phone, '\\D', '', 'g'), 9) = RIGHT($1, 9)
+          LIMIT 1`,
+        [rawPhone]
+      );
+      if (cRows[0]?.full_name) resolvedName = cRows[0].full_name;
+    } catch { /* keep whatsapp profile name */ }
+  }
+
   try {
     await db.insert(whatsappMessagesTable).values({
-      conversationId: body.conversationId ?? body.waId ?? "unknown",
-      waId:           body.waId ?? "",
-      senderName:     body.senderName ?? body.messageContact?.name ?? null,
+      conversationId: (body.conversationId ?? rawWaId) || "unknown",
+      waId:           rawWaId,
+      senderName:     resolvedName,
       messageText:    body.text ?? null,
       messageType:    body.type ?? "text",
       direction:      "inbound",
@@ -73,21 +89,26 @@ router.get("/whatsapp/conversations", async (req, res): Promise<void> => {
     return;
   }
 
+  // Prefer the customer's full_name from Central over the WhatsApp profile name.
+  // Match on the last 9 digits of the phone (handles all Zim formats).
   const rows = await db.execute(sql`
-    SELECT DISTINCT ON (wa_id)
-      wa_id         AS "waId",
-      sender_name   AS "senderName",
-      message_text  AS "lastMessage",
-      direction,
-      created_at    AS "lastAt",
+    SELECT DISTINCT ON (m.wa_id)
+      m.wa_id                                              AS "waId",
+      COALESCE(c.full_name, m.sender_name)                 AS "senderName",
+      m.message_text                                       AS "lastMessage",
+      m.direction,
+      m.created_at                                         AS "lastAt",
       (
         SELECT COUNT(*)::int FROM whatsapp_messages m2
-        WHERE m2.wa_id = whatsapp_messages.wa_id
+        WHERE m2.wa_id = m.wa_id
           AND m2.is_read = false
           AND m2.direction = 'inbound'
       ) AS "unreadCount"
-    FROM whatsapp_messages
-    ORDER BY wa_id, created_at DESC
+    FROM whatsapp_messages m
+    LEFT JOIN customers c
+      ON RIGHT(REGEXP_REPLACE(c.phone, '\\D', '', 'g'), 9)
+       = RIGHT(REGEXP_REPLACE(m.wa_id,  '\\D', '', 'g'), 9)
+    ORDER BY m.wa_id, m.created_at DESC
   `);
 
   res.json({ configured: true, conversations: rows.rows });
