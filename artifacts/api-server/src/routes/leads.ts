@@ -253,6 +253,39 @@ router.put("/leads/:id/convert", requireStaffAuth, async (req, res): Promise<voi
   }
 });
 
+// ─── PATCH /api/leads/:id — update editable fields ───────────────────────────
+
+router.patch("/leads/:id", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const { notes, customer_name, phone, flock_size } = req.body ?? {};
+  const sets: string[] = [];
+  const params: any[] = [];
+
+  if (notes !== undefined)         { sets.push(`notes = $${params.push(notes ?? null)}`); }
+  if (customer_name !== undefined) { sets.push(`customer_name = $${params.push(String(customer_name).trim())}`); }
+  if (phone !== undefined)         { sets.push(`phone = $${params.push(String(phone).trim())}`); }
+  if (flock_size !== undefined)    { sets.push(`flock_size = $${params.push(parseInt(flock_size, 10) || 0)}`); }
+
+  if (sets.length === 0) { res.status(400).json({ error: "Nothing to update" }); return; }
+
+  sets.push(`updated_at = now()`);
+  params.push(id);
+
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `UPDATE leads SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found" }); return; }
+    res.json(r.rows[0]);
+  } finally {
+    client.release();
+  }
+});
+
 // ─── DELETE /api/leads/:id — permanently remove a lead ───────────────────────
 
 router.delete("/leads/:id", requireStaffAuth, async (req, res): Promise<void> => {

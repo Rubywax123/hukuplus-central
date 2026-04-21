@@ -3391,6 +3391,8 @@ function LeadsTab() {
   const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [editingLeadId, setEditingLeadId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<{ customer_name: string; phone: string; flock_size: string; notes: string }>({ customer_name: "", phone: "", flock_size: "", notes: "" });
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
@@ -3459,6 +3461,30 @@ function LeadsTab() {
     },
     onSuccess: () => { setConfirmDeleteId(null); invalidateAll(); },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Record<string, any> }) => {
+      const r = await fetch(`${BASE}/api/leads/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!r.ok) throw new Error("Failed to save");
+    },
+    onSuccess: () => { setEditingLeadId(null); invalidateAll(); },
+  });
+
+  const startEdit = (lead: Lead) => {
+    setEditDraft({
+      customer_name: lead.customer_name,
+      phone: lead.phone,
+      flock_size: lead.flock_size > 0 ? String(lead.flock_size) : "",
+      notes: lead.notes ?? "",
+    });
+    setEditingLeadId(lead.id);
+    setConfirmDeleteId(null);
+  };
 
   // ── Derive filter options from fetched leads ─────────────────────────────────
   const retailerNames = Array.from(new Set(rawLeads.map(l => l.retailer_name).filter(Boolean))) as string[];
@@ -3923,16 +3949,22 @@ function LeadsTab() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                      {lead.status === "new" && (
+                      {lead.status === "new" && editingLeadId !== lead.id && (
                         <button onClick={() => acknowledgeMutation.mutate(lead.id)} disabled={acknowledgeMutation.isPending}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 border border-sky-500/25 text-sky-300 hover:bg-sky-500/20 transition-all disabled:opacity-40">
                           <CheckCheck className="w-3.5 h-3.5" /> Acknowledge
                         </button>
                       )}
-                      {lead.status !== "converted" && (
+                      {lead.status !== "converted" && editingLeadId !== lead.id && (
                         <button onClick={() => setConvertingLead(lead)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
                           <CheckCircle2 className="w-3.5 h-3.5" /> File
+                        </button>
+                      )}
+                      {editingLeadId !== lead.id && (
+                        <button onClick={() => startEdit(lead)}
+                          className="p-1.5 rounded-lg text-white/25 hover:text-blue-400 hover:bg-blue-500/10 transition-all">
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
                       )}
                       {confirmDeleteId === lead.id ? (
@@ -3947,14 +3979,74 @@ function LeadsTab() {
                             Confirm
                           </button>
                         </div>
-                      ) : (
+                      ) : editingLeadId !== lead.id ? (
                         <button onClick={() => setConfirmDeleteId(lead.id)}
-                          className="p-1.5 rounded-lg text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all mt-0.5">
+                          className="p-1.5 rounded-lg text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </div>
+
+                  {/* ── Inline edit form ── */}
+                  {editingLeadId === lead.id && (
+                    <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Name</label>
+                          <input
+                            className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                            value={editDraft.customer_name}
+                            onChange={e => setEditDraft(d => ({ ...d, customer_name: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Phone</label>
+                          <input
+                            className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                            value={editDraft.phone}
+                            onChange={e => setEditDraft(d => ({ ...d, phone: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Flock Size</label>
+                        <input
+                          type="number" min="0"
+                          className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                          value={editDraft.flock_size}
+                          onChange={e => setEditDraft(d => ({ ...d, flock_size: e.target.value }))}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Notes</label>
+                        <textarea
+                          rows={3}
+                          className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 resize-none"
+                          value={editDraft.notes}
+                          onChange={e => setEditDraft(d => ({ ...d, notes: e.target.value }))}
+                          placeholder="Add notes…"
+                        />
+                      </div>
+                      {updateMutation.isError && (
+                        <p className="text-xs text-red-400">{String(updateMutation.error)}</p>
+                      )}
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => updateMutation.mutate({ id: lead.id, data: { customer_name: editDraft.customer_name, phone: editDraft.phone, flock_size: editDraft.flock_size || "0", notes: editDraft.notes || null } })}
+                          disabled={updateMutation.isPending}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-all disabled:opacity-40">
+                          {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                          Save
+                        </button>
+                        <button onClick={() => setEditingLeadId(null)}
+                          className="px-3 py-1.5 text-xs text-muted-foreground hover:text-white transition-colors">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
