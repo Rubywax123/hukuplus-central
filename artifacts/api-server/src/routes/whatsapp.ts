@@ -296,4 +296,63 @@ router.post("/whatsapp/send", async (req, res): Promise<void> => {
   res.json({ ok: true });
 });
 
+// ─── Create a lead from a WhatsApp conversation ───────────────────────────────
+
+router.post("/whatsapp/conversations/:waId/create-lead", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const rawWaId = req.params.waId;
+  const digits  = rawWaId.replace(/\D/g, "");
+
+  // Look up the best name we have for this contact
+  const nameRow = await pool.query(
+    `SELECT COALESCE(c.full_name, m.sender_name) AS name
+       FROM whatsapp_messages m
+       LEFT JOIN customers c
+         ON RIGHT(REGEXP_REPLACE(c.phone, '\\D', '', 'g'), 9)
+          = RIGHT(REGEXP_REPLACE(m.wa_id, '\\D', '', 'g'), 9)
+      WHERE m.wa_id = $1 AND m.direction = 'inbound'
+      ORDER BY m.created_at DESC LIMIT 1`,
+    [rawWaId]
+  );
+  const customerName: string =
+    nameRow.rows[0]?.name ?? rawWaId;
+
+  // Phone for the lead — use international format
+  let phone = rawWaId;
+  if (digits.length === 9)                                   phone = "263" + digits;
+  else if (digits.length === 10 && digits.startsWith("0"))   phone = "263" + digits.slice(1);
+  const last9 = phone.replace(/\D/g, "").slice(-9);
+
+  // Guard: return existing lead if one is already open for this number
+  const existing = await pool.query(
+    `SELECT id FROM leads
+      WHERE RIGHT(REGEXP_REPLACE(phone, '\\D', '', 'g'), 9) = $1
+        AND status != 'converted'
+      ORDER BY created_at DESC LIMIT 1`,
+    [last9]
+  );
+  if (existing.rows[0]) {
+    res.status(409).json({ existing: true, leadId: existing.rows[0].id });
+    return;
+  }
+
+  const submittedBy: string =
+    (req as any).staffUser?.email ?? (req as any).staffUser?.name ?? "WhatsApp";
+
+  const result = await pool.query(
+    `INSERT INTO leads (customer_name, phone, notes, submitted_by, loan_product)
+     VALUES ($1, $2, $3, $4, 'HukuPlus')
+     RETURNING id`,
+    [
+      customerName,
+      phone,
+      "Lead created from incoming WhatsApp message",
+      submittedBy,
+    ]
+  );
+
+  res.status(201).json({ leadId: result.rows[0].id, customerName, phone });
+});
+
 export default router;

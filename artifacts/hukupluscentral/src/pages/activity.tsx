@@ -2346,6 +2346,7 @@ function WhatsAppTab() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
+  const [leadState, setLeadState] = useState<{ leadId: number; existing: boolean } | null>(null);
 
   const { data: convData, isLoading: loadingConvs } = useQuery<{
     configured: boolean;
@@ -2421,6 +2422,23 @@ function WhatsAppTab() {
     },
   });
 
+  const createLeadMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/conversations/${selected!.waId}/create-lead`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (r.status === 409) return { ...data, existing: true };
+      if (!r.ok) throw new Error(data.error ?? "Failed to create lead");
+      return { ...data, existing: false };
+    },
+    onSuccess: (data) => {
+      setLeadState({ leadId: data.leadId, existing: data.existing });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+
   const templates = templatesData?.templates ?? [];
   const activeTpl = templates.find(t => t.name === selectedTemplate) ?? null;
 
@@ -2462,7 +2480,7 @@ function WhatsAppTab() {
             conversations.map(conv => (
               <button
                 key={conv.waId}
-                onClick={() => setSelected(conv)}
+                onClick={() => { setSelected(conv); setLeadState(null); }}
                 className={cn(
                   "w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors",
                   selected?.waId === conv.waId && "bg-white/10"
@@ -2500,14 +2518,42 @@ function WhatsAppTab() {
           ) : (
             <>
               {/* Header */}
-              <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-green-500/20 flex items-center justify-center">
-                  <Phone className="w-3 h-3 text-green-400" />
+              <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-green-500/20 flex items-center justify-center">
+                    <Phone className="w-3 h-3 text-green-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{selected.senderName ?? selected.waId}</p>
+                    <p className="text-[11px] text-muted-foreground">+{selected.waId}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold">{selected.senderName ?? selected.waId}</p>
-                  <p className="text-[11px] text-muted-foreground">+{selected.waId}</p>
-                </div>
+                {/* Create Lead button */}
+                {leadState ? (
+                  <div className={cn(
+                    "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium",
+                    leadState.existing
+                      ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                      : "bg-green-500/15 text-green-400 border border-green-500/20"
+                  )}>
+                    {leadState.existing
+                      ? <><span className="text-amber-400">⚠</span> Lead #{leadState.leadId} already open</>
+                      : <><span>✓</span> Lead #{leadState.leadId} created</>
+                    }
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => createLeadMutation.mutate()}
+                    disabled={createLeadMutation.isPending}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-colors disabled:opacity-50"
+                  >
+                    {createLeadMutation.isPending
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <UserPlus className="w-3.5 h-3.5" />
+                    }
+                    Create Lead
+                  </button>
+                )}
               </div>
 
               {/* Messages */}
