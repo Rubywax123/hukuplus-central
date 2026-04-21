@@ -989,7 +989,7 @@ export async function runMigrations() {
         retailer_name TEXT,
         branch_name TEXT,
         flock_size INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'converted')),
+        status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'converted', 'dropped')),
         notes TEXT,
         submitted_by TEXT,
         acknowledged_at TIMESTAMPTZ,
@@ -1105,6 +1105,14 @@ export async function runMigrations() {
     await client.query(`
       ALTER TABLE leads ADD COLUMN IF NOT EXISTS dropped_at TIMESTAMPTZ;
       ALTER TABLE leads ADD COLUMN IF NOT EXISTS dropped_by TEXT;
+    `);
+
+    // ── Widen leads status check constraint to include 'dropped' ──────────────
+    // Drop the old constraint (name may vary) and recreate with the full set.
+    await client.query(`
+      ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_status_check;
+      ALTER TABLE leads ADD CONSTRAINT leads_status_check
+        CHECK (status IN ('new', 'acknowledged', 'converted', 'dropped'));
     `);
 
     // ── Revolver mirror tables (Revolver → Central read sync) ─────────────────
