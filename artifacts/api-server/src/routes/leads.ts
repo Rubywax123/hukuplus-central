@@ -89,6 +89,10 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
     if (status === "unconverted") {
       where = "WHERE l.status IN ('new', 'acknowledged') AND l.dismissed_at IS NULL";
       orderBy = "ORDER BY l.created_at DESC";
+    } else if (status === "pipeline") {
+      // Pipeline = all acknowledged leads regardless of dismissed_at; excludes converted
+      where = "WHERE l.status = 'acknowledged'";
+      orderBy = "ORDER BY l.created_at DESC";
     } else if (status && status !== "all") {
       where = `WHERE l.status = $${params.push(status)}`;
     }
@@ -121,9 +125,11 @@ router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> =
          AND l.dismissed_at IS NULL`
     );
     const globalR = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new' AND dismissed_at IS NULL`);
+    const pipelineR = await client.query(`SELECT COUNT(*) AS pipeline_count FROM leads WHERE status = 'acknowledged'`);
     res.json({
       newCount: parseInt(globalR.rows[0].new_count, 10),
       feedCount: parseInt(feedR.rows[0].feed_count, 10),
+      pipelineCount: parseInt(pipelineR.rows[0].pipeline_count, 10),
     });
   } finally {
     client.release();

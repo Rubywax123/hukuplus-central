@@ -3399,10 +3399,21 @@ function LeadsTab() {
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"unconverted" | "new" | "acknowledged" | "converted" | "all">("unconverted");
+  const [statusFilter, setStatusFilter] = useState<"pipeline" | "unconverted" | "new" | "acknowledged" | "converted" | "all">("pipeline");
   const [retailerFilter, setRetailerFilter] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
+
+  // ── Lead counts (shared key — deduped by TanStack) ──────────────────────────
+  const { data: leadCounts } = useQuery<{ newCount: number; feedCount: number; pipelineCount: number }>({
+    queryKey: ["leads-count"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/counts`, { credentials: "include" });
+      if (!r.ok) return { newCount: 0, feedCount: 0, pipelineCount: 0 };
+      return r.json();
+    },
+    refetchInterval: 30_000,
+  });
 
   // ── Feed query (per-user undismissed unconverted leads) ─────────────────────
   const { data: feedLeads = [], isLoading: feedLoading, refetch: refetchFeed } = useQuery<Lead[]>({
@@ -3545,9 +3556,9 @@ function LeadsTab() {
   const filtersActive = !!(retailerFilter || storeFilter || searchQuery.trim());
 
   const STATUS_FILTERS = [
-    { value: "unconverted", label: "Active Pipeline" },
+    { value: "pipeline",    label: "Pipeline" },
+    { value: "unconverted", label: "Feed active" },
     { value: "new",         label: "New only" },
-    { value: "acknowledged",label: "Acknowledged" },
     { value: "converted",   label: "Converted" },
     { value: "all",         label: "All time" },
   ] as const;
@@ -3586,6 +3597,14 @@ function LeadsTab() {
                 subTab === "pipeline" ? "bg-amber-500 text-black" : "text-muted-foreground hover:text-foreground")}>
               <Filter className="w-3.5 h-3.5" />
               Pipeline
+              {(leadCounts?.pipelineCount ?? 0) > 0 && (
+                <span className={cn(
+                  "inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold",
+                  subTab === "pipeline" ? "bg-black/20 text-black" : "bg-amber-500/20 text-amber-400"
+                )}>
+                  {(leadCounts?.pipelineCount ?? 0) > 99 ? "99+" : leadCounts?.pipelineCount}
+                </span>
+              )}
             </button>
           </div>
           <button onClick={() => setShowNew(true)}
@@ -3977,8 +3996,10 @@ function LeadsTab() {
             <p className="text-sm mt-1">
               {filtersActive
                 ? "No results for the current filters — try clearing them"
+                : statusFilter === "pipeline"
+                ? "No pipeline leads — acknowledge leads in the Feed to move them here"
                 : statusFilter === "unconverted"
-                ? "No active leads — use New Lead to record one"
+                ? "No active undismissed leads — use New Lead to record one"
                 : "No leads in this status"}
             </p>
           </div>
@@ -4295,11 +4316,11 @@ export default function ActivityPage() {
     refetchInterval: 30_000,
   });
 
-  const { data: leadsCount } = useQuery<{ newCount: number; feedCount: number }>({
+  const { data: leadsCount } = useQuery<{ newCount: number; feedCount: number; pipelineCount: number }>({
     queryKey: ["leads-count"],
     queryFn: async () => {
       const r = await fetch(`${BASE}/api/leads/counts`, { credentials: "include" });
-      if (!r.ok) return { newCount: 0, feedCount: 0 };
+      if (!r.ok) return { newCount: 0, feedCount: 0, pipelineCount: 0 };
       return r.json();
     },
     refetchInterval: 30_000,
