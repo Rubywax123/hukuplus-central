@@ -45,6 +45,39 @@ async function fetchLRLoans(): Promise<any[] | null> {
 
 // Count agreements issued in a given month. Primary source: Loan Register API.
 // Fallback: local agreements table (which the Xero sync populates from Xero invoices).
+async function countLRDisbursementsForDay(dateStr: string): Promise<number> {
+  const loans = await fetchLRLoans();
+  if (loans !== null) {
+    const matched = loans.filter((l) => {
+      if (String(l.loanType ?? "").toLowerCase() !== "hukuplus") return false;
+      for (const field of DATE_FIELDS) {
+        if (l[field] && String(l[field]).startsWith(dateStr)) return true;
+      }
+      return false;
+    });
+    return matched.length;
+  }
+  try {
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query<{ count: string }>(`
+        SELECT COUNT(*)::int AS count
+        FROM agreements
+        WHERE form_type = 'agreement'
+          AND (
+            (disbursement_date IS NOT NULL AND disbursement_date >= DATE_TRUNC('day', NOW()) AND disbursement_date < DATE_TRUNC('day', NOW()) + INTERVAL '1 day')
+            OR  (disbursement_date IS NULL  AND created_at        >= DATE_TRUNC('day', NOW()) AND created_at        < DATE_TRUNC('day', NOW()) + INTERVAL '1 day')
+          )
+      `);
+      return parseInt(rows[0]?.count ?? "0", 10);
+    } finally {
+      client.release();
+    }
+  } catch {
+    return 0;
+  }
+}
+
 async function countLRDisbursementsForMonth(yearMonth: string): Promise<number> {
   // ── Try LR API first ──────────────────────────────────────────────────────
   const loans = await fetchLRLoans();
@@ -169,29 +202,35 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     // Applications + re-applications: sourced from Formitize notifications
-    const { rows } = await client.query<{ task_type: string; current_month: string; prev_month: string }>(`
+    const { rows } = await client.query<{ task_type: string; current_month: string; prev_month: string; today: string }>(`
       SELECT
         task_type,
         COUNT(DISTINCT formitize_job_id)
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW())) AS current_month,
         COUNT(DISTINCT formitize_job_id)
           FILTER (WHERE created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
-                    AND created_at <  DATE_TRUNC('month', NOW())) AS prev_month
+                    AND created_at <  DATE_TRUNC('month', NOW())) AS prev_month,
+        COUNT(DISTINCT formitize_job_id)
+          FILTER (WHERE created_at >= DATE_TRUNC('day', NOW())) AS today
       FROM formitize_notifications
       WHERE task_type IN ('application', 'reapplication')
         AND created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
       GROUP BY task_type
     `);
 
-    const get = (type: string, col: "current_month" | "prev_month") =>
+    const get = (type: string, col: "current_month" | "prev_month" | "today") =>
       parseInt(rows.find((r) => r.task_type === type)?.[col] ?? "0", 10);
+
+    // Today's date string for LR daily count
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
     // Agreements: Loan Register is the ground truth — it counts only disbursed loans,
     // which is the correct definition of "agreements issued". Formitize agreements
     // include signed-but-not-yet-disbursed loans which must not be counted yet.
-    const [currentAgreements, previousAgreements] = await Promise.all([
+    const [currentAgreements, previousAgreements, todayAgreements] = await Promise.all([
       countLRDisbursementsForMonth(currentYM),
       countLRDisbursementsForMonth(previousYM),
+      countLRDisbursementsForDay(todayStr),
     ]);
 
     const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
@@ -199,16 +238,19 @@ router.get("/dashboard/monthly-metrics", async (req, res): Promise<void> => {
     res.json({
       month: monthLabel,
       newApplications: {
-        current: get("application", "current_month"),
+        current:  get("application", "current_month"),
         previous: get("application", "prev_month"),
+        today:    get("application", "today"),
       },
       reApplications: {
-        current: get("reapplication", "current_month"),
+        current:  get("reapplication", "current_month"),
         previous: get("reapplication", "prev_month"),
+        today:    get("reapplication", "today"),
       },
       agreementsIssued: {
         current:  currentAgreements,
         previous: previousAgreements,
+        today:    todayAgreements,
       },
     });
   } finally {

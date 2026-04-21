@@ -15,9 +15,9 @@ import { useLocation } from "wouter";
 
 interface MonthlyMetrics {
   month: string;
-  newApplications: { current: number; previous: number };
-  reApplications: { current: number; previous: number };
-  agreementsIssued: { current: number; previous: number };
+  newApplications: { current: number; previous: number; today: number };
+  reApplications:  { current: number; previous: number; today: number };
+  agreementsIssued:{ current: number; previous: number; today: number };
 }
 
 interface MonthSnapshot {
@@ -124,7 +124,7 @@ function delta(current: number, previous: number) {
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
-function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, colorClass, bgClass, delay, onClick }: any) {
+function MonthlyMetricCard({ title, subtitle, value, previous, today, icon: Icon, colorClass, bgClass, delay, onClick }: any) {
   const d = delta(value, previous);
   return (
     <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
@@ -143,6 +143,23 @@ function MonthlyMetricCard({ title, subtitle, value, previous, icon: Icon, color
           </div>
         </div>
         <h3 className="text-5xl font-display font-bold text-white mt-2">{value}</h3>
+
+        {/* Daily counter */}
+        <div className="mt-3">
+          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
+            today > 0
+              ? "bg-white/10 border-white/20"
+              : "bg-white/[0.03] border-white/8"
+          }`}>
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${today > 0 ? "text-white/60" : "text-white/25"}`}>
+              Today
+            </span>
+            <span className={`text-sm font-bold tabular-nums ${today > 0 ? "text-white" : "text-white/25"}`}>
+              {today ?? 0}
+            </span>
+          </div>
+        </div>
+
         <div className="mt-auto pt-3">
           {d && (
             <p className={`text-xs font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
@@ -757,18 +774,21 @@ export default function DashboardPage() {
         <MonthlyMetricCard
           delay={0.08} title="New Applications" subtitle="First-time customer applications"
           value={monthly?.newApplications.current ?? 0} previous={monthly?.newApplications.previous ?? 0}
+          today={monthly?.newApplications.today ?? 0}
           icon={UserPlus} colorClass="text-sky-400" bgClass="bg-sky-400"
           onClick={() => setDrillDown("application")}
         />
         <MonthlyMetricCard
           delay={0.14} title="Re-Applications" subtitle="Returning customer applications"
           value={monthly?.reApplications.current ?? 0} previous={monthly?.reApplications.previous ?? 0}
+          today={monthly?.reApplications.today ?? 0}
           icon={RefreshCw} colorClass="text-amber-400" bgClass="bg-amber-400"
           onClick={() => setDrillDown("reapplication")}
         />
         <MonthlyMetricCard
           delay={0.20} title="Agreements Issued" subtitle="Loan agreements generated this month"
           value={monthly?.agreementsIssued.current ?? 0} previous={monthly?.agreementsIssued.previous ?? 0}
+          today={monthly?.agreementsIssued.today ?? 0}
           icon={FileCheck} colorClass="text-emerald-400" bgClass="bg-emerald-400"
         />
         <LeadsPipelineCard stats={leadsStats} delay={0.26} />
