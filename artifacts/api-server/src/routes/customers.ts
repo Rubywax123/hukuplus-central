@@ -217,6 +217,79 @@ router.get("/customers/:id", apiKeyOrSession, async (req, res): Promise<void> =>
   res.json({ customer, agreements });
 });
 
+// ── Revolver profile for a Central customer ───────────────────────────────────
+router.get("/customers/:id/revolver", apiKeyOrSession, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const client = await pool.connect();
+  try {
+    // 1. Get the customer's phone so we can normalise and match
+    const { rows: cRows } = await client.query(
+      "SELECT phone FROM customers WHERE id = $1",
+      [id]
+    );
+    if (!cRows.length) { res.status(404).json({ error: "Customer not found" }); return; }
+
+    const rawPhone: string = cRows[0].phone ?? "";
+    // last-9-digits normalisation (same as syncRevolverData)
+    const cleaned = rawPhone.replace(/\D/g, "");
+    const phoneNorm = cleaned.length >= 9 ? cleaned.slice(-9) : null;
+
+    if (!phoneNorm) {
+      res.json({ linked: false, reason: "No phone number" });
+      return;
+    }
+
+    // 2. Find matching Revolver customer
+    const { rows: rcRows } = await client.query(
+      `SELECT revolver_id, name, email, phone, company,
+              access_enabled, weekly_tray_target, synced_at,
+              central_retailer_id, central_branch_id
+       FROM revolver_customers
+       WHERE phone_norm = $1
+       LIMIT 1`,
+      [phoneNorm]
+    );
+
+    if (!rcRows.length) {
+      res.json({ linked: false, reason: "No Revolver record matched" });
+      return;
+    }
+
+    const rc = rcRows[0];
+
+    // 3. Facilities for this Revolver customer
+    const { rows: facilities } = await client.query(
+      `SELECT revolver_id, status, credit_limit, outstanding_balance,
+              available_balance, synced_at
+       FROM revolver_facilities
+       WHERE revolver_customer_id = $1
+       ORDER BY revolver_id`,
+      [rc.revolver_id]
+    );
+
+    // 4. Drawdown requests
+    const { rows: drawdowns } = await client.query(
+      `SELECT revolver_id, revolver_facility_id, amount, status, synced_at,
+              raw->>'createdAt' AS created_at
+       FROM revolver_drawdown_requests
+       WHERE revolver_customer_id = $1
+       ORDER BY revolver_id DESC`,
+      [rc.revolver_id]
+    );
+
+    res.json({
+      linked: true,
+      customer: rc,
+      facilities,
+      drawdowns,
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // ── Create customer (manual insert) ──────────────────────────────────────────
 router.post("/customers", apiKeyOrSession, async (req, res): Promise<void> => {
   const { fullName, phone, email, nationalId, address, notes } = req.body;

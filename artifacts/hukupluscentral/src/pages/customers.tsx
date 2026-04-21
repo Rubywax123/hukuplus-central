@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck, Leaf } from "lucide-react";
+import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck, Leaf, Layers, ArrowDownCircle, TrendingUp } from "lucide-react";
 import RetailersPage from "@/pages/retailers";
 import TefcoStaffPage from "@/pages/team";
 import AgronomistsPage from "@/pages/team-agronomists";
@@ -144,6 +144,199 @@ function formatUSD(v: number | null) {
 function formatDate(d: string) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-ZW", { year: "numeric", month: "short", day: "numeric" });
+}
+
+// ── Revolver Panel ──────────────────────────────────────────────────────────
+
+interface RevolverFacility {
+  revolver_id: number;
+  status: string;
+  credit_limit: number;
+  outstanding_balance: number;
+  available_balance: number;
+  synced_at: string;
+}
+
+interface RevolverDrawdown {
+  revolver_id: number;
+  revolver_facility_id: number;
+  amount: number;
+  status: string;
+  created_at: string | null;
+  synced_at: string;
+}
+
+interface RevolverCustomerProfile {
+  revolver_id: number;
+  name: string;
+  email: string | null;
+  phone: string;
+  company: string | null;
+  access_enabled: boolean;
+  weekly_tray_target: number | null;
+  synced_at: string;
+}
+
+interface RevolverData {
+  linked: boolean;
+  reason?: string;
+  customer?: RevolverCustomerProfile;
+  facilities?: RevolverFacility[];
+  drawdowns?: RevolverDrawdown[];
+}
+
+function facilityStatusClass(status: string) {
+  switch (status) {
+    case "active": return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+    case "suspended": return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+    case "closed": return "bg-red-500/10 text-red-400 border-red-500/20";
+    default: return "bg-white/5 text-muted-foreground border-white/10";
+  }
+}
+
+function drawdownStatusClass(status: string) {
+  switch (status) {
+    case "approved": return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+    case "pending": return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+    case "rejected": return "bg-red-500/10 text-red-400 border-red-500/20";
+    case "disbursed": return "bg-blue-500/10 text-blue-400 border-blue-500/20";
+    default: return "bg-white/5 text-muted-foreground border-white/10";
+  }
+}
+
+function RevolverPanel({ customerId }: { customerId: number }) {
+  const { data, isLoading } = useQuery<RevolverData>({
+    queryKey: ["revolver-customer", customerId],
+    queryFn: () => fetch(`${BASE}/api/customers/${customerId}/revolver`, { credentials: "include" }).then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2">
+        <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs text-muted-foreground">Checking Revolver…</span>
+      </div>
+    );
+  }
+
+  if (!data?.linked) {
+    return (
+      <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3">
+        <Layers className="w-4 h-4 text-muted-foreground shrink-0" />
+        <div>
+          <p className="text-xs text-muted-foreground">No Revolver credit facility</p>
+          <p className="text-xs text-muted-foreground/50">This customer has no matching record in Revolver</p>
+        </div>
+      </div>
+    );
+  }
+
+  const rc = data.customer!;
+  const facilities = data.facilities ?? [];
+  const drawdowns = data.drawdowns ?? [];
+  const totalLimit = facilities.reduce((s, f) => s + Number(f.credit_limit), 0);
+  const totalOutstanding = facilities.reduce((s, f) => s + Number(f.outstanding_balance), 0);
+  const totalAvailable = facilities.reduce((s, f) => s + Number(f.available_balance), 0);
+
+  return (
+    <div className="space-y-3">
+      {/* Linked badge */}
+      <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
+        <div className="flex items-center gap-2 mb-1">
+          <Layers className="w-3.5 h-3.5 text-violet-400" />
+          <span className="text-xs font-semibold text-violet-400">Linked to Revolver</span>
+          <span className={`ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold border ${rc.access_enabled ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}>
+            {rc.access_enabled ? "Access enabled" : "Access disabled"}
+          </span>
+        </div>
+        <p className="text-sm font-semibold text-white">{rc.name}</p>
+        {rc.company && <p className="text-xs text-muted-foreground">{rc.company}</p>}
+        {rc.weekly_tray_target != null && (
+          <p className="text-xs text-muted-foreground/60 mt-0.5">Weekly tray target: {rc.weekly_tray_target}</p>
+        )}
+      </div>
+
+      {/* Credit summary */}
+      {facilities.length > 0 && (
+        <div className="grid grid-cols-3 gap-2">
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-center">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Limit</p>
+            <p className="text-sm font-bold text-white">{formatUSD(totalLimit)}</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-center">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Outstanding</p>
+            <p className={`text-sm font-bold ${totalOutstanding > 0 ? "text-amber-400" : "text-white"}`}>{formatUSD(totalOutstanding)}</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-center">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Available</p>
+            <p className={`text-sm font-bold ${totalAvailable > 0 ? "text-emerald-400" : "text-white"}`}>{formatUSD(totalAvailable)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Facilities */}
+      {facilities.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <TrendingUp className="w-3 h-3" /> Facilities ({facilities.length})
+          </p>
+          <div className="space-y-1.5">
+            {facilities.map(f => (
+              <div key={f.revolver_id} className="p-2.5 rounded-lg bg-white/5 border border-white/5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-muted-foreground font-mono">#{f.revolver_id}</span>
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold border ${facilityStatusClass(f.status)}`}>
+                    {f.status}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-x-3 text-xs">
+                  <div>
+                    <p className="text-muted-foreground/60">Limit</p>
+                    <p className="text-white font-medium">{formatUSD(Number(f.credit_limit))}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground/60">Owed</p>
+                    <p className={`font-medium ${Number(f.outstanding_balance) > 0 ? "text-amber-400" : "text-white"}`}>{formatUSD(Number(f.outstanding_balance))}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground/60">Free</p>
+                    <p className={`font-medium ${Number(f.available_balance) > 0 ? "text-emerald-400" : "text-white"}`}>{formatUSD(Number(f.available_balance))}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Drawdowns */}
+      {drawdowns.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <ArrowDownCircle className="w-3 h-3" /> Drawdowns ({drawdowns.length})
+          </p>
+          <div className="space-y-1.5">
+            {drawdowns.map(d => (
+              <div key={d.revolver_id} className="p-2.5 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-white">{formatUSD(Number(d.amount))}</p>
+                  {d.created_at && <p className="text-xs text-muted-foreground">{formatDate(d.created_at)}</p>}
+                </div>
+                <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold border ${drawdownStatusClass(d.status)}`}>
+                  {d.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {facilities.length === 0 && (
+        <p className="text-xs text-muted-foreground italic text-center py-1">No facilities on record yet — sync may be pending</p>
+      )}
+    </div>
+  );
 }
 
 // ── Xero Panel ──────────────────────────────────────────────────────────────
@@ -721,6 +914,17 @@ function CustomerDrawer({ customerId, onClose }: { customerId: number; onClose: 
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Formitize CRM ID</p>
                 <p className="text-xs text-muted-foreground font-mono">{c.formitizeCrmId}</p>
+              </div>
+            )}
+
+            {/* Revolver Panel */}
+            {!editMode && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Layers className="w-3.5 h-3.5 text-violet-400" />
+                  Revolver
+                </p>
+                <RevolverPanel customerId={c.id} />
               </div>
             )}
 
