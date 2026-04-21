@@ -3143,6 +3143,7 @@ function LeadsTab() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"unconverted" | "new" | "acknowledged" | "converted" | "all">("unconverted");
   const [retailerFilter, setRetailerFilter] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
@@ -3229,14 +3230,32 @@ function LeadsTab() {
     let list = [...rawLeads];
     if (retailerFilter) list = list.filter(l => l.retailer_name === retailerFilter);
     if (storeFilter)    list = list.filter(l => l.branch_name === storeFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(l =>
+        l.customer_name.toLowerCase().includes(q) ||
+        (l.phone ?? "").replace(/\D/g, "").includes(q.replace(/\D/g, "")) ||
+        (l.notes ?? "").toLowerCase().includes(q)
+      );
+    }
     // API returns newest-first; flip if ascending
     if (sortAsc) list = list.reverse();
     return list;
-  }, [rawLeads, retailerFilter, storeFilter, sortAsc]);
+  }, [rawLeads, retailerFilter, storeFilter, searchQuery, sortAsc]);
+
+  // Feed also filtered by search query
+  const filteredFeedLeads = React.useMemo(() => {
+    if (!searchQuery.trim()) return feedLeads;
+    const q = searchQuery.trim().toLowerCase();
+    return feedLeads.filter(l =>
+      l.customer_name.toLowerCase().includes(q) ||
+      (l.phone ?? "").replace(/\D/g, "").includes(q.replace(/\D/g, ""))
+    );
+  }, [feedLeads, searchQuery]);
 
   const totalValue = leads.reduce((sum, l) => sum + Number(l.estimated_value ?? 0), 0);
   const totalBirds = leads.reduce((sum, l) => sum + (l.flock_size ?? 0), 0);
-  const filtersActive = !!(retailerFilter || storeFilter);
+  const filtersActive = !!(retailerFilter || storeFilter || searchQuery.trim());
 
   const STATUS_FILTERS = [
     { value: "unconverted", label: "Active Pipeline" },
@@ -3288,14 +3307,34 @@ function LeadsTab() {
           </button>
         </div>
 
+        {/* ── Search bar (shared across both sub-tabs) ── */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search by name or phone…"
+            className="w-full pl-9 pr-9 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500/30 transition"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-white transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
         {/* ═══ MY FEED SUB-TAB ═══ */}
         {subTab === "feed" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                {feedLoading ? "Loading…" : feedLeads.length === 0
-                  ? "You're all caught up"
-                  : `${feedLeads.length} lead${feedLeads.length !== 1 ? "s" : ""} to review`}
+                {feedLoading ? "Loading…" : filteredFeedLeads.length === 0
+                  ? (searchQuery ? "No leads match your search" : "You're all caught up")
+                  : `${filteredFeedLeads.length}${searchQuery ? " matching" : ""} lead${filteredFeedLeads.length !== 1 ? "s" : ""} to review`}
               </p>
               <button onClick={() => refetchFeed()} className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors">
                 <RefreshCw className="w-4 h-4" />
@@ -3306,16 +3345,16 @@ function LeadsTab() {
               <div className="flex items-center justify-center py-16 text-white/40">
                 <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading your feed…
               </div>
-            ) : feedLeads.length === 0 ? (
+            ) : filteredFeedLeads.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-white/40">
                 <CheckCheck className="w-10 h-10 mb-3 opacity-30" />
-                <p className="text-base font-medium">All caught up</p>
-                <p className="text-sm mt-1">No new leads to review — check back later</p>
+                <p className="text-base font-medium">{searchQuery ? "No results" : "All caught up"}</p>
+                <p className="text-sm mt-1">{searchQuery ? "Try a different name or number" : "No new leads to review — check back later"}</p>
               </div>
             ) : (
               <div className="flex flex-col gap-2">
                 <AnimatePresence initial={false}>
-                  {feedLeads.map(lead => {
+                  {filteredFeedLeads.map(lead => {
                     const isExpanded = expandedId === lead.id;
                     return (
                       <motion.div key={lead.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 40, scale: 0.95 }} transition={{ duration: 0.2 }}
