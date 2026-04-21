@@ -3692,65 +3692,134 @@ function LeadsTab() {
                               className="overflow-hidden"
                             >
                               <div className="px-4 pb-4 pt-0 border-t border-white/8 space-y-3">
-                                {/* Detail rows */}
-                                <div className="grid grid-cols-2 gap-3 pt-3">
-                                  <div>
-                                    <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Phone</p>
-                                    <p className="text-sm text-white mt-0.5">{lead.phone}</p>
+
+                                {editingLeadId === lead.id ? (
+                                  /* ── Inline edit form ── */
+                                  <div className="space-y-2 pt-3">
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-semibold text-white/30 uppercase tracking-wide mb-1 block">Name</label>
+                                        <input
+                                          className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                                          value={editDraft.customer_name}
+                                          onChange={e => setEditDraft(d => ({ ...d, customer_name: e.target.value }))}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-semibold text-white/30 uppercase tracking-wide mb-1 block">Phone</label>
+                                        <input
+                                          className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                                          value={editDraft.phone}
+                                          onChange={e => setEditDraft(d => ({ ...d, phone: e.target.value }))}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-semibold text-white/30 uppercase tracking-wide mb-1 block">Flock Size</label>
+                                      <input
+                                        type="number" min="0"
+                                        className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                                        value={editDraft.flock_size}
+                                        onChange={e => setEditDraft(d => ({ ...d, flock_size: e.target.value }))}
+                                        placeholder="0"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-semibold text-white/30 uppercase tracking-wide mb-1 block">Notes</label>
+                                      <textarea
+                                        rows={3}
+                                        className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 resize-none"
+                                        value={editDraft.notes}
+                                        onChange={e => setEditDraft(d => ({ ...d, notes: e.target.value }))}
+                                        placeholder="Add notes…"
+                                      />
+                                    </div>
+                                    {updateMutation.isError && (
+                                      <p className="text-xs text-red-400">{String(updateMutation.error)}</p>
+                                    )}
+                                    <div className="flex gap-2 pt-1">
+                                      <button
+                                        onClick={() => updateMutation.mutate({ id: lead.id, data: { customer_name: editDraft.customer_name, phone: editDraft.phone, flock_size: editDraft.flock_size || "0", notes: editDraft.notes || null } })}
+                                        disabled={updateMutation.isPending}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-all disabled:opacity-40">
+                                        {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                                        Save
+                                      </button>
+                                      <button onClick={() => setEditingLeadId(null)}
+                                        className="px-3 py-1.5 text-xs text-muted-foreground hover:text-white transition-colors">
+                                        Cancel
+                                      </button>
+                                    </div>
                                   </div>
-                                  {lead.flock_size > 0 && (
-                                    <div>
-                                      <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Flock / Value</p>
-                                      <p className="text-sm text-white mt-0.5">{lead.flock_size} birds · <span className="text-emerald-400">${Number(lead.estimated_value).toFixed(2)}</span></p>
+                                ) : (
+                                  /* ── Read view ── */
+                                  <>
+                                    <div className="grid grid-cols-2 gap-3 pt-3">
+                                      <div>
+                                        <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Phone</p>
+                                        <p className="text-sm text-white mt-0.5">{lead.phone}</p>
+                                      </div>
+                                      {lead.flock_size > 0 && (
+                                        <div>
+                                          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Flock / Value</p>
+                                          <p className="text-sm text-white mt-0.5">{lead.flock_size} birds · <span className="text-emerald-400">${Number(lead.estimated_value).toFixed(2)}</span></p>
+                                        </div>
+                                      )}
+                                      {lead.retailer_name && (
+                                        <div>
+                                          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Retailer</p>
+                                          <p className="text-sm text-white mt-0.5">{lead.retailer_name}</p>
+                                        </div>
+                                      )}
+                                      {lead.branch_name && (
+                                        <div>
+                                          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Store</p>
+                                          <p className="text-sm text-white mt-0.5">{lead.branch_name}</p>
+                                        </div>
+                                      )}
+                                      {lead.submitted_by && (
+                                        <div className="col-span-2">
+                                          <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Submitted by</p>
+                                          <p className="text-sm text-white/70 mt-0.5">{lead.submitted_by}</p>
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                  {lead.retailer_name && (
-                                    <div>
-                                      <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Retailer</p>
-                                      <p className="text-sm text-white mt-0.5">{lead.retailer_name}</p>
-                                    </div>
-                                  )}
-                                  {lead.branch_name && (
-                                    <div>
-                                      <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Store</p>
-                                      <p className="text-sm text-white mt-0.5">{lead.branch_name}</p>
-                                    </div>
-                                  )}
-                                  {lead.submitted_by && (
-                                    <div className="col-span-2">
-                                      <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wide">Submitted by</p>
-                                      <p className="text-sm text-white/70 mt-0.5">{lead.submitted_by}</p>
-                                    </div>
-                                  )}
-                                </div>
-                                {lead.notes && (
-                                  <div className="rounded-lg bg-sky-500/8 border border-sky-500/15 px-3 py-2">
-                                    <p className="text-[10px] font-semibold text-sky-400/60 uppercase tracking-wide mb-0.5">Notes</p>
-                                    <p className="text-sm text-sky-300/80">{lead.notes}</p>
-                                  </div>
+                                    {lead.notes && (
+                                      <div className="rounded-lg bg-sky-500/8 border border-sky-500/15 px-3 py-2">
+                                        <p className="text-[10px] font-semibold text-sky-400/60 uppercase tracking-wide mb-0.5">Notes</p>
+                                        <p className="text-sm text-sky-300/80">{lead.notes}</p>
+                                      </div>
+                                    )}
+                                  </>
                                 )}
 
                                 {/* Action buttons */}
-                                <div className="flex items-center gap-2 flex-wrap pt-1">
-                                  {lead.status === "new" && (
-                                    <button onClick={() => acknowledgeMutation.mutate(lead.id)} disabled={acknowledgeMutation.isPending}
-                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 border border-sky-500/25 text-sky-300 hover:bg-sky-500/20 transition-all disabled:opacity-40">
-                                      <CheckCheck className="w-3.5 h-3.5" /> Acknowledge
+                                {editingLeadId !== lead.id && (
+                                  <div className="flex items-center gap-2 flex-wrap pt-1">
+                                    {lead.status === "new" && (
+                                      <button onClick={() => acknowledgeMutation.mutate(lead.id)} disabled={acknowledgeMutation.isPending}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 border border-sky-500/25 text-sky-300 hover:bg-sky-500/20 transition-all disabled:opacity-40">
+                                        <CheckCheck className="w-3.5 h-3.5" /> Acknowledge
+                                      </button>
+                                    )}
+                                    <button onClick={() => setConvertingLead(lead)}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
+                                      <CheckCircle2 className="w-3.5 h-3.5" /> File / Convert
                                     </button>
-                                  )}
-                                  <button onClick={() => setConvertingLead(lead)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
-                                    <CheckCircle2 className="w-3.5 h-3.5" /> File / Convert
-                                  </button>
-                                  <button
-                                    onClick={() => dismissMutation.mutate(lead.id)}
-                                    disabled={dismissMutation.isPending}
-                                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-white/10 border border-white/15 text-white hover:bg-white/15 transition-all disabled:opacity-40 ml-auto"
-                                  >
-                                    {dismissMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
-                                    Mark Done
-                                  </button>
-                                </div>
+                                    <button onClick={() => startEdit(lead)}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 border border-blue-500/20 text-blue-300 hover:bg-blue-500/20 transition-all">
+                                      <Pencil className="w-3.5 h-3.5" /> Edit
+                                    </button>
+                                    <button
+                                      onClick={() => dismissMutation.mutate(lead.id)}
+                                      disabled={dismissMutation.isPending}
+                                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-white/10 border border-white/15 text-white hover:bg-white/15 transition-all disabled:opacity-40 ml-auto"
+                                    >
+                                      {dismissMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
+                                      Mark Done
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </motion.div>
                           )}
