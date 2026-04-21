@@ -1095,6 +1095,12 @@ export async function runMigrations() {
       ALTER TABLE leads ADD COLUMN IF NOT EXISTS messaged_at TIMESTAMPTZ;
     `);
 
+    // ── dismissed_at on leads (global team-wide mark-done) ────────────────────
+    await client.query(`
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS dismissed_by TEXT;
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

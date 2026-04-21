@@ -87,7 +87,7 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
     let orderBy = "ORDER BY CASE l.status WHEN 'new' THEN 0 WHEN 'acknowledged' THEN 1 ELSE 2 END, l.created_at DESC";
 
     if (status === "unconverted") {
-      where = "WHERE l.status IN ('new', 'acknowledged')";
+      where = "WHERE l.status IN ('new', 'acknowledged') AND l.dismissed_at IS NULL";
       orderBy = "ORDER BY l.created_at DESC";
     } else if (status && status !== "all") {
       where = `WHERE l.status = $${params.push(status)}`;
@@ -111,21 +111,16 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
 
 // ─── GET /api/leads/counts — global new count (for badge) ─────────────────────
 
-router.get("/leads/counts", requireStaffAuth, async (req, res): Promise<void> => {
-  const email = (req as any).staffUser?.email ?? (req as any).user?.email ?? "";
+router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     const feedR = await client.query(
       `SELECT COUNT(*) AS feed_count
        FROM leads l
        WHERE l.status IN ('new', 'acknowledged')
-         AND NOT EXISTS (
-           SELECT 1 FROM lead_dismissals d
-           WHERE d.lead_id = l.id AND d.staff_email = $1
-         )`,
-      [email]
+         AND l.dismissed_at IS NULL`
     );
-    const globalR = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new'`);
+    const globalR = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new' AND dismissed_at IS NULL`);
     res.json({
       newCount: parseInt(globalR.rows[0].new_count, 10),
       feedCount: parseInt(feedR.rows[0].feed_count, 10),
@@ -166,8 +161,7 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
 
 // ─── GET /api/leads/feed — per-user feed (undismissed unconverted leads) ──────
 
-router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
-  const email = (req as any).staffUser?.email ?? (req as any).user?.email ?? "";
+router.get("/leads/feed", requireStaffAuth, async (_req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     const result = await client.query(
@@ -175,12 +169,9 @@ router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
               (l.flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value
        FROM leads l
        WHERE l.status IN ('new', 'acknowledged')
-         AND NOT EXISTS (
-           SELECT 1 FROM lead_dismissals d
-           WHERE d.lead_id = l.id AND d.staff_email = $1
-         )
+         AND l.dismissed_at IS NULL
        ORDER BY l.created_at DESC`,
-      [email]
+      []
     );
     res.json(result.rows);
   } finally {
@@ -188,19 +179,21 @@ router.get("/leads/feed", requireStaffAuth, async (req, res): Promise<void> => {
   }
 });
 
-// ─── PUT /api/leads/:id/dismiss — mark done in MY feed (per-user) ─────────────
+// ─── PUT /api/leads/:id/dismiss — mark done globally (removes from all feeds + active pipeline) ──
 
 router.put("/leads/:id/dismiss", requireStaffAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
-  const email = (req as any).staffUser?.email ?? (req as any).user?.email ?? "";
+  const by = (req as any).staffUser?.email ?? (req as any).user?.email ?? "unknown";
   const client = await pool.connect();
   try {
-    await client.query(
-      `INSERT INTO lead_dismissals (lead_id, staff_email)
-       VALUES ($1, $2)
-       ON CONFLICT (lead_id, staff_email) DO NOTHING`,
-      [id, email]
+    const r = await client.query(
+      `UPDATE leads
+         SET dismissed_at = NOW(), dismissed_by = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id`,
+      [by, id]
     );
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found" }); return; }
     res.json({ ok: true });
   } finally {
     client.release();

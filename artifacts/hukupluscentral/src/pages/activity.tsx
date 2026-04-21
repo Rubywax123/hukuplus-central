@@ -2949,6 +2949,8 @@ interface Lead {
   converted_customer_name: string | null;
   created_at: string;
   messaged_at: string | null;
+  dismissed_at: string | null;
+  dismissed_by: string | null;
 }
 
 const LEAD_PRODUCTS = [
@@ -4022,6 +4024,14 @@ function LeadsTab() {
                         )}>
                           {lead.status === "new" ? "⚡ NEW" : lead.status === "converted" ? "✓ CONVERTED" : "ACKNOWLEDGED"}
                         </span>
+                        {lead.dismissed_at && (
+                          <span
+                            className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/8 text-white/35 border border-white/10"
+                            title={`Marked done by ${lead.dismissed_by ?? "unknown"} on ${fmt(lead.dismissed_at)}`}
+                          >
+                            ✓ DONE
+                          </span>
+                        )}
                         {lead.messaged_at && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
                             ✉ MESSAGED
