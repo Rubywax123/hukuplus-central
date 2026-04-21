@@ -1091,24 +1091,86 @@ router.post("/formitize/webhook", async (req, res) => {
   let resolvedBranchName = "";
 
   if (product === "HukuPlus" && isNewCustomerForm) {
-    // "New Customer Application" — formtext_1 contains the actual store/branch name.
-    // Search all branches for a match, then resolve parent retailer.
+    // "New Customer Application" — formtext_1 contains the store/branch name.
+    // formtext_3 contains the store email (e.g. "chivu@profeeds.co.zw") — use its domain to narrow the retailer.
     const storeName = (fieldMap["formtext_1"] || "").trim();
+    const newCustStoreEmail = (fieldMap["formtext_3"] || "").trim();
+
     if (storeName) {
+      const allRetailers = await db.select().from(retailersTable);
       const allBranches = await db.select().from(branchesTable);
-      const storeWords = storeName.toLowerCase().split(/\s+/);
-      const matchedBranch = allBranches.find(b => {
-        const bn = b.name.toLowerCase();
-        return storeWords.some(w => w.length > 2 && bn.includes(w));
-      });
+
+      // Strip generic noise words so "Chivhu branch" → ["chivhu"]
+      const NC_NOISE = new Set(["branch", "store", "shop", "main", "outlet", "centre", "center", "unit", "site", "head"]);
+      const searchWords = storeName.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !NC_NOISE.has(w));
+
+      // Edit-distance-1 helper (same as the other HukuPlus path)
+      const editDist1 = (a: string, b: string): boolean => {
+        if (a === b) return true;
+        if (Math.abs(a.length - b.length) > 1) return false;
+        if (a.length === b.length) {
+          let diffs = 0;
+          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diffs++;
+          return diffs <= 1;
+        }
+        const [long, short] = a.length > b.length ? [a, b] : [b, a];
+        for (let i = 0; i < long.length; i++) {
+          if (long.slice(0, i) + long.slice(i + 1) === short) return true;
+        }
+        return false;
+      };
+
+      // Narrow candidates by retailer hint from store email domain if available
+      let candidates = allBranches;
+      if (newCustStoreEmail.includes("@")) {
+        const emailDomain = newCustStoreEmail.split("@")[1] ?? "";
+        const retailerHintNC = emailDomain.split(".")[0]?.toLowerCase() ?? "";
+        if (retailerHintNC.length > 2) {
+          const hintRetailers = allRetailers.filter(r => r.name.toLowerCase().includes(retailerHintNC));
+          if (hintRetailers.length === 1) {
+            const narrowed = allBranches.filter(b => b.retailerId === hintRetailers[0].id);
+            if (narrowed.length > 0) {
+              candidates = narrowed;
+              console.log(`[formitize] New-cust: retailer narrowed via email domain "${retailerHintNC}" → ${hintRetailers[0].name}`);
+            }
+          }
+        }
+      }
+
+      // 1. Exact name match
+      let matchedBranch = candidates.find(b => b.name.toLowerCase() === storeName.toLowerCase());
+
+      // 2. Word-scored match (after noise-word stripping)
+      if (!matchedBranch && searchWords.length > 0) {
+        const scored = candidates.map(b => {
+          const bn = b.name.toLowerCase();
+          const score = searchWords.filter(w => bn.includes(w)).reduce((s, w) => s + w.length, 0);
+          return { branch: b, score };
+        }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+        if (scored.length > 0) matchedBranch = scored[0].branch;
+      }
+
+      // 3. Edit-distance-1 fuzzy fallback
+      if (!matchedBranch && searchWords.length > 0) {
+        const fuzzy = candidates.map(b => {
+          const branchWords = b.name.toLowerCase().split(/\s+/);
+          const score = searchWords.reduce((s, sw) => s + (branchWords.some(bw => editDist1(sw, bw)) ? sw.length : 0), 0);
+          return { branch: b, score };
+        }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+        if (fuzzy.length > 0) {
+          matchedBranch = fuzzy[0].branch;
+          console.log(`[formitize] New-cust: fuzzy-matched "${storeName}" → "${matchedBranch.name}" (edit-distance-1)`);
+        }
+      }
+
       if (matchedBranch) {
         branchId = matchedBranch.id;
         resolvedBranchName = matchedBranch.name;
         const [retailer] = await db.select().from(retailersTable).where(eq(retailersTable.id, matchedBranch.retailerId));
         if (retailer) { retailerId = retailer.id; resolvedRetailerName = retailer.name; }
-      } else {
-        // Fallback: match retailer name directly
-        const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${storeWords[0]}%`));
+      } else if (searchWords.length > 0) {
+        // Last resort: match retailer name directly from the first meaningful word
+        const [retailer] = await db.select().from(retailersTable).where(ilike(retailersTable.name, `%${searchWords[0]}%`));
         if (retailer) {
           retailerId = retailer.id;
           resolvedRetailerName = retailer.name;
