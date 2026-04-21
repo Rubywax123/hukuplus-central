@@ -2939,7 +2939,7 @@ interface Lead {
   branch_name: string | null;
   flock_size: number;
   estimated_value: number;
-  status: "new" | "acknowledged" | "converted";
+  status: "new" | "acknowledged" | "converted" | "dropped";
   notes: string | null;
   loan_product: string;
   submitted_by: string | null;
@@ -2951,6 +2951,8 @@ interface Lead {
   messaged_at: string | null;
   dismissed_at: string | null;
   dismissed_by: string | null;
+  dropped_at: string | null;
+  dropped_by: string | null;
 }
 
 const LEAD_PRODUCTS = [
@@ -3399,7 +3401,7 @@ function LeadsTab() {
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"pipeline" | "unconverted" | "new" | "acknowledged" | "converted" | "all">("pipeline");
+  const [statusFilter, setStatusFilter] = useState<"pipeline" | "unconverted" | "new" | "acknowledged" | "converted" | "dropped" | "all">("pipeline");
   const [retailerFilter, setRetailerFilter] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
@@ -3471,6 +3473,14 @@ function LeadsTab() {
   const unacknowledgeMutation = useMutation({
     mutationFn: async (id: number) => {
       const r = await fetch(`${BASE}/api/leads/${id}/unacknowledge`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: invalidateAll,
+  });
+
+  const dropMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${BASE}/api/leads/${id}/drop`, { method: "PUT", credentials: "include" });
       if (!r.ok) throw new Error("Failed");
     },
     onSuccess: invalidateAll,
@@ -3568,6 +3578,7 @@ function LeadsTab() {
     { value: "unconverted", label: "Feed active" },
     { value: "new",         label: "New only" },
     { value: "converted",   label: "Converted" },
+    { value: "dropped",     label: "Dropped" },
     { value: "all",         label: "All time" },
   ] as const;
 
@@ -3884,6 +3895,15 @@ function LeadsTab() {
                                       {dismissMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
                                       Mark Done
                                     </button>
+                                    <button
+                                      onClick={() => dropMutation.mutate(lead.id)}
+                                      disabled={dropMutation.isPending}
+                                      title="Mark as permanently inconvertible — removes from active pipeline count"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 border border-rose-500/25 text-rose-400 hover:bg-rose-500/20 transition-all disabled:opacity-40"
+                                    >
+                                      {dropMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                                      Drop
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -4008,6 +4028,8 @@ function LeadsTab() {
                 ? "No pipeline leads — acknowledge leads in the Feed to move them here"
                 : statusFilter === "unconverted"
                 ? "No active undismissed leads — use New Lead to record one"
+                : statusFilter === "dropped"
+                ? "No dropped leads — only inconvertible leads appear here"
                 : "No leads in this status"}
             </p>
           </div>
@@ -4127,6 +4149,15 @@ function LeadsTab() {
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             : <RotateCcw className="w-3.5 h-3.5" />}
                           Back to Feed
+                        </button>
+                      )}
+                      {lead.status !== "converted" && lead.status !== "dropped" && editingLeadId !== lead.id && (
+                        <button
+                          onClick={() => dropMutation.mutate(lead.id)}
+                          disabled={dropMutation.isPending}
+                          title="Mark as permanently inconvertible — removes from active pipeline"
+                          className="p-1.5 rounded-lg text-white/20 hover:text-rose-400 hover:bg-rose-500/10 transition-all disabled:opacity-40">
+                          {dropMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                         </button>
                       )}
                       {editingLeadId !== lead.id && (

@@ -136,29 +136,59 @@ router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> =
   }
 });
 
-// ─── GET /api/leads/monthly-stats — current + previous month counts ───────────
+// ─── GET /api/leads/monthly-stats — pipeline snapshot + monthly resolution ────
 
 router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     const r = await client.query(`
       SELECT
+        -- current active pipeline (no time filter — reduces as leads resolve)
+        COUNT(*) FILTER (WHERE status IN ('new', 'acknowledged'))::int
+          AS active_pipeline,
+
+        -- this month intake
         COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
-          AS this_month_leads,
-        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_leads,
+          AS this_month_created,
+
+        -- this month conversions
         COUNT(*) FILTER (WHERE status = 'converted'
           AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
           AS this_month_conversions,
+
+        -- this month dropped (inconvertible)
+        COUNT(*) FILTER (WHERE status = 'dropped'
+          AND date_trunc('month', dropped_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
+          AS this_month_dropped,
+
+        -- last month intake
+        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
+          AS last_month_created,
+
+        -- last month conversions
         COUNT(*) FILTER (WHERE status = 'converted'
           AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_conversions
+          AS last_month_conversions,
+
+        -- last month dropped
+        COUNT(*) FILTER (WHERE status = 'dropped'
+          AND date_trunc('month', dropped_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
+          AS last_month_dropped
       FROM leads
     `);
     const row = r.rows[0];
     res.json({
-      thisMonth:  { leads: row.this_month_leads,  conversions: row.this_month_conversions },
-      lastMonth:  { leads: row.last_month_leads,  conversions: row.last_month_conversions },
+      activePipeline: parseInt(row.active_pipeline, 10),
+      thisMonth: {
+        created:     parseInt(row.this_month_created, 10),
+        conversions: parseInt(row.this_month_conversions, 10),
+        dropped:     parseInt(row.this_month_dropped, 10),
+      },
+      lastMonth: {
+        created:     parseInt(row.last_month_created, 10),
+        conversions: parseInt(row.last_month_conversions, 10),
+        dropped:     parseInt(row.last_month_dropped, 10),
+      },
     });
   } finally {
     client.release();
@@ -247,6 +277,31 @@ router.put("/leads/:id/unacknowledge", requireStaffAuth, async (req, res): Promi
       [id]
     );
     if (!r.rows[0]) { res.status(404).json({ error: "Lead not found or not in pipeline" }); return; }
+    res.json(r.rows[0]);
+  } finally {
+    client.release();
+  }
+});
+
+// ─── PUT /api/leads/:id/drop — mark permanently inconvertible ────────────────
+
+router.put("/leads/:id/drop", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const droppedBy = (req as any).staffUser?.email ?? (req as any).user?.email ?? "unknown";
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `UPDATE leads
+       SET status      = 'dropped',
+           dropped_at  = NOW(),
+           dropped_by  = $1,
+           updated_at  = NOW()
+       WHERE id = $2 AND status != 'converted'
+       RETURNING *, (flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value`,
+      [droppedBy, id]
+    );
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found or already converted" }); return; }
     res.json(r.rows[0]);
   } finally {
     client.release();

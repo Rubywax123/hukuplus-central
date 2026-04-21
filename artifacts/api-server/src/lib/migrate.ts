@@ -1101,6 +1101,12 @@ export async function runMigrations() {
       ALTER TABLE leads ADD COLUMN IF NOT EXISTS dismissed_by TEXT;
     `);
 
+    // ── dropped_at on leads (permanently inconvertible) ───────────────────────
+    await client.query(`
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS dropped_at TIMESTAMPTZ;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS dropped_by TEXT;
+    `);
+
     // ── Revolver mirror tables (Revolver → Central read sync) ─────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS revolver_customers (

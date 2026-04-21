@@ -59,8 +59,9 @@ interface RevolverSummary {
 }
 
 interface LeadsMonthlyStats {
-  thisMonth: { leads: number; conversions: number };
-  lastMonth: { leads: number; conversions: number };
+  activePipeline: number;
+  thisMonth: { created: number; conversions: number; dropped: number };
+  lastMonth: { created: number; conversions: number; dropped: number };
 }
 
 interface ConversionCustomer {
@@ -199,14 +200,26 @@ function MonthlyMetricCard({ title, subtitle, value, previous, today, icon: Icon
 
 function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefined; delay: number }) {
   const [, navigate] = useLocation();
-  const totalLeads     = stats?.thisMonth.leads ?? 0;
-  const conversions    = stats?.thisMonth.conversions ?? 0;
-  const remaining      = Math.max(0, totalLeads - conversions);
-  const prevLeads      = stats?.lastMonth.leads ?? 0;
+
+  // Big number = current active leads (new + acknowledged) — reduces on conversion or drop
+  const active       = stats?.activePipeline ?? 0;
+
+  // This month resolution stats
+  const conversions  = stats?.thisMonth.conversions ?? 0;
+  const dropped      = stats?.thisMonth.dropped     ?? 0;
+  const created      = stats?.thisMonth.created     ?? 0;
+  const resolved     = conversions + dropped;
+  // Rate = % of resolved leads that were successful (only meaningful once some resolved)
+  const rate         = resolved > 0 ? Math.round((conversions / resolved) * 100) : 0;
+
+  // Last month for comparison
   const prevConversions = stats?.lastMonth.conversions ?? 0;
-  const rate     = totalLeads > 0 ? Math.round((conversions / totalLeads) * 100) : 0;
-  const prevRate = prevLeads  > 0 ? Math.round((prevConversions / prevLeads) * 100) : 0;
-  const d = delta(totalLeads, prevLeads);
+  const prevDropped     = stats?.lastMonth.dropped     ?? 0;
+  const prevResolved    = prevConversions + prevDropped;
+  const prevRate        = prevResolved > 0 ? Math.round((prevConversions / prevResolved) * 100) : 0;
+  const prevCreated     = stats?.lastMonth.created ?? 0;
+
+  const d      = delta(created, prevCreated);
   const rateUp = rate >= prevRate;
 
   return (
@@ -219,27 +232,30 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leads Pipeline</p>
-            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Field sales this month · {totalLeads} total</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Active pipeline · {created} created this month</p>
           </div>
           <div className="p-2 rounded-lg bg-white/5 text-violet-400">
             <TrendingUp className="w-5 h-5" />
           </div>
         </div>
 
-        {/* Big number = remaining unconverted leads */}
-        <h3 className="text-5xl font-display font-bold text-white mt-2">{remaining}</h3>
+        {/* Big number = current active pipeline — decreases as leads resolve */}
+        <h3 className="text-5xl font-display font-bold text-white mt-2">{active}</h3>
 
-        {/* Conversions row */}
-        <div className="flex items-center gap-2 mt-3">
+        {/* Resolution row */}
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
           <span className="text-sm font-semibold text-emerald-400">{conversions} converted</span>
-          {totalLeads > 0 && (
+          {dropped > 0 && (
+            <span className="text-sm text-rose-400/70">{dropped} dropped</span>
+          )}
+          {resolved > 0 && (
             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${rateUp ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>
               {rate}%
             </span>
           )}
-          {prevLeads > 0 && (
+          {prevResolved > 0 && (
             <span className="text-[10px] text-muted-foreground/50 ml-auto">
-              last: {prevLeads} / {prevConversions} ({prevRate}%)
+              last: {prevConversions}/{prevResolved} ({prevRate}%)
             </span>
           )}
         </div>
@@ -247,7 +263,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
         <div className="mt-auto pt-2">
           {d && (
             <p className={`text-xs font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
-              {d.label} leads
+              {d.label} leads created vs last month
             </p>
           )}
           <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline</p>
