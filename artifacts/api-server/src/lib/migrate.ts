@@ -1090,6 +1090,11 @@ export async function runMigrations() {
         );
     `);
 
+    // ── messaged_at on leads ──────────────────────────────────────────────────
+    await client.query(`
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS messaged_at TIMESTAMPTZ;
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

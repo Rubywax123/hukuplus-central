@@ -253,6 +253,28 @@ router.put("/leads/:id/convert", requireStaffAuth, async (req, res): Promise<voi
   }
 });
 
+// ─── PUT /api/leads/:id/toggle-messaged — mark/unmark as messaged ────────────
+
+router.put("/leads/:id/toggle-messaged", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `UPDATE leads
+         SET messaged_at = CASE WHEN messaged_at IS NULL THEN now() ELSE NULL END,
+             updated_at  = now()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found" }); return; }
+    res.json(r.rows[0]);
+  } finally {
+    client.release();
+  }
+});
+
 // ─── PATCH /api/leads/:id — update editable fields ───────────────────────────
 
 router.patch("/leads/:id", requireStaffAuth, async (req, res): Promise<void> => {

@@ -2948,6 +2948,7 @@ interface Lead {
   converted_at: string | null;
   converted_customer_name: string | null;
   created_at: string;
+  messaged_at: string | null;
 }
 
 const LEAD_PRODUCTS = [
@@ -3475,6 +3476,14 @@ function LeadsTab() {
     onSuccess: () => { setEditingLeadId(null); invalidateAll(); },
   });
 
+  const messagedMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${BASE}/api/leads/${id}/toggle-messaged`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: invalidateAll,
+  });
+
   const startEdit = (lead: Lead) => {
     setEditDraft({
       customer_name: lead.customer_name,
@@ -3636,9 +3645,11 @@ function LeadsTab() {
                       <motion.div key={lead.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 40, scale: 0.95 }} transition={{ duration: 0.2 }}
                         className={cn(
                           "rounded-xl border transition-all overflow-hidden",
-                          lead.status === "new"
-                            ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70"
-                            : "bg-white/[0.02] border-white/8"
+                          lead.messaged_at
+                            ? "bg-teal-500/[0.05] border-teal-500/30 border-l-[3px] border-l-teal-400/60"
+                            : lead.status === "new"
+                              ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70"
+                              : "bg-white/[0.02] border-white/8"
                         )}>
 
                         {/* ── Card header (always visible, click to expand) ── */}
@@ -3648,9 +3659,16 @@ function LeadsTab() {
                         >
                           <div className={cn(
                             "mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                            lead.status === "new" ? "bg-amber-500/15 border border-amber-500/25" : "bg-white/10 border border-white/15"
+                            lead.messaged_at
+                              ? "bg-teal-500/15 border border-teal-500/25"
+                              : lead.status === "new"
+                                ? "bg-amber-500/15 border border-amber-500/25"
+                                : "bg-white/10 border border-white/15"
                           )}>
-                            <UserPlus className={cn("w-4 h-4", lead.status === "new" ? "text-amber-400" : "text-white/50")} />
+                            {lead.messaged_at
+                              ? <MessageCircle className="w-4 h-4 text-teal-400" />
+                              : <UserPlus className={cn("w-4 h-4", lead.status === "new" ? "text-amber-400" : "text-white/50")} />
+                            }
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -3662,6 +3680,11 @@ function LeadsTab() {
                               )}>
                                 {lead.status === "new" ? "⚡ NEW" : "ACKNOWLEDGED"}
                               </span>
+                              {lead.messaged_at && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                                  ✉ MESSAGED
+                                </span>
+                              )}
                               {lead.retailer_name && (
                                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/15">
                                   {lead.retailer_name}{lead.branch_name ? ` — ${lead.branch_name}` : ""}
@@ -3811,6 +3834,20 @@ function LeadsTab() {
                                       <Pencil className="w-3.5 h-3.5" /> Edit
                                     </button>
                                     <button
+                                      onClick={() => messagedMutation.mutate(lead.id)}
+                                      disabled={messagedMutation.isPending}
+                                      className={cn(
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all disabled:opacity-40",
+                                        lead.messaged_at
+                                          ? "bg-teal-500/20 border-teal-500/35 text-teal-300 hover:bg-teal-500/10"
+                                          : "bg-white/5 border-white/15 text-white/50 hover:bg-teal-500/10 hover:border-teal-500/25 hover:text-teal-300"
+                                      )}
+                                      title={lead.messaged_at ? `Messaged ${fmt(lead.messaged_at)} — click to unmark` : "Mark as messaged"}
+                                    >
+                                      <MessageCircle className="w-3.5 h-3.5" />
+                                      {lead.messaged_at ? "Messaged" : "Mark messaged"}
+                                    </button>
+                                    <button
                                       onClick={() => dismissMutation.mutate(lead.id)}
                                       disabled={dismissMutation.isPending}
                                       className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-white/10 border border-white/15 text-white hover:bg-white/15 transition-all disabled:opacity-40 ml-auto"
@@ -3950,24 +3987,30 @@ function LeadsTab() {
                 <motion.div key={lead.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.18 }}
                   className={cn(
                     "p-4 rounded-xl border transition-colors",
-                    lead.status === "new"
-                      ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70"
-                      : lead.status === "converted"
+                    lead.status === "converted"
                       ? "bg-emerald-500/[0.03] border-emerald-500/15 opacity-70"
-                      : "bg-white/[0.02] border-white/8"
+                      : lead.messaged_at
+                        ? "bg-teal-500/[0.05] border-teal-500/30 border-l-[3px] border-l-teal-400/60"
+                        : lead.status === "new"
+                          ? "bg-amber-500/[0.04] border-amber-500/25 border-l-[3px] border-l-amber-400/70"
+                          : "bg-white/[0.02] border-white/8"
                   )}>
                   <div className="flex items-start gap-3">
                     <div className={cn(
                       "mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                      lead.status === "new" ? "bg-amber-500/15 border border-amber-500/25"
+                      lead.messaged_at ? "bg-teal-500/15 border border-teal-500/25"
+                        : lead.status === "new" ? "bg-amber-500/15 border border-amber-500/25"
                         : lead.status === "converted" ? "bg-emerald-500/15 border border-emerald-500/25"
                         : "bg-white/10 border border-white/15"
                     )}>
-                      <UserPlus className={cn("w-4 h-4",
-                        lead.status === "new" ? "text-amber-400"
-                          : lead.status === "converted" ? "text-emerald-400"
-                          : "text-white/50"
-                      )} />
+                      {lead.messaged_at
+                        ? <MessageCircle className="w-4 h-4 text-teal-400" />
+                        : <UserPlus className={cn("w-4 h-4",
+                            lead.status === "new" ? "text-amber-400"
+                              : lead.status === "converted" ? "text-emerald-400"
+                              : "text-white/50"
+                          )} />
+                      }
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -3979,6 +4022,11 @@ function LeadsTab() {
                         )}>
                           {lead.status === "new" ? "⚡ NEW" : lead.status === "converted" ? "✓ CONVERTED" : "ACKNOWLEDGED"}
                         </span>
+                        {lead.messaged_at && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                            ✉ MESSAGED
+                          </span>
+                        )}
                         {lead.retailer_name && (
                           <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/15">
                             {lead.retailer_name}{lead.branch_name ? ` — ${lead.branch_name}` : ""}
@@ -4036,6 +4084,19 @@ function LeadsTab() {
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                       )}
+                      <button
+                        onClick={() => messagedMutation.mutate(lead.id)}
+                        disabled={messagedMutation.isPending}
+                        title={lead.messaged_at ? `Messaged ${fmt(lead.messaged_at)} — click to unmark` : "Mark as messaged"}
+                        className={cn(
+                          "p-1.5 rounded-lg transition-all disabled:opacity-40",
+                          lead.messaged_at
+                            ? "text-teal-400 bg-teal-500/15 hover:bg-teal-500/5"
+                            : "text-white/25 hover:text-teal-400 hover:bg-teal-500/10"
+                        )}
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                      </button>
                       {confirmDeleteId === lead.id ? (
                         <div className="flex items-center gap-1 mt-0.5">
                           <button onClick={() => setConfirmDeleteId(null)}
