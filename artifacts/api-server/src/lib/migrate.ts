@@ -1101,6 +1101,50 @@ export async function runMigrations() {
       ALTER TABLE leads ADD COLUMN IF NOT EXISTS dismissed_by TEXT;
     `);
 
+    // ── Revolver mirror tables (Revolver → Central read sync) ─────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS revolver_customers (
+        revolver_id       INTEGER PRIMARY KEY,
+        name              TEXT,
+        email             TEXT,
+        phone             TEXT,
+        phone_norm        TEXT,
+        company           TEXT,
+        revolver_retailer_id    INTEGER,
+        revolver_branch_id      INTEGER,
+        central_customer_id     INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        central_retailer_id     INTEGER REFERENCES retailers(id) ON DELETE SET NULL,
+        central_branch_id       INTEGER REFERENCES branches(id)  ON DELETE SET NULL,
+        access_enabled    BOOLEAN DEFAULT TRUE,
+        weekly_tray_target INTEGER,
+        raw               JSONB,
+        synced_at         TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS revolver_facilities (
+        revolver_id            INTEGER PRIMARY KEY,
+        revolver_customer_id   INTEGER,
+        central_customer_id    INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        status                 TEXT,
+        credit_limit           NUMERIC,
+        outstanding_balance    NUMERIC,
+        available_balance      NUMERIC,
+        raw                    JSONB,
+        synced_at              TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS revolver_drawdown_requests (
+        revolver_id            INTEGER PRIMARY KEY,
+        revolver_facility_id   INTEGER,
+        revolver_customer_id   INTEGER,
+        central_customer_id    INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        amount                 NUMERIC,
+        status                 TEXT,
+        raw                    JSONB,
+        synced_at              TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

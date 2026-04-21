@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -47,6 +47,17 @@ interface ApplicationsDetail {
   duplicateCustomers: string[];
 }
 
+interface RevolverSummary {
+  active_customers: number;
+  matched_customers: number;
+  total_customers: number;
+  active_facilities: number;
+  total_credit_limit: number;
+  total_outstanding: number;
+  pending_drawdowns: number;
+  last_synced_at: string | null;
+}
+
 interface LeadsMonthlyStats {
   thisMonth: { leads: number; conversions: number };
   lastMonth: { leads: number; conversions: number };
@@ -73,6 +84,15 @@ interface ConversionData {
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
+
+function useRevolverSummary() {
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  return useQuery<RevolverSummary>({
+    queryKey: ["revolver-summary"],
+    queryFn: () => fetch(`${BASE}/api/revolver/summary`, { credentials: "include" }).then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 function useMonthlyMetrics() {
   return useQuery<MonthlyMetrics>({
@@ -721,6 +741,73 @@ function HistoryTable({ data }: { data: MonthSnapshot[] }) {
   );
 }
 
+// ─── Revolver Summary Card ─────────────────────────────────────────────────────
+
+function RevolverSummarySection({ data, delay }: { data: RevolverSummary | undefined; delay: number }) {
+  const fmt$ = (n: number) => n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`;
+  const available = data ? data.total_credit_limit - data.total_outstanding : 0;
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} className="mb-10">
+      <div className="flex items-center gap-2 mb-4">
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Revolver</h2>
+        <span className="text-xs text-muted-foreground/50 font-medium">· Credit facility overview</span>
+        {data?.last_synced_at && (
+          <span className="text-[10px] text-muted-foreground/40 ml-auto">
+            synced {format(new Date(data.last_synced_at), "HH:mm")}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Customers */}
+        <GlassCard className="p-5 flex flex-col gap-1 relative overflow-hidden">
+          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full blur-2xl opacity-15 bg-violet-400" />
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 rounded-md bg-white/5 text-violet-400"><Layers className="w-3.5 h-3.5" /></div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Customers</p>
+          </div>
+          <p className="text-3xl font-display font-bold text-white">{data?.total_customers ?? 0}</p>
+          <p className="text-[11px] text-muted-foreground/60">
+            {data?.matched_customers ?? 0} linked to HukuPlus
+          </p>
+        </GlassCard>
+
+        {/* Active Facilities */}
+        <GlassCard className="p-5 flex flex-col gap-1 relative overflow-hidden">
+          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full blur-2xl opacity-15 bg-blue-400" />
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 rounded-md bg-white/5 text-blue-400"><CreditCard className="w-3.5 h-3.5" /></div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Facilities</p>
+          </div>
+          <p className="text-3xl font-display font-bold text-white">{data?.active_facilities ?? 0}</p>
+          <p className="text-[11px] text-muted-foreground/60">active credit facilities</p>
+        </GlassCard>
+
+        {/* Credit deployed */}
+        <GlassCard className="p-5 flex flex-col gap-1 relative overflow-hidden">
+          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full blur-2xl opacity-15 bg-emerald-400" />
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 rounded-md bg-white/5 text-emerald-400"><TrendingUp className="w-3.5 h-3.5" /></div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Outstanding</p>
+          </div>
+          <p className="text-3xl font-display font-bold text-white">{fmt$(Number(data?.total_outstanding ?? 0))}</p>
+          <p className="text-[11px] text-muted-foreground/60">of {fmt$(Number(data?.total_credit_limit ?? 0))} limit · {fmt$(available)} free</p>
+        </GlassCard>
+
+        {/* Pending drawdowns */}
+        <GlassCard className="p-5 flex flex-col gap-1 relative overflow-hidden">
+          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full blur-2xl opacity-15 bg-amber-400" />
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 rounded-md bg-white/5 text-amber-400"><ArrowDownCircle className="w-3.5 h-3.5" /></div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Drawdowns</p>
+          </div>
+          <p className="text-3xl font-display font-bold text-white">{data?.pending_drawdowns ?? 0}</p>
+          <p className="text-[11px] text-muted-foreground/60">pending requests</p>
+        </GlassCard>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -730,6 +817,7 @@ export default function DashboardPage() {
   const { data: history, isLoading: historyLoading } = useMonthlyHistory();
   const { data: leadsStats } = useLeadsMonthlyStats();
   const { data: conversionData } = useReapplicationConversion();
+  const { data: revolverSummary } = useRevolverSummary();
   const [drillDown, setDrillDown] = useState<"application" | "reapplication" | null>(null);
   const [showConversion, setShowConversion] = useState(false);
 
@@ -794,6 +882,9 @@ export default function DashboardPage() {
         <LeadsPipelineCard stats={leadsStats} delay={0.26} />
         <ReapplyConversionCard data={conversionData} delay={0.32} onClick={() => setShowConversion(true)} />
       </div>
+
+      {/* ── Revolver section ── */}
+      <RevolverSummarySection data={revolverSummary} delay={0.35} />
 
       {/* ── Historical comparison ── */}
       {!historyLoading && history && history.length > 0 && (

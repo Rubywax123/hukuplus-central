@@ -1,6 +1,6 @@
 import app from "./app";
 import { runMigrations } from "./lib/migrate";
-import { syncHukuPlusStores, syncRevolverStores } from "./routes/sync";
+import { syncHukuPlusStores, syncRevolverStores, syncRevolverData } from "./routes/sync";
 import { syncXeroInvoices } from "./lib/syncXeroInvoices";
 import { autoSnapshotPreviousMonth } from "./lib/snapshotMonths";
 
@@ -37,8 +37,8 @@ async function runStoreSync() {
     console.error("[sync:hukuplus] Failed:", err.message);
   }
 
-  // Step 2: push from Central into Revolver
-  console.log("[sync] Starting scheduled Revolver sync...");
+  // Step 2: push from Central into Revolver (structure)
+  console.log("[sync] Starting scheduled Revolver store sync...");
   try {
     const result = await syncRevolverStores();
     console.log(
@@ -49,6 +49,21 @@ async function runStoreSync() {
     );
   } catch (err: any) {
     console.error("[sync:revolver] Failed:", err.message);
+  }
+
+  // Step 3: pull from Revolver into Central (customers, facilities, drawdowns)
+  console.log("[sync] Starting Revolver data pull...");
+  try {
+    const result = await syncRevolverData();
+    console.log(
+      `[sync:revolver-data] Done — ` +
+      `${result.customersUpserted} customers, ` +
+      `${result.facilitiesUpserted} facilities, ` +
+      `${result.drawdownsUpserted} drawdowns, ` +
+      `${result.matched} matched to Central customers.`
+    );
+  } catch (err: any) {
+    console.error("[sync:revolver-data] Failed:", err.message);
   }
 }
 
