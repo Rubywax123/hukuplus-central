@@ -279,11 +279,57 @@ router.get("/customers/:id/revolver", apiKeyOrSession, async (req, res): Promise
       [rc.revolver_id]
     );
 
+    // 5. Revolver form submissions from Formitize (applications, agreements, drawdowns, payments)
+    //    Match by customer_id first, then fall back to phone_norm or name for unlinked notifications
+    const customerRow = await client.query(
+      "SELECT full_name, phone FROM customers WHERE id = $1",
+      [id]
+    );
+    const custName: string = customerRow.rows[0]?.full_name ?? "";
+
+    const { rows: forms } = await client.query(
+      `SELECT
+         id, formitize_job_id, form_name, task_type,
+         customer_name, customer_phone, branch_name, retailer_name,
+         status, payment_amount, created_at, processed_at,
+         is_delinquent_warning, is_duplicate_warning, notes
+       FROM formitize_notifications
+       WHERE product = 'Revolver'
+         AND (
+           customer_id = $1
+           OR (customer_id IS NULL AND customer_phone IS NOT NULL
+               AND RIGHT(REGEXP_REPLACE(customer_phone, '\\D', '', 'g'), 9) = $2)
+           OR (customer_id IS NULL AND customer_name ILIKE $3)
+         )
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [id, phoneNorm, `%${custName}%`]
+    );
+
+    // 6. Revolver agreements stored in agreements table
+    const { rows: revolverAgreements } = await client.query(
+      `SELECT
+         a.id, a.loan_product, a.loan_amount, a.status,
+         a.created_at, a.signed_at, a.formitize_job_id, a.formitize_form_url,
+         a.facility_fee_amount, a.interest_amount, a.monthly_instalment,
+         a.loan_tenor_months, a.repayment_date, a.signed_documents,
+         b.name AS branch_name, r.name AS retailer_name
+       FROM agreements a
+       LEFT JOIN branches b ON b.id = a.branch_id
+       LEFT JOIN retailers r ON r.id = a.retailer_id
+       WHERE a.customer_id = $1
+         AND a.loan_product ILIKE 'Revolver%'
+       ORDER BY a.created_at DESC`,
+      [id]
+    );
+
     res.json({
       linked: true,
       customer: rc,
       facilities,
       drawdowns,
+      forms,
+      agreements: revolverAgreements,
     });
   } finally {
     client.release();

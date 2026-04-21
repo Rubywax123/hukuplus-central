@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck, Leaf, Layers, ArrowDownCircle, TrendingUp } from "lucide-react";
+import { Search, Users, X, Phone, CreditCard, Building2, FileSignature, Edit2, Check, ChevronRight, Link2, AlertCircle, RefreshCw, DollarSign, Receipt, UploadCloud, Filter, CheckCircle2, AlertTriangle, UserPlus, ShieldCheck, Leaf, Layers, ArrowDownCircle, TrendingUp, ClipboardList, ExternalLink } from "lucide-react";
 import RetailersPage from "@/pages/retailers";
 import TefcoStaffPage from "@/pages/team";
 import AgronomistsPage from "@/pages/team-agronomists";
@@ -177,12 +177,51 @@ interface RevolverCustomerProfile {
   synced_at: string;
 }
 
+interface RevolverFormNotification {
+  id: number;
+  formitize_job_id: string | null;
+  form_name: string;
+  task_type: string;
+  customer_name: string;
+  customer_phone: string | null;
+  branch_name: string | null;
+  retailer_name: string | null;
+  status: string;
+  payment_amount: number | null;
+  created_at: string;
+  processed_at: string | null;
+  is_delinquent_warning: boolean;
+  is_duplicate_warning: boolean;
+  notes: string | null;
+}
+
+interface RevolverAgreement {
+  id: number;
+  loan_product: string;
+  loan_amount: number | null;
+  status: string;
+  created_at: string;
+  signed_at: string | null;
+  formitize_job_id: string | null;
+  formitize_form_url: string | null;
+  facility_fee_amount: string | null;
+  interest_amount: string | null;
+  monthly_instalment: string | null;
+  loan_tenor_months: number | null;
+  repayment_date: string | null;
+  signed_documents: Array<{ url: string; name: string }> | null;
+  branch_name: string | null;
+  retailer_name: string | null;
+}
+
 interface RevolverData {
   linked: boolean;
   reason?: string;
   customer?: RevolverCustomerProfile;
   facilities?: RevolverFacility[];
   drawdowns?: RevolverDrawdown[];
+  forms?: RevolverFormNotification[];
+  agreements?: RevolverAgreement[];
 }
 
 function facilityStatusClass(status: string) {
@@ -235,6 +274,8 @@ function RevolverPanel({ customerId }: { customerId: number }) {
   const rc = data.customer!;
   const facilities = data.facilities ?? [];
   const drawdowns = data.drawdowns ?? [];
+  const forms = data.forms ?? [];
+  const agreements = data.agreements ?? [];
   const totalLimit = facilities.reduce((s, f) => s + Number(f.credit_limit), 0);
   const totalOutstanding = facilities.reduce((s, f) => s + Number(f.outstanding_balance), 0);
   const totalAvailable = facilities.reduce((s, f) => s + Number(f.available_balance), 0);
@@ -332,8 +373,122 @@ function RevolverPanel({ customerId }: { customerId: number }) {
         </div>
       )}
 
-      {facilities.length === 0 && (
-        <p className="text-xs text-muted-foreground italic text-center py-1">No facilities on record yet — sync may be pending</p>
+      {facilities.length === 0 && forms.length === 0 && agreements.length === 0 && (
+        <p className="text-xs text-muted-foreground italic text-center py-1">No facilities or forms on record yet</p>
+      )}
+
+      {/* Revolver Agreements (from Formitize via Central) */}
+      {agreements.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <FileSignature className="w-3 h-3" /> Agreements ({agreements.length})
+          </p>
+          <div className="space-y-2">
+            {agreements.map(a => (
+              <div key={a.id} className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-white">{a.loan_product}</span>
+                  <span className={statusBadge(a.status)}>{a.status}</span>
+                </div>
+                {(a.retailer_name || a.branch_name) && (
+                  <p className="text-xs text-muted-foreground">{[a.retailer_name, a.branch_name].filter(Boolean).join(" — ")}</p>
+                )}
+                <div className="grid grid-cols-2 gap-x-3 text-xs">
+                  {a.loan_amount != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Amount</span>
+                      <span className="text-white font-medium">{formatUSD(a.loan_amount)}</span>
+                    </div>
+                  )}
+                  {a.monthly_instalment && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Monthly</span>
+                      <span className="text-white font-medium">{formatUSD(parseFloat(a.monthly_instalment))}</span>
+                    </div>
+                  )}
+                  {a.loan_tenor_months && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Term</span>
+                      <span className="text-white font-medium">{a.loan_tenor_months} mo</span>
+                    </div>
+                  )}
+                  {a.repayment_date && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Repay by</span>
+                      <span className="text-white font-medium">{formatDate(a.repayment_date)}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] text-muted-foreground/50">{formatDate(a.created_at)}</span>
+                  {a.signed_at && <span className="text-[10px] text-emerald-400">Signed {formatDate(a.signed_at)}</span>}
+                  {a.formitize_form_url && (
+                    <a href={a.formitize_form_url} target="_blank" rel="noopener noreferrer"
+                      className="ml-auto flex items-center gap-1 text-[10px] text-primary hover:underline">
+                      <ExternalLink className="w-2.5 h-2.5" /> View in Formitize
+                    </a>
+                  )}
+                </div>
+                {a.signed_documents && a.signed_documents.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1 border-t border-white/5">
+                    {a.signed_documents.map((doc, i) => (
+                      <a key={i} href={doc.url} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-colors">
+                        <FileSignature className="w-2.5 h-2.5" /> {doc.name || `Doc ${i + 1}`}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Formitize submissions (applications, payment notices, drawdown requests, uploads) */}
+      {forms.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <ClipboardList className="w-3 h-3" /> Formitize Activity ({forms.length})
+          </p>
+          <div className="space-y-1.5">
+            {forms.map(f => {
+              const typeLabel: Record<string, string> = {
+                application: "Application",
+                agreement: "Agreement",
+                drawdown: "Drawdown Request",
+                payment: "Payment Notice",
+                upload: "Document Upload",
+                reapplication: "Re-Application",
+              };
+              return (
+                <div key={f.id} className={`p-2.5 rounded-lg border ${f.is_delinquent_warning ? "bg-red-500/10 border-red-500/20" : f.is_duplicate_warning ? "bg-amber-500/10 border-amber-500/20" : "bg-white/5 border-white/5"}`}>
+                  <div className="flex items-start justify-between gap-2 mb-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-medium text-white">{typeLabel[f.task_type] ?? f.task_type}</span>
+                      {f.payment_amount != null && (
+                        <span className="text-xs text-emerald-400 font-medium">{formatUSD(f.payment_amount)}</span>
+                      )}
+                      {f.is_delinquent_warning && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 border border-red-500/30 text-red-400 font-semibold">⚠ Delinquent flag</span>
+                      )}
+                      {f.is_duplicate_warning && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400 font-semibold">Duplicate?</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground/50 shrink-0">{formatDate(f.created_at)}</span>
+                  </div>
+                  {(f.retailer_name || f.branch_name) && (
+                    <p className="text-[10px] text-muted-foreground/60">{[f.retailer_name, f.branch_name].filter(Boolean).join(" — ")}</p>
+                  )}
+                  {f.formitize_job_id && (
+                    <p className="text-[10px] text-muted-foreground/40 font-mono">Job #{f.formitize_job_id}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
