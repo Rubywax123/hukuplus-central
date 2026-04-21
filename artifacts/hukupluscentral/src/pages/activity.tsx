@@ -2339,6 +2339,227 @@ function MessageTicks({ status }: { status: string }) {
   );
 }
 
+function NewMessageModal({
+  onClose,
+  onSent,
+}: {
+  onClose: () => void;
+  onSent: (waId: string, name: string) => void;
+}) {
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: number; fullName: string; phone: string } | null>(null);
+  const [manualPhone, setManualPhone] = useState("");
+  const [useManual, setUseManual] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const { data: customerResults = [] } = useQuery<Array<{ id: number; full_name: string; phone: string | null }>>({
+    queryKey: ["customer-search-msg", customerSearch],
+    enabled: customerSearch.length >= 2 && !selectedCustomer,
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/customers?search=${encodeURIComponent(customerSearch)}&limit=8`, { credentials: "include" });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return (data.customers ?? data).filter((c: any) => c.phone);
+    },
+    staleTime: 30_000,
+  });
+
+  const { data: templatesData } = useQuery<{ templates: Array<{ name: string; body: string; params: string[]; headerType: string | null }> }>({
+    queryKey: ["wa-templates"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/whatsapp/templates`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    staleTime: 5 * 60_000,
+  });
+  const templates = templatesData?.templates ?? [];
+  const activeTpl = templates.find(t => t.name === selectedTemplate) ?? null;
+
+  const rawPhone = useManual ? manualPhone : (selectedCustomer?.phone ?? "");
+  const normalizedPhone = (() => {
+    const digits = rawPhone.replace(/\D/g, "");
+    if (digits.length === 12 && digits.startsWith("263")) return digits;
+    if (digits.length === 10 && digits.startsWith("0")) return "263" + digits.slice(1);
+    if (digits.length === 9) return "263" + digits;
+    return digits;
+  })();
+
+  const recipientName = useManual ? ("+" + normalizedPhone) : (selectedCustomer?.fullName ?? "");
+  const hasRecipient = normalizedPhone.length >= 9;
+  const canSend = hasRecipient && !!selectedTemplate &&
+    (!activeTpl || activeTpl.params.every(p => (templateParams[p] ?? "").trim()));
+
+  const sendMutation = useMutation({
+    mutationFn: async () => {
+      const params = activeTpl ? activeTpl.params.map(p => ({ name: p, value: templateParams[p] ?? "" })) : [];
+      const r = await fetch(`${BASE}/api/whatsapp/send-template`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ waId: normalizedPhone, templateName: selectedTemplate, parameters: params }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Failed to send");
+      return data;
+    },
+    onSuccess: () => onSent(normalizedPhone, recipientName),
+    onError: (err: any) => setApiError(err.message),
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-lg mx-4 rounded-2xl bg-[#151e2e] border border-white/10 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-green-500/20 flex items-center justify-center">
+              <Send className="w-3.5 h-3.5 text-green-400" />
+            </div>
+            <h2 className="text-sm font-semibold text-foreground">New WhatsApp Message</h2>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-white transition-colors"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-5 space-y-5 overflow-y-auto">
+          {/* ── Recipient ── */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Recipient</label>
+              <button
+                onClick={() => { setUseManual(v => !v); setSelectedCustomer(null); setCustomerSearch(""); setManualPhone(""); }}
+                className="text-[11px] text-amber-400 hover:text-amber-300 transition-colors"
+              >
+                {useManual ? "Search customers instead" : "Enter number manually"}
+              </button>
+            </div>
+
+            {selectedCustomer && !useManual ? (
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-green-500/10 border border-green-500/20">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{selectedCustomer.fullName}</p>
+                  <p className="text-xs text-muted-foreground">{selectedCustomer.phone}</p>
+                </div>
+                <button onClick={() => { setSelectedCustomer(null); setCustomerSearch(""); }} className="text-muted-foreground hover:text-white ml-2 transition-colors">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : useManual ? (
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                <input
+                  type="tel"
+                  value={manualPhone}
+                  onChange={e => setManualPhone(e.target.value)}
+                  placeholder="e.g. 0783503327 or 263783503327"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                />
+              </div>
+            ) : (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={e => { setCustomerSearch(e.target.value); setShowDropdown(true); }}
+                  onFocus={() => setShowDropdown(true)}
+                  placeholder="Search customer by name or phone…"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                />
+                {showDropdown && customerResults.length > 0 && (
+                  <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl bg-[#1a2438] border border-white/10 shadow-xl overflow-hidden">
+                    {customerResults.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => { setSelectedCustomer({ id: c.id, fullName: c.full_name, phone: c.phone! }); setCustomerSearch(""); setShowDropdown(false); }}
+                        className="w-full text-left px-3 py-2.5 hover:bg-white/8 transition-colors border-b border-white/5 last:border-0"
+                      >
+                        <p className="text-sm font-medium text-foreground">{c.full_name}</p>
+                        <p className="text-xs text-muted-foreground">{c.phone}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Template picker ── */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Template</label>
+            {templates.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">Loading approved templates…</p>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {templates.map(tpl => (
+                  <div
+                    key={tpl.name}
+                    onClick={() => { setSelectedTemplate(tpl.name); setTemplateParams({}); }}
+                    className={cn(
+                      "rounded-xl border p-3 cursor-pointer transition-all",
+                      selectedTemplate === tpl.name
+                        ? "border-green-500/40 bg-green-500/10"
+                        : "border-white/8 bg-white/[0.03] hover:bg-white/6"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <p className="text-xs font-semibold text-foreground uppercase tracking-wide">{tpl.name.replace(/_/g, " ")}</p>
+                      {selectedTemplate === tpl.name && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2">{tpl.body}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Template parameters ── */}
+          {activeTpl && activeTpl.params.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Fill in Template Fields</label>
+              <div className="space-y-2">
+                {activeTpl.params.map(param => (
+                  <div key={param}>
+                    <label className="text-xs text-muted-foreground capitalize mb-1 block">{param.replace(/_/g, " ")}</label>
+                    <input
+                      type="text"
+                      value={templateParams[param] ?? ""}
+                      onChange={e => setTemplateParams(p => ({ ...p, [param]: e.target.value }))}
+                      placeholder={`Enter ${param.replace(/_/g, " ")}…`}
+                      className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {apiError && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-300">{apiError}</div>
+          )}
+
+          <button
+            onClick={() => { setApiError(null); sendMutation.mutate(); }}
+            disabled={!canSend || sendMutation.isPending}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {sendMutation.isPending
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
+              : <><Send className="w-4 h-4" /> Send Message</>
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WhatsAppTab() {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<WaConversation | null>(null);
@@ -2347,6 +2568,7 @@ function WhatsAppTab() {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
   const [leadState, setLeadState] = useState<{ leadId: number; existing: boolean } | null>(null);
+  const [showNewMsg, setShowNewMsg] = useState(false);
 
   const { data: convData, isLoading: loadingConvs } = useQuery<{
     configured: boolean;
@@ -2469,11 +2691,24 @@ function WhatsAppTab() {
   const conversations = convData.conversations ?? [];
 
   return (
+    <>
     <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden" style={{ minHeight: 480 }}>
       <div className="flex h-full" style={{ minHeight: 480 }}>
 
         {/* Conversation list */}
-        <div className="w-64 shrink-0 border-r border-white/10 overflow-y-auto" style={{ maxHeight: 600 }}>
+        <div className="w-64 shrink-0 border-r border-white/10 flex flex-col" style={{ maxHeight: 600 }}>
+          {/* Compose header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 shrink-0">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Chats</span>
+            <button
+              onClick={() => setShowNewMsg(true)}
+              title="New message"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-green-400 hover:bg-green-500/10 transition-colors border border-green-500/20"
+            >
+              <Pencil className="w-3 h-3" /> New
+            </button>
+          </div>
+          <div className="overflow-y-auto flex-1">
           {conversations.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet</div>
           ) : (
@@ -2506,6 +2741,7 @@ function WhatsAppTab() {
               </button>
             ))
           )}
+          </div>
         </div>
 
         {/* Message thread */}
@@ -2670,6 +2906,20 @@ function WhatsAppTab() {
         </div>
       </div>
     </div>
+
+    {showNewMsg && (
+      <NewMessageModal
+        onClose={() => setShowNewMsg(false)}
+        onSent={(waId, name) => {
+          setShowNewMsg(false);
+          qc.invalidateQueries({ queryKey: ["wa-conversations"] });
+          // Pre-select the conversation so the user lands on it immediately
+          setSelected({ waId, senderName: name, lastMessage: null, direction: "outbound", lastAt: new Date().toISOString(), unreadCount: 0 });
+          setLeadState(null);
+        }}
+      />
+    )}
+  </>
   );
 }
 
