@@ -227,6 +227,32 @@ router.put("/leads/:id/acknowledge", requireStaffAuth, async (req, res): Promise
   }
 });
 
+// ─── PUT /api/leads/:id/unacknowledge — move pipeline lead back to Feed ───────
+
+router.put("/leads/:id/unacknowledge", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `UPDATE leads
+       SET status          = 'new',
+           acknowledged_at = NULL,
+           acknowledged_by = NULL,
+           dismissed_at    = NULL,
+           dismissed_by    = NULL,
+           updated_at      = NOW()
+       WHERE id = $1 AND status = 'acknowledged'
+       RETURNING *, (flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value`,
+      [id]
+    );
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found or not in pipeline" }); return; }
+    res.json(r.rows[0]);
+  } finally {
+    client.release();
+  }
+});
+
 // ─── PUT /api/leads/:id/convert — file as converted customer ─────────────────
 
 router.put("/leads/:id/convert", requireStaffAuth, async (req, res): Promise<void> => {

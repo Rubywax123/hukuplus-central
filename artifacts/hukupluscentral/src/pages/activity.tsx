@@ -8,7 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
-  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil,
+  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil, RotateCcw,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -3468,6 +3468,14 @@ function LeadsTab() {
     onSuccess: invalidateAll,
   });
 
+  const unacknowledgeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${BASE}/api/leads/${id}/unacknowledge`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: invalidateAll,
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const r = await fetch(`${BASE}/api/leads/${id}`, { method: "DELETE", credentials: "include" });
@@ -4107,6 +4115,18 @@ function LeadsTab() {
                         <button onClick={() => setConvertingLead(lead)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20 transition-all">
                           <CheckCircle2 className="w-3.5 h-3.5" /> File
+                        </button>
+                      )}
+                      {lead.status === "acknowledged" && editingLeadId !== lead.id && (
+                        <button
+                          onClick={() => unacknowledgeMutation.mutate(lead.id)}
+                          disabled={unacknowledgeMutation.isPending}
+                          title="Move back to Feed as a new lead"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500/10 border border-orange-500/25 text-orange-300 hover:bg-orange-500/20 transition-all disabled:opacity-40">
+                          {unacknowledgeMutation.isPending
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <RotateCcw className="w-3.5 h-3.5" />}
+                          Back to Feed
                         </button>
                       )}
                       {editingLeadId !== lead.id && (
