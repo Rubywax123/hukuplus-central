@@ -4,16 +4,15 @@ import { eq, ilike, or, desc } from "drizzle-orm";
 
 const router = Router();
 
-const CENTRAL_API_KEY = process.env.CENTRAL_API_KEY;
-
 /**
- * Middleware: authenticate external loan apps via Bearer token.
- * Uses the same CENTRAL_API_KEY that HukuPlus already knows.
+ * Middleware: authenticate external apps via Bearer token.
+ * Accepts the HUKUPLUS_API_KEY secret (set in environment variables).
  */
 function requireAppKey(req: any, res: any, next: any) {
+  const apiKey = process.env.HUKUPLUS_API_KEY;
   const header = req.headers["authorization"] ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!CENTRAL_API_KEY || token !== CENTRAL_API_KEY) {
+  if (!apiKey || token !== apiKey) {
     res.status(401).json({ error: "Unauthorized — invalid or missing API key" });
     return;
   }
@@ -21,71 +20,10 @@ function requireAppKey(req: any, res: any, next: any) {
 }
 
 /**
- * GET /api/external/stores
- *
- * Returns all active retailers and their branches from Central's database.
- * This is the single source of truth for store data across all loan apps.
- *
- * Response format:
- * [
- *   {
- *     retailerId: 1,
- *     retailerName: "Profeeds",
- *     branches: [
- *       { branchId: 2, branchName: "Beitbridge" },
- *       ...
- *     ]
- *   },
- *   ...
- * ]
- *
- * Also supports flat format with ?format=flat:
- * [
- *   { retailerId: 1, retailerName: "Profeeds", branchId: 2, branchName: "Beitbridge" },
- *   ...
- * ]
- */
-router.get("/external/stores", requireAppKey, async (req, res): Promise<void> => {
-  const retailers = await db
-    .select()
-    .from(retailersTable)
-    .where(eq(retailersTable.isActive, true))
-    .orderBy(retailersTable.name);
-
-  const branches = await db
-    .select()
-    .from(branchesTable)
-    .where(eq(branchesTable.isActive, true))
-    .orderBy(branchesTable.name);
-
-  if (req.query.format === "flat") {
-    const flat = branches.map(b => {
-      const retailer = retailers.find(r => r.id === b.retailerId);
-      return {
-        retailerId: b.retailerId,
-        retailerName: retailer?.name ?? "",
-        branchId: b.id,
-        branchName: b.name,
-      };
-    });
-    res.json(flat);
-    return;
-  }
-
-  const grouped = retailers.map(r => ({
-    retailerId: r.id,
-    retailerName: r.name,
-    branches: branches
-      .filter(b => b.retailerId === r.id)
-      .map(b => ({ branchId: b.id, branchName: b.name })),
-  }));
-
-  res.json(grouped);
-});
-
-/**
  * GET /api/external/retailers
- * Returns just the retailer list (no branches).
+ *
+ * Returns all active retailers.
+ * Response: [{ id, name, email }]
  */
 router.get("/external/retailers", requireAppKey, async (req, res): Promise<void> => {
   const retailers = await db
@@ -95,8 +33,51 @@ router.get("/external/retailers", requireAppKey, async (req, res): Promise<void>
     .orderBy(retailersTable.name);
 
   res.json(retailers.map(r => ({
-    retailerId: r.id,
-    retailerName: r.name,
+    id: r.id,
+    name: r.name,
+    email: r.contactEmail ?? null,
+  })));
+});
+
+/**
+ * GET /api/external/stores
+ *
+ * Returns all active stores (branches) with their parent retailer.
+ * Response: [{ id, name, email, retailer_id }]
+ *
+ * Also supports grouped format with ?format=grouped:
+ * [{ retailerId, retailerName, branches: [{ id, name }] }]
+ */
+router.get("/external/stores", requireAppKey, async (req, res): Promise<void> => {
+  const branches = await db
+    .select()
+    .from(branchesTable)
+    .where(eq(branchesTable.isActive, true))
+    .orderBy(branchesTable.name);
+
+  if (req.query.format === "grouped") {
+    const retailers = await db
+      .select()
+      .from(retailersTable)
+      .where(eq(retailersTable.isActive, true))
+      .orderBy(retailersTable.name);
+
+    const grouped = retailers.map(r => ({
+      retailerId: r.id,
+      retailerName: r.name,
+      branches: branches
+        .filter(b => b.retailerId === r.id)
+        .map(b => ({ id: b.id, name: b.name })),
+    }));
+    res.json(grouped);
+    return;
+  }
+
+  res.json(branches.map(b => ({
+    id: b.id,
+    name: b.name,
+    email: null,
+    retailer_id: b.retailerId,
   })));
 });
 
