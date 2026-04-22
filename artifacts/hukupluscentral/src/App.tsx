@@ -26,6 +26,7 @@ import XeroIntegrationPage from "@/pages/xero";
 import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
 import ApplyRevolverPage from "@/pages/apply-revolver";
 import MyCustomersPage from "@/pages/my-customers";
+import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 
 function Redirect({ to }: { to: string }) {
@@ -98,6 +99,7 @@ function Router() {
             <Route path="/activity" component={ActivityPage} />
             <Route path="/my-customers" component={MyCustomersPage} />
             <Route path="/xero">{() => <SalesAgentGuard><XeroIntegrationPage /></SalesAgentGuard>}</Route>
+            <Route path="/settings">{() => <SalesAgentGuard><SettingsPage /></SalesAgentGuard>}</Route>
             {/* Legacy redirects — now folded into the Customers hub */}
             <Route path="/retailers">{() => <Redirect to="/customers?tab=retailers" />}</Route>
             <Route path="/team">{() => <Redirect to="/customers?tab=staff" />}</Route>

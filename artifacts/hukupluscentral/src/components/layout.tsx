@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, ArrowRightLeft, UserPlus } from "lucide-react";
+import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, ArrowRightLeft, UserPlus, Settings } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -313,13 +313,15 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
   const activityBadge = unreadCount + pendingDrawdowns + leadsFeedCount;
   const isSalesAgent = user?.role === "sales_agent";
 
-  // Sales agents get a stripped-down nav
+  // Sales agents get a stripped-down nav; super_admin gets Settings appended
   const visibleNavItems = isSalesAgent
     ? [
         { path: "/activity",      label: "Activity",     icon: Activity,      badge: "activity" as const },
         { path: "/my-customers",  label: "My Customers", icon: ContactRound,  badge: undefined },
       ]
-    : navItems;
+    : user?.role === "super_admin"
+      ? [...navItems, { path: "/settings", label: "Settings", icon: Settings }]
+      : navItems;
 
   // Mobile bottom nav items (most essential for field use)
   const mobileNavItems = isSalesAgent

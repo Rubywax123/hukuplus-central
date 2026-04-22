@@ -148,4 +148,31 @@ router.delete("/staff/users/:id", requireStaffAuth, requireSuperAdmin, async (re
   res.json({ ok: true });
 });
 
+/**
+ * GET /api/admin/api-keys
+ * Super-admin only. Returns the API keys used by external apps so they can
+ * be viewed and shared from within the HukuPlusCentral UI without needing
+ * access to the Replit secrets panel.
+ */
+router.get("/admin/api-keys", requireStaffAuth, requireSuperAdmin, (req, res) => {
+  res.json({
+    keys: [
+      {
+        name: "HukuPlus External API Key",
+        description: "Used by external apps (e.g. Reconciliator) to call /api/external/retailers, /api/external/stores, and /api/external/customers.",
+        header: "Authorization: Bearer <key>",
+        envVar: "HUKUPLUS_API_KEY",
+        value: process.env.HUKUPLUS_API_KEY ?? null,
+      },
+      {
+        name: "Takundwa API Key",
+        description: "Used by the Takundwa app to access protected Central endpoints via the x-api-key header.",
+        header: "x-api-key: <key>",
+        envVar: "TAKUNDWA_API_KEY",
+        value: process.env.TAKUNDWA_API_KEY ?? null,
+      },
+    ],
+  });
+});
+
 export default router;
