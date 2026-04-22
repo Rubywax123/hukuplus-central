@@ -192,6 +192,7 @@ export const CreateBranchBody = zod.object({
   name: zod.string(),
   location: zod.string().nullish(),
   contactPhone: zod.string().nullish(),
+  email: zod.string().nullish(),
 });
 
 /**
@@ -206,6 +207,7 @@ export const UpdateBranchBody = zod.object({
   name: zod.string().optional(),
   location: zod.string().nullish(),
   contactPhone: zod.string().nullish(),
+  email: zod.string().nullish(),
   isActive: zod.boolean().optional(),
 });
 

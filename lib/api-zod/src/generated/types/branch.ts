@@ -14,6 +14,8 @@ export interface Branch {
   location?: string | null;
   /** @nullable */
   contactPhone?: string | null;
+  /** @nullable */
+  email?: string | null;
   isActive: boolean;
   createdAt: Date;
 }

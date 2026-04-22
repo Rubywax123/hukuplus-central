@@ -12,4 +12,6 @@ export interface CreateBranchBody {
   location?: string | null;
   /** @nullable */
   contactPhone?: string | null;
+  /** @nullable */
+  email?: string | null;
 }

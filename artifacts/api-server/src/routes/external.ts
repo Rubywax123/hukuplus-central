@@ -76,7 +76,7 @@ router.get("/external/stores", requireAppKey, async (req, res): Promise<void> =>
   res.json(branches.map(b => ({
     id: b.id,
     name: b.name,
-    email: null,
+    email: b.email ?? null,
     retailer_id: b.retailerId,
   })));
 });

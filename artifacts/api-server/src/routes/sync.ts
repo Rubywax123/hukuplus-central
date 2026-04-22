@@ -145,10 +145,12 @@ export async function syncHukuPlusStores() {
       const existingBranches = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, centralRetailerId));
       const matched = existingBranches.find(b => b.name.toLowerCase() === bName.toLowerCase());
 
+      const storeEmail = store.email?.trim() || null;
+
       if (!matched) {
         const [created] = await db
           .insert(branchesTable)
-          .values({ retailerId: centralRetailerId, name: bName, isActive: store.enabled ?? true })
+          .values({ retailerId: centralRetailerId, name: bName, isActive: store.enabled ?? true, email: storeEmail })
           .returning();
 
         // Store mapping with HukuPlus store ID
@@ -162,10 +164,13 @@ export async function syncHukuPlusStores() {
 
         results.branchesCreated++;
       } else {
-        // Update isActive if it changed; upsert mapping with HukuPlus store ID
+        // Update isActive and email if changed; upsert mapping with HukuPlus store ID
         const hukuActive = store.enabled ?? true;
-        if (matched.isActive !== hukuActive) {
-          await db.update(branchesTable).set({ isActive: hukuActive }).where(eq(branchesTable.id, matched.id));
+        const updates: Record<string, any> = {};
+        if (matched.isActive !== hukuActive) updates.isActive = hukuActive;
+        if (storeEmail && matched.email !== storeEmail) updates.email = storeEmail;
+        if (Object.keys(updates).length > 0) {
+          await db.update(branchesTable).set(updates).where(eq(branchesTable.id, matched.id));
         }
 
         await db

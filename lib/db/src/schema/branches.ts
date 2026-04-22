@@ -9,6 +9,7 @@ export const branchesTable = pgTable("branches", {
   name: text("name").notNull(),
   location: text("location"),
   contactPhone: text("contact_phone"),
+  email: text("email"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

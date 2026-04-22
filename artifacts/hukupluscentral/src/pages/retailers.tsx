@@ -63,6 +63,7 @@ function BranchCard({ branch, retailerId }: { branch: any; retailerId: number })
   const [editName, setEditName] = useState(branch.name);
   const [editLocation, setEditLocation] = useState(branch.location ?? "");
   const [editPhone, setEditPhone] = useState(branch.contactPhone ?? "");
+  const [editEmail, setEditEmail] = useState(branch.email ?? "");
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: [`/api/retailers/${retailerId}/branches`] });
@@ -72,7 +73,7 @@ function BranchCard({ branch, retailerId }: { branch: any; retailerId: number })
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     updateMutation.mutate(
-      { retailerId, branchId: branch.id, data: { name: editName, location: editLocation || null, contactPhone: editPhone || null } },
+      { retailerId, branchId: branch.id, data: { name: editName, location: editLocation || null, contactPhone: editPhone || null, email: editEmail || null } },
       { onSuccess: () => { setEditing(false); invalidate(); } }
     );
   };
@@ -97,6 +98,7 @@ function BranchCard({ branch, retailerId }: { branch: any; retailerId: number })
         <Input placeholder="Branch Name" value={editName} onChange={e => setEditName(e.target.value)} required className="py-1.5 text-sm" />
         <Input placeholder="Location / City" value={editLocation} onChange={e => setEditLocation(e.target.value)} className="py-1.5 text-sm" />
         <Input placeholder="Contact Phone" value={editPhone} onChange={e => setEditPhone(e.target.value)} className="py-1.5 text-sm" />
+        <Input placeholder="Email" type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} className="py-1.5 text-sm" />
         <div className="flex gap-2 pt-1">
           <GradientButton type="submit" isLoading={updateMutation.isPending} className="py-1.5 px-3 text-xs flex-1">Save</GradientButton>
           <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-white px-2 transition-colors">Cancel</button>
@@ -141,9 +143,10 @@ function BranchCard({ branch, retailerId }: { branch: any; retailerId: number })
         <p className="text-sm font-medium text-white truncate">{branch.name}</p>
         {branch.location && <p className="text-xs text-muted-foreground mt-0.5">{branch.location}</p>}
         {branch.contactPhone && <p className="text-xs text-muted-foreground">{branch.contactPhone}</p>}
+        {branch.email && <p className="text-xs text-muted-foreground">{branch.email}</p>}
       </div>
       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-        <button onClick={() => { setEditName(branch.name); setEditLocation(branch.location ?? ""); setEditPhone(branch.contactPhone ?? ""); setEditing(true); }}
+        <button onClick={() => { setEditName(branch.name); setEditLocation(branch.location ?? ""); setEditPhone(branch.contactPhone ?? ""); setEditEmail(branch.email ?? ""); setEditing(true); }}
           className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-white/5 transition-colors" title="Edit branch">
           <Pencil className="w-3.5 h-3.5" />
         </button>
@@ -166,13 +169,14 @@ function BranchesPanel({ retailerId }: { retailerId: number }) {
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate({ retailerId, data: { name, location: location || null, contactPhone: phone || null } }, {
+    createMutation.mutate({ retailerId, data: { name, location: location || null, contactPhone: phone || null, email: email || null } }, {
       onSuccess: () => {
         setIsAdding(false);
-        setName(""); setLocation(""); setPhone("");
+        setName(""); setLocation(""); setPhone(""); setEmail("");
         queryClient.invalidateQueries({ queryKey: [`/api/retailers/${retailerId}/branches`] });
         queryClient.invalidateQueries({ queryKey: [`/api/retailers`] });
       }
@@ -195,12 +199,13 @@ function BranchesPanel({ retailerId }: { retailerId: number }) {
           <motion.form
             initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
             onSubmit={handleAdd}
-            className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 bg-white/5 p-3 rounded-lg border border-white/10 overflow-hidden"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 bg-white/5 p-3 rounded-lg border border-white/10 overflow-hidden"
           >
             <Input placeholder="Branch Name *" value={name} onChange={e => setName(e.target.value)} required className="py-2 text-sm" />
             <Input placeholder="Location / City" value={location} onChange={e => setLocation(e.target.value)} className="py-2 text-sm" />
             <Input placeholder="Contact Phone" value={phone} onChange={e => setPhone(e.target.value)} className="py-2 text-sm" />
-            <div className="sm:col-span-3 flex gap-2">
+            <Input placeholder="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} className="py-2 text-sm" />
+            <div className="sm:col-span-2 flex gap-2">
               <GradientButton type="submit" isLoading={createMutation.isPending} className="py-2 text-sm">Save Branch</GradientButton>
               <button type="button" onClick={() => setIsAdding(false)} className="text-sm text-muted-foreground hover:text-white px-3 transition-colors">Cancel</button>
             </div>

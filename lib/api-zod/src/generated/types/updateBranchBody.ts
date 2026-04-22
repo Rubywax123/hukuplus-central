@@ -12,5 +12,7 @@ export interface UpdateBranchBody {
   location?: string | null;
   /** @nullable */
   contactPhone?: string | null;
+  /** @nullable */
+  email?: string | null;
   isActive?: boolean;
 }

@@ -1107,6 +1107,11 @@ export async function runMigrations() {
       ALTER TABLE leads ADD COLUMN IF NOT EXISTS dropped_by TEXT;
     `);
 
+    // ── email column on branches (populated by LR sync) ──────────────────────
+    await client.query(`
+      ALTER TABLE branches ADD COLUMN IF NOT EXISTS email TEXT;
+    `);
+
     // ── Widen leads status check constraint to include 'dropped' ──────────────
     // Drop the old constraint (name may vary) and recreate with the full set.
     await client.query(`
