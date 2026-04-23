@@ -91,24 +91,28 @@ router.get("/whatsapp/conversations", async (req, res): Promise<void> => {
 
   // Prefer the customer's full_name from Central over the WhatsApp profile name.
   // Match on the last 9 digits of the phone (handles all Zim formats).
+  // DISTINCT ON must order by wa_id first; wrap in subquery to then sort by recency.
   const rows = await db.execute(sql`
-    SELECT DISTINCT ON (m.wa_id)
-      m.wa_id                                              AS "waId",
-      COALESCE(c.full_name, m.sender_name)                 AS "senderName",
-      m.message_text                                       AS "lastMessage",
-      m.direction,
-      m.created_at                                         AS "lastAt",
-      (
-        SELECT COUNT(*)::int FROM whatsapp_messages m2
-        WHERE m2.wa_id = m.wa_id
-          AND m2.is_read = false
-          AND m2.direction = 'inbound'
-      ) AS "unreadCount"
-    FROM whatsapp_messages m
-    LEFT JOIN customers c
-      ON RIGHT(REGEXP_REPLACE(c.phone, '\\D', '', 'g'), 9)
-       = RIGHT(REGEXP_REPLACE(m.wa_id,  '\\D', '', 'g'), 9)
-    ORDER BY m.wa_id, m.created_at DESC
+    SELECT * FROM (
+      SELECT DISTINCT ON (m.wa_id)
+        m.wa_id                                              AS "waId",
+        COALESCE(c.full_name, m.sender_name)                 AS "senderName",
+        m.message_text                                       AS "lastMessage",
+        m.direction,
+        m.created_at                                         AS "lastAt",
+        (
+          SELECT COUNT(*)::int FROM whatsapp_messages m2
+          WHERE m2.wa_id = m.wa_id
+            AND m2.is_read = false
+            AND m2.direction = 'inbound'
+        ) AS "unreadCount"
+      FROM whatsapp_messages m
+      LEFT JOIN customers c
+        ON RIGHT(REGEXP_REPLACE(c.phone, '\\D', '', 'g'), 9)
+         = RIGHT(REGEXP_REPLACE(m.wa_id,  '\\D', '', 'g'), 9)
+      ORDER BY m.wa_id, m.created_at DESC
+    ) latest
+    ORDER BY "lastAt" DESC
   `);
 
   res.json({ configured: true, conversations: rows.rows });
