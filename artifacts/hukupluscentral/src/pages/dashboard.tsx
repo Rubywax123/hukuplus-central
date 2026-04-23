@@ -254,11 +254,21 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
           </div>
         </div>
 
-        {/* Big number: pipeline count — all acknowledged leads */}
-        <h3 className="text-5xl font-display font-bold text-white mt-2">{pipeline}</h3>
-        <p className="text-[11px] text-muted-foreground/50 mt-1">
-          in pipeline{pipelineFiled > 0 ? ` · ${pipelineActive} active` : ""}
-        </p>
+        {/* Big numbers row: pipeline count + conversion rate side by side */}
+        <div className="flex items-end gap-6 mt-2">
+          <div>
+            <h3 className="text-5xl font-display font-bold text-white">{pipeline}</h3>
+            <p className="text-[11px] text-muted-foreground/50 mt-1">
+              in pipeline{pipelineFiled > 0 ? ` · ${pipelineActive} active` : ""}
+            </p>
+          </div>
+          {rate !== null && (
+            <div className="pb-0.5">
+              <h3 className="text-5xl font-display font-bold text-violet-400">{rate}%</h3>
+              <p className="text-[11px] text-muted-foreground/50 mt-1">conversion rate</p>
+            </div>
+          )}
+        </div>
 
         {/* Outcomes row */}
         <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -268,11 +278,6 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
           )}
           {dropped > 0 && (
             <span className="text-sm text-rose-400/60">{dropped} dropped</span>
-          )}
-          {rate !== null && (
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 ml-auto">
-              {rate}% rate
-            </span>
           )}
         </div>
 
