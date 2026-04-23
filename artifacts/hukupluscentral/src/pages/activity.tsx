@@ -3470,6 +3470,15 @@ function LeadsTab() {
     onSuccess: invalidateAll,
   });
 
+  const reengageAllMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/reengage-all`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
   const acknowledgeMutation = useMutation({
     mutationFn: async (id: number) => {
       const r = await fetch(`${BASE}/api/leads/${id}/acknowledge`, { method: "PUT", credentials: "include" });
@@ -3937,6 +3946,11 @@ function LeadsTab() {
               {leads.length} lead{leads.length !== 1 ? "s" : ""}
               {filtersActive && <span className="text-amber-400"> (filtered)</span>}
             </p>
+            {rawLeads.filter(l => l.dismissed_at).length > 0 && (
+              <p className="text-xs text-amber-400/70 mt-0.5">
+                {rawLeads.filter(l => l.dismissed_at).length} filed — use Re-engage to bring back to active
+              </p>
+            )}
             {totalBirds > 0 && (
               <p className="text-xs text-muted-foreground mt-0.5">
                 🐔 {totalBirds.toLocaleString()} birds · <span className="text-emerald-400/80 font-medium">${totalValue.toFixed(2)} est.</span>
@@ -3944,6 +3958,15 @@ function LeadsTab() {
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {rawLeads.filter(l => l.dismissed_at).length > 0 && (
+              <button
+                onClick={() => reengageAllMutation.mutate()}
+                disabled={reengageAllMutation.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+                {reengageAllMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                Re-engage All Filed ({rawLeads.filter(l => l.dismissed_at).length})
+              </button>
+            )}
             <button onClick={handleExport}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors border border-white/10">
               <Download className="w-3.5 h-3.5" /> Export CSV

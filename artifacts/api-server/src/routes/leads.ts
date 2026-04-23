@@ -239,6 +239,23 @@ router.put("/leads/:id/reengage", requireStaffAuth, async (req, res): Promise<vo
   }
 });
 
+// ─── PUT /api/leads/reengage-all — clear dismissed_at for all filed acknowledged leads ──
+
+router.put("/leads/reengage-all", requireStaffAuth, async (_req, res): Promise<void> => {
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `UPDATE leads
+         SET dismissed_at = NULL, dismissed_by = NULL, updated_at = NOW()
+       WHERE status = 'acknowledged' AND dismissed_at IS NOT NULL
+       RETURNING id`
+    );
+    res.json({ ok: true, count: r.rowCount });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── PUT /api/leads/:id/acknowledge ──────────────────────────────────────────
 
 router.put("/leads/:id/acknowledge", requireStaffAuth, async (req, res): Promise<void> => {
