@@ -60,8 +60,8 @@ interface RevolverSummary {
 
 interface LeadsMonthlyStats {
   activePipeline: number;
-  thisMonth: { created: number; conversions: number; dropped: number; done: number; active: number };
-  lastMonth: { created: number; conversions: number; dropped: number; done: number; active: number };
+  thisMonth: { created: number; conversions: number; dropped: number; done: number };
+  lastMonth: { created: number; conversions: number; dropped: number; done: number };
 }
 
 interface ConversionCustomer {
@@ -201,7 +201,7 @@ function MonthlyMetricCard({ title, subtitle, value, previous, today, icon: Icon
 function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefined; delay: number }) {
   const [, navigate] = useLocation();
 
-  // Big number = current active leads (new + acknowledged, excl. done/dropped/converted)
+  // Big number = new + acknowledged (incl. filed/done); only converted & dropped are truly out
   const active       = stats?.activePipeline ?? 0;
 
   // This month stats
@@ -209,20 +209,17 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
   const dropped      = stats?.thisMonth.dropped     ?? 0;
   const done         = stats?.thisMonth.done        ?? 0;
   const created      = stats?.thisMonth.created     ?? 0;
-  // still-active this month = created this month that are still live/pipeline (not done/dropped/converted)
-  const monthActive  = stats?.thisMonth.active      ?? 0;
-  // Rate = conversions / (live + pipeline + conversions): done & dropped fall off the pool entirely
-  const rateDenom    = monthActive + conversions;
-  const rate         = rateDenom > 0 ? Math.round((conversions / rateDenom) * 100) : null;
+  // Rate = conversions / (created - dropped): working pool = everyone except permanently dropped no-hopers
+  const rateDenom    = Math.max(created - dropped, 1);
+  const rate         = created > 0 ? Math.round((conversions / rateDenom) * 100) : null;
 
   // Last month for comparison
   const prevConversions = stats?.lastMonth.conversions ?? 0;
   const prevCreated     = stats?.lastMonth.created     ?? 0;
   const prevDone        = stats?.lastMonth.done        ?? 0;
   const prevDropped     = stats?.lastMonth.dropped     ?? 0;
-  const prevMonthActive = stats?.lastMonth.active      ?? 0;
-  const prevRateDenom   = prevMonthActive + prevConversions;
-  const prevRate        = prevRateDenom > 0 ? Math.round((prevConversions / prevRateDenom) * 100) : null;
+  const prevRateDenom   = Math.max(prevCreated - prevDropped, 1);
+  const prevRate        = prevCreated > 0 ? Math.round((prevConversions / prevRateDenom) * 100) : null;
 
   const d      = delta(created, prevCreated);
   const rateUp = rate !== null && prevRate !== null ? rate >= prevRate : rate !== null;
@@ -263,7 +260,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
           )}
           {prevRate !== null && (
             <span className="text-[10px] text-muted-foreground/50 ml-auto">
-              last: {prevConversions}/{prevRateDenom} ({prevRate}%)
+              last: {prevConversions}/{prevCreated - prevDropped} ({prevRate}%)
             </span>
           )}
         </div>
@@ -274,7 +271,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
               {d.label} leads created vs last month
             </p>
           )}
-          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline · rate = converted ÷ (live + pipeline + converted)</p>
+          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline · rate = converted ÷ (created − dropped)</p>
         </div>
       </GlassCard>
     </motion.div>
