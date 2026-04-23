@@ -87,7 +87,8 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
     let orderBy = "ORDER BY CASE l.status WHEN 'new' THEN 0 WHEN 'acknowledged' THEN 1 ELSE 2 END, l.created_at DESC";
 
     if (status === "unconverted") {
-      where = "WHERE l.status IN ('new', 'acknowledged') AND l.dismissed_at IS NULL";
+      // Feed: new (live) leads only — acknowledged leads are Pipeline, not Feed
+      where = "WHERE l.status = 'new' AND l.dismissed_at IS NULL";
       orderBy = "ORDER BY l.created_at DESC";
     } else if (status === "pipeline") {
       // Pipeline = all acknowledged leads regardless of dismissed_at; excludes converted
@@ -119,15 +120,13 @@ router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> =
   const client = await pool.connect();
   try {
     const feedR = await client.query(
-      `SELECT COUNT(*) AS feed_count
-       FROM leads l
-       WHERE l.status IN ('new', 'acknowledged')
-         AND l.dismissed_at IS NULL`
+      `SELECT COUNT(*) AS feed_count FROM leads WHERE status = 'new' AND dismissed_at IS NULL`
     );
-    const globalR = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new' AND dismissed_at IS NULL`);
-    const pipelineR = await client.query(`SELECT COUNT(*) AS pipeline_count FROM leads WHERE status = 'acknowledged' AND dismissed_at IS NULL`);
+    const pipelineR = await client.query(
+      `SELECT COUNT(*) AS pipeline_count FROM leads WHERE status = 'acknowledged' AND dismissed_at IS NULL`
+    );
     res.json({
-      newCount: parseInt(globalR.rows[0].new_count, 10),
+      newCount: parseInt(feedR.rows[0].feed_count, 10),
       feedCount: parseInt(feedR.rows[0].feed_count, 10),
       pipelineCount: parseInt(pipelineR.rows[0].pipeline_count, 10),
     });
@@ -177,7 +176,7 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
   }
 });
 
-// ─── GET /api/leads/feed — per-user feed (undismissed unconverted leads) ──────
+// ─── GET /api/leads/feed — new leads only (possibilities not yet acknowledged) ─
 
 router.get("/leads/feed", requireStaffAuth, async (_req, res): Promise<void> => {
   const client = await pool.connect();
@@ -186,7 +185,7 @@ router.get("/leads/feed", requireStaffAuth, async (_req, res): Promise<void> => 
       `SELECT l.*,
               (l.flock_size * ${FLOCK_VALUE_PER_HEAD}) AS estimated_value
        FROM leads l
-       WHERE l.status IN ('new', 'acknowledged')
+       WHERE l.status = 'new'
          AND l.dismissed_at IS NULL
        ORDER BY l.created_at DESC`,
       []
