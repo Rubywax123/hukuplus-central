@@ -125,7 +125,7 @@ router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> =
          AND l.dismissed_at IS NULL`
     );
     const globalR = await client.query(`SELECT COUNT(*) AS new_count FROM leads WHERE status = 'new' AND dismissed_at IS NULL`);
-    const pipelineR = await client.query(`SELECT COUNT(*) AS pipeline_count FROM leads WHERE status = 'acknowledged'`);
+    const pipelineR = await client.query(`SELECT COUNT(*) AS pipeline_count FROM leads WHERE status = 'acknowledged' AND dismissed_at IS NULL`);
     res.json({
       newCount: parseInt(globalR.rows[0].new_count, 10),
       feedCount: parseInt(feedR.rows[0].feed_count, 10),
@@ -143,8 +143,8 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
   try {
     const r = await client.query(`
       SELECT
-        -- current active pipeline (no time filter — reduces as leads resolve)
-        COUNT(*) FILTER (WHERE status IN ('new', 'acknowledged'))::int
+        -- current active pipeline: excludes done (dismissed) and dropped/converted
+        COUNT(*) FILTER (WHERE status IN ('new', 'acknowledged') AND dismissed_at IS NULL)::int
           AS active_pipeline,
 
         -- this month intake
@@ -156,10 +156,15 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
           AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
           AS this_month_conversions,
 
-        -- this month dropped (inconvertible)
+        -- this month dropped (permanently inconvertible)
         COUNT(*) FILTER (WHERE status = 'dropped'
           AND date_trunc('month', dropped_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
           AS this_month_dropped,
+
+        -- this month done (dismissed — parked for future re-engagement)
+        COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL AND status NOT IN ('converted', 'dropped')
+          AND date_trunc('month', dismissed_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
+          AS this_month_done,
 
         -- last month intake
         COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
@@ -173,7 +178,12 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
         -- last month dropped
         COUNT(*) FILTER (WHERE status = 'dropped'
           AND date_trunc('month', dropped_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_dropped
+          AS last_month_dropped,
+
+        -- last month done
+        COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL AND status NOT IN ('converted', 'dropped')
+          AND date_trunc('month', dismissed_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
+          AS last_month_done
       FROM leads
     `);
     const row = r.rows[0];
@@ -183,11 +193,13 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
         created:     parseInt(row.this_month_created, 10),
         conversions: parseInt(row.this_month_conversions, 10),
         dropped:     parseInt(row.this_month_dropped, 10),
+        done:        parseInt(row.this_month_done, 10),
       },
       lastMonth: {
         created:     parseInt(row.last_month_created, 10),
         conversions: parseInt(row.last_month_conversions, 10),
         dropped:     parseInt(row.last_month_dropped, 10),
+        done:        parseInt(row.last_month_done, 10),
       },
     });
   } finally {
