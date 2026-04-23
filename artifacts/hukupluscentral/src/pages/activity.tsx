@@ -3391,7 +3391,7 @@ function ConvertLeadModal({ lead, onClose, onDone }: { lead: Lead; onClose: () =
 
 function LeadsTab() {
   const qc = useQueryClient();
-  const [subTab, setSubTab] = useState<"feed" | "pipeline">("feed");
+  const [subTab, setSubTab] = useState<"feed" | "pipeline" | "filed">("feed");
   const [showNew, setShowNew] = useState(false);
   const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -3407,11 +3407,11 @@ function LeadsTab() {
   const [sortAsc, setSortAsc] = useState(false);
 
   // ── Lead counts (shared key — deduped by TanStack) ──────────────────────────
-  const { data: leadCounts } = useQuery<{ newCount: number; feedCount: number; pipelineCount: number }>({
+  const { data: leadCounts } = useQuery<{ newCount: number; feedCount: number; pipelineCount: number; filedCount: number }>({
     queryKey: ["leads-count"],
     queryFn: async () => {
       const r = await fetch(`${BASE}/api/leads/counts`, { credentials: "include" });
-      if (!r.ok) return { newCount: 0, feedCount: 0, pipelineCount: 0 };
+      if (!r.ok) return { newCount: 0, feedCount: 0, pipelineCount: 0, filedCount: 0 };
       return r.json();
     },
     refetchInterval: 30_000,
@@ -3439,6 +3439,18 @@ function LeadsTab() {
     refetchInterval: 30_000,
   });
 
+  // ── Filed query — ALL dismissed leads (new + acknowledged) ───────────────────
+  const { data: filedLeads = [], isLoading: filedLoading, refetch: refetchFiled } = useQuery<Lead[]>({
+    queryKey: ["leads-filed"],
+    queryFn: async () => {
+      const r = await fetch(`${BASE}/api/leads?status=filed`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    refetchInterval: 30_000,
+    enabled: subTab === "filed",
+  });
+
   const { data: retailers = [] } = useQuery<Array<{ id: number; name: string; branch_id: number; branch_name: string }>>({
     queryKey: ["retailers-for-leads"],
     queryFn: async () => {
@@ -3451,7 +3463,9 @@ function LeadsTab() {
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ["leads"] });
     qc.invalidateQueries({ queryKey: ["leads-feed"] });
+    qc.invalidateQueries({ queryKey: ["leads-filed"] });
     qc.invalidateQueries({ queryKey: ["leads-count"] });
+    qc.invalidateQueries({ queryKey: ["leads-pipeline-stats"] });
   };
 
   const dismissMutation = useMutation({
@@ -3639,6 +3653,20 @@ function LeadsTab() {
                   subTab === "pipeline" ? "bg-black/20 text-black" : "bg-amber-500/20 text-amber-400"
                 )}>
                   {(leadCounts?.pipelineCount ?? 0) > 99 ? "99+" : leadCounts?.pipelineCount}
+                </span>
+              )}
+            </button>
+            <button onClick={() => setSubTab("filed")}
+              className={cn("flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors",
+                subTab === "filed" ? "bg-amber-500 text-black" : "text-muted-foreground hover:text-foreground")}>
+              <FolderOpen className="w-3.5 h-3.5" />
+              Filed
+              {(leadCounts?.filedCount ?? 0) > 0 && (
+                <span className={cn(
+                  "inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold",
+                  subTab === "filed" ? "bg-black/20 text-black" : "bg-white/15 text-white/60"
+                )}>
+                  {(leadCounts?.filedCount ?? 0) > 99 ? "99+" : leadCounts?.filedCount}
                 </span>
               )}
             </button>
@@ -4303,6 +4331,159 @@ function LeadsTab() {
             </AnimatePresence>
           </div>
         )}
+        </div>
+        )}
+
+        {/* ═══ FILED SUB-TAB ═══ */}
+        {subTab === "filed" && (
+        <div className="space-y-4">
+          {/* Top bar */}
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-sm font-medium text-white">
+                {filedLoading ? "Loading…" : `${filedLeads.filter(l => !searchQuery.trim() || l.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) || (l.phone ?? "").includes(searchQuery)).length} filed lead${filedLeads.length !== 1 ? "s" : ""}`}
+              </p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">Parked leads — re-engage to restore or drop to write off</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => reengageAllMutation.mutate()}
+                disabled={reengageAllMutation.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+                {reengageAllMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                Re-engage All
+              </button>
+              <button onClick={() => refetchFiled()} title="Refresh" className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors">
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {filedLoading ? (
+            <div className="flex items-center justify-center py-16 text-white/40">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading filed leads…
+            </div>
+          ) : filedLeads.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
+              <FolderOpen className="w-8 h-8 text-white/20" />
+              <p className="text-sm text-white/40">No filed leads</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <AnimatePresence>
+                {filedLeads
+                  .filter(l => !searchQuery.trim() ||
+                    l.customer_name.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
+                    (l.phone ?? "").replace(/\D/g, "").includes(searchQuery.trim().replace(/\D/g, "")) ||
+                    (l.notes ?? "").toLowerCase().includes(searchQuery.trim().toLowerCase()))
+                  .map(lead => (
+                  <motion.div key={lead.id}
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }}
+                    className="rounded-xl bg-white/[0.03] border border-white/8 p-3">
+                    {editingLeadId === lead.id ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-semibold text-white">Edit lead</p>
+                          <button onClick={() => setEditingLeadId(null)} className="text-white/40 hover:text-white transition-colors"><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Customer name</label>
+                          <input className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                            value={editDraft.customer_name} onChange={e => setEditDraft(d => ({ ...d, customer_name: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Phone</label>
+                          <input className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                            value={editDraft.phone} onChange={e => setEditDraft(d => ({ ...d, phone: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Flock size</label>
+                          <input type="number" className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+                            value={editDraft.flock_size} onChange={e => setEditDraft(d => ({ ...d, flock_size: e.target.value }))} placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 block">Notes</label>
+                          <textarea rows={3} className="w-full bg-white/5 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 resize-none"
+                            value={editDraft.notes} onChange={e => setEditDraft(d => ({ ...d, notes: e.target.value }))} placeholder="Add notes…" />
+                        </div>
+                        {updateMutation.isError && <p className="text-xs text-red-400">{String(updateMutation.error)}</p>}
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => updateMutation.mutate({ id: lead.id, data: { customer_name: editDraft.customer_name, phone: editDraft.phone, flock_size: editDraft.flock_size || "0", notes: editDraft.notes || null } })}
+                            disabled={updateMutation.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-all disabled:opacity-40">
+                            {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                            Save
+                          </button>
+                          <button onClick={() => setEditingLeadId(null)} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-white transition-colors">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className={cn(
+                              "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                              lead.status === "new"
+                                ? "bg-amber-500/15 text-amber-300 border-amber-500/25"
+                                : "bg-sky-500/15 text-sky-300 border-sky-500/25"
+                            )}>
+                              {lead.status === "new" ? "📋 WAS LEAD" : "📊 WAS PIPELINE"}
+                            </span>
+                            {lead.retailer_name && (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/15">
+                                {lead.retailer_name}{lead.branch_name ? ` — ${lead.branch_name}` : ""}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-semibold text-white/80">{lead.customer_name}</p>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-white/40 flex-wrap">
+                            {lead.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{lead.phone}</span>}
+                            {lead.flock_size > 0 && (
+                              <span className="flex items-center gap-1">🐔 {lead.flock_size} · <span className="text-emerald-400/70 font-medium">${Number(lead.estimated_value).toFixed(2)}</span></span>
+                            )}
+                          </div>
+                          {lead.notes && (
+                            <p className="text-xs text-sky-300/50 mt-1 flex items-center gap-1">
+                              <FileText className="w-3 h-3" />{lead.notes}
+                            </p>
+                          )}
+                          <p className="text-[11px] text-amber-400/50 mt-1.5 flex items-center gap-1">
+                            <FolderOpen className="w-3 h-3" />
+                            Filed {fmt(lead.dismissed_at!)}{lead.dismissed_by ? ` by ${lead.dismissed_by}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-1.5 shrink-0 items-end">
+                          <button
+                            onClick={() => reengageMutation.mutate(lead.id)}
+                            disabled={reengageMutation.isPending}
+                            title={lead.status === "new" ? "Restore to Feed" : "Restore to Pipeline"}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+                            {reengageMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                            {lead.status === "new" ? "Restore to Feed" : "Restore to Pipeline"}
+                          </button>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <button onClick={() => startEdit(lead)}
+                              className="p-1.5 rounded-lg text-white/25 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+                              title="Edit details">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => dropMutation.mutate(lead.id)}
+                              disabled={dropMutation.isPending}
+                              title="Drop permanently — no-hoper"
+                              className="p-1.5 rounded-lg text-white/20 hover:text-rose-400 hover:bg-rose-500/10 transition-all disabled:opacity-40">
+                              {dropMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
         )}
 

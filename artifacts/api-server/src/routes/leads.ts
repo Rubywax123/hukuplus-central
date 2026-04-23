@@ -94,6 +94,10 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
       // Pipeline = all acknowledged leads regardless of dismissed_at; excludes converted
       where = "WHERE l.status = 'acknowledged'";
       orderBy = "ORDER BY l.created_at DESC";
+    } else if (status === "filed") {
+      // Filed = any dismissed lead not yet converted or dropped (new + acknowledged)
+      where = "WHERE l.dismissed_at IS NOT NULL AND l.status NOT IN ('converted', 'dropped')";
+      orderBy = "ORDER BY l.dismissed_at DESC";
     } else if (status && status !== "all") {
       where = `WHERE l.status = $${params.push(status)}`;
     }
@@ -119,16 +123,16 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
 router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> => {
   const client = await pool.connect();
   try {
-    const feedR = await client.query(
-      `SELECT COUNT(*) AS feed_count FROM leads WHERE status = 'new' AND dismissed_at IS NULL`
-    );
-    const pipelineR = await client.query(
-      `SELECT COUNT(*) AS pipeline_count FROM leads WHERE status = 'acknowledged' AND dismissed_at IS NULL`
-    );
+    const [feedR, pipelineR, filedR] = await Promise.all([
+      client.query(`SELECT COUNT(*) AS c FROM leads WHERE status = 'new' AND dismissed_at IS NULL`),
+      client.query(`SELECT COUNT(*) AS c FROM leads WHERE status = 'acknowledged' AND dismissed_at IS NULL`),
+      client.query(`SELECT COUNT(*) AS c FROM leads WHERE dismissed_at IS NOT NULL AND status NOT IN ('converted','dropped')`),
+    ]);
     res.json({
-      newCount: parseInt(feedR.rows[0].feed_count, 10),
-      feedCount: parseInt(feedR.rows[0].feed_count, 10),
-      pipelineCount: parseInt(pipelineR.rows[0].pipeline_count, 10),
+      newCount:      parseInt(feedR.rows[0].c, 10),
+      feedCount:     parseInt(feedR.rows[0].c, 10),
+      pipelineCount: parseInt(pipelineR.rows[0].c, 10),
+      filedCount:    parseInt(filedR.rows[0].c, 10),
     });
   } finally {
     client.release();
