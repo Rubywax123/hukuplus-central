@@ -144,12 +144,15 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
     const r = await client.query(`
       SELECT
         -- Live: new prospects not yet filed/dropped/converted
-        COUNT(*) FILTER (WHERE status = 'new' AND dismissed_at IS NULL)::int         AS live,
+        COUNT(*) FILTER (WHERE status = 'new' AND dismissed_at IS NULL)::int          AS live,
 
-        -- Pipeline: acknowledged (being worked), not yet filed/dropped/converted
-        COUNT(*) FILTER (WHERE status = 'acknowledged' AND dismissed_at IS NULL)::int AS pipeline,
+        -- Pipeline: ALL acknowledged leads (matches what the Pipeline tab shows)
+        COUNT(*) FILTER (WHERE status = 'acknowledged')::int                          AS pipeline,
 
-        -- Filed: parked for future re-engagement (dismissed_at set, not converted/dropped)
+        -- Pipeline active: acknowledged leads currently being worked (not filed)
+        COUNT(*) FILTER (WHERE status = 'acknowledged' AND dismissed_at IS NULL)::int AS pipeline_active,
+
+        -- Filed: any dismissed lead not yet converted or dropped
         COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL
           AND status NOT IN ('converted', 'dropped'))::int                            AS filed,
 
@@ -163,14 +166,16 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
         COUNT(*)::int                                                                  AS total
       FROM leads
     `);
-    const row = r.rows[0];
-    const live      = parseInt(row.live, 10);
-    const pipeline  = parseInt(row.pipeline, 10);
-    const filed     = parseInt(row.filed, 10);
-    const converted = parseInt(row.converted, 10);
-    const dropped   = parseInt(row.dropped, 10);
-    const total     = parseInt(row.total, 10);
-    res.json({ live, pipeline, filed, converted, dropped, total, active: live + pipeline });
+    const row            = r.rows[0];
+    const live           = parseInt(row.live, 10);
+    const pipeline       = parseInt(row.pipeline, 10);       // all acknowledged (matches tab)
+    const pipelineActive = parseInt(row.pipeline_active, 10); // acknowledged & undismissed
+    const filed          = parseInt(row.filed, 10);
+    const converted      = parseInt(row.converted, 10);
+    const dropped        = parseInt(row.dropped, 10);
+    const total          = parseInt(row.total, 10);
+    const active         = live + pipelineActive;             // currently being worked
+    res.json({ live, pipeline, pipelineActive, filed, converted, dropped, total, active });
   } finally {
     client.release();
   }

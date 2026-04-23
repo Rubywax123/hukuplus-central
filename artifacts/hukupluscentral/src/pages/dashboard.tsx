@@ -59,13 +59,14 @@ interface RevolverSummary {
 }
 
 interface LeadsPipelineStats {
-  live: number;       // new prospects, not yet filed/dropped/converted
-  pipeline: number;   // acknowledged, being actively worked
-  filed: number;      // parked for future re-engagement
-  converted: number;  // all-time wins
-  dropped: number;    // all-time no-hopers
-  total: number;      // all-time created
-  active: number;     // live + pipeline
+  live: number;           // new prospects, undismissed
+  pipeline: number;       // ALL acknowledged leads (matches Pipeline tab count)
+  pipelineActive: number; // acknowledged & undismissed (currently being worked)
+  filed: number;          // parked for future re-engagement (dismissed, any status)
+  converted: number;      // all-time wins
+  dropped: number;        // all-time no-hopers
+  total: number;          // all-time created
+  active: number;         // live + pipelineActive (currently being worked)
 }
 
 interface ConversionCustomer {
@@ -207,13 +208,15 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
   const qc = useQueryClient();
   const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
 
-  const live      = stats?.live      ?? 0;
-  const pipeline  = stats?.pipeline  ?? 0;
-  const active    = stats?.active    ?? 0;   // live + pipeline
-  const filed     = stats?.filed     ?? 0;   // parked for re-engagement
-  const converted = stats?.converted ?? 0;   // all-time wins
-  const dropped   = stats?.dropped   ?? 0;   // all-time no-hopers
-  const total     = stats?.total     ?? 0;   // all-time created
+  const live           = stats?.live           ?? 0;
+  const pipeline       = stats?.pipeline       ?? 0;  // ALL acknowledged (matches tab)
+  const pipelineActive = stats?.pipelineActive ?? 0;  // acknowledged & undismissed
+  const active         = stats?.active         ?? 0;  // live + pipelineActive
+  const filed          = stats?.filed          ?? 0;  // parked for re-engagement
+  const converted      = stats?.converted      ?? 0;  // all-time wins
+  const dropped        = stats?.dropped        ?? 0;  // all-time no-hopers
+  const total          = stats?.total          ?? 0;  // all-time created
+  const pipelineFiled  = pipeline - pipelineActive;   // how many pipeline leads are parked
 
   // Rate = converted ÷ (active + converted)
   const rateDenom = active + converted;
@@ -242,7 +245,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leads Pipeline</p>
             <p className="text-[11px] text-muted-foreground/60 mt-0.5">
-              {live} live · {pipeline} pipeline · {total} total
+              {live} live · {pipeline} pipeline{pipelineFiled > 0 ? ` (${pipelineFiled} filed)` : ""} · {total} total
             </p>
           </div>
           <div className="p-2 rounded-lg bg-white/5 text-violet-400">
@@ -270,8 +273,8 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
           )}
         </div>
 
-        {/* Recovery banner — only when leads are incorrectly filed */}
-        {filed > 0 && active === 0 && (
+        {/* Recovery banner — when any leads are filed and could be restored */}
+        {filed > 0 && (
           <div
             className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25"
             onClick={e => e.stopPropagation()}
