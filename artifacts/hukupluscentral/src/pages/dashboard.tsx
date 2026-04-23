@@ -58,10 +58,14 @@ interface RevolverSummary {
   last_synced_at: string | null;
 }
 
-interface LeadsMonthlyStats {
-  activePipeline: number;
-  thisMonth: { created: number; conversions: number; dropped: number; done: number };
-  lastMonth: { created: number; conversions: number; dropped: number; done: number };
+interface LeadsPipelineStats {
+  live: number;       // new prospects, not yet filed/dropped/converted
+  pipeline: number;   // acknowledged, being actively worked
+  filed: number;      // parked for future re-engagement
+  converted: number;  // all-time wins
+  dropped: number;    // all-time no-hopers
+  total: number;      // all-time created
+  active: number;     // live + pipeline
 }
 
 interface ConversionCustomer {
@@ -113,11 +117,11 @@ function useMonthlyHistory() {
 
 function useLeadsMonthlyStats() {
   const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
-  return useQuery<LeadsMonthlyStats>({
-    queryKey: ["leads-monthly-stats"],
+  return useQuery<LeadsPipelineStats>({
+    queryKey: ["leads-pipeline-stats"],
     queryFn: async () => {
       const r = await fetch(`${BASE}/api/leads/monthly-stats`, { credentials: "include" });
-      if (!r.ok) return { thisMonth: { leads: 0, conversions: 0 }, lastMonth: { leads: 0, conversions: 0 } };
+      if (!r.ok) return { live: 0, pipeline: 0, filed: 0, converted: 0, dropped: 0, total: 0, active: 0 };
       return r.json();
     },
     refetchInterval: 5 * 60 * 1000,
@@ -198,31 +202,20 @@ function MonthlyMetricCard({ title, subtitle, value, previous, today, icon: Icon
 
 // ── Leads Pipeline Card ───────────────────────────────────────────────────────
 
-function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefined; delay: number }) {
+function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undefined; delay: number }) {
   const [, navigate] = useLocation();
 
-  // Big number = new + acknowledged (incl. filed/done); only converted & dropped are truly out
-  const active       = stats?.activePipeline ?? 0;
+  const live      = stats?.live      ?? 0;
+  const pipeline  = stats?.pipeline  ?? 0;
+  const active    = stats?.active    ?? 0;   // live + pipeline
+  const filed     = stats?.filed     ?? 0;   // parked for re-engagement
+  const converted = stats?.converted ?? 0;   // all-time wins
+  const dropped   = stats?.dropped   ?? 0;   // all-time no-hopers
+  const total     = stats?.total     ?? 0;   // all-time created
 
-  // This month stats
-  const conversions  = stats?.thisMonth.conversions ?? 0;
-  const dropped      = stats?.thisMonth.dropped     ?? 0;
-  const done         = stats?.thisMonth.done        ?? 0;
-  const created      = stats?.thisMonth.created     ?? 0;
-  // Rate = conversions / (created - dropped): working pool = everyone except permanently dropped no-hopers
-  const rateDenom    = Math.max(created - dropped, 1);
-  const rate         = created > 0 ? Math.round((conversions / rateDenom) * 100) : null;
-
-  // Last month for comparison
-  const prevConversions = stats?.lastMonth.conversions ?? 0;
-  const prevCreated     = stats?.lastMonth.created     ?? 0;
-  const prevDone        = stats?.lastMonth.done        ?? 0;
-  const prevDropped     = stats?.lastMonth.dropped     ?? 0;
-  const prevRateDenom   = Math.max(prevCreated - prevDropped, 1);
-  const prevRate        = prevCreated > 0 ? Math.round((prevConversions / prevRateDenom) * 100) : null;
-
-  const d      = delta(created, prevCreated);
-  const rateUp = rate !== null && prevRate !== null ? rate >= prevRate : rate !== null;
+  // Rate = all-time conversions ÷ (total − dropped): every lead except no-hopers counts
+  const rateDenom = Math.max(total - dropped, 1);
+  const rate      = total > 0 ? Math.round((converted / rateDenom) * 100) : null;
 
   return (
     <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
@@ -231,47 +224,41 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
         onClick={() => navigate("/activity")}
       >
         <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity bg-violet-400" />
+
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leads Pipeline</p>
-            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Live &amp; pipeline · {created} created this month</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+              {live} live · {pipeline} pipeline · {total} total
+            </p>
           </div>
           <div className="p-2 rounded-lg bg-white/5 text-violet-400">
             <TrendingUp className="w-5 h-5" />
           </div>
         </div>
 
-        {/* Big number = current undone active leads — drops as leads are marked done/dropped/converted */}
+        {/* Big number: currently being worked (live + pipeline) */}
         <h3 className="text-5xl font-display font-bold text-white mt-2">{active}</h3>
+        <p className="text-[11px] text-muted-foreground/50 mt-1">active working cases</p>
 
-        {/* Resolution row */}
+        {/* Outcomes row */}
         <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <span className="text-sm font-semibold text-emerald-400">{conversions} converted</span>
-          {dropped > 0 && (
-            <span className="text-sm text-rose-400/70">{dropped} dropped</span>
+          <span className="text-sm font-semibold text-emerald-400">{converted} converted</span>
+          {filed > 0 && (
+            <span className="text-sm text-amber-400/80">{filed} filed</span>
           )}
-          {done > 0 && (
-            <span className="text-sm text-amber-400/70">{done} done</span>
+          {dropped > 0 && (
+            <span className="text-sm text-rose-400/60">{dropped} dropped</span>
           )}
           {rate !== null && (
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${rateUp ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>
-              {rate}%
-            </span>
-          )}
-          {prevRate !== null && (
-            <span className="text-[10px] text-muted-foreground/50 ml-auto">
-              last: {prevConversions}/{prevCreated - prevDropped} ({prevRate}%)
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 ml-auto">
+              {rate}% rate
             </span>
           )}
         </div>
 
-        <div className="mt-auto pt-2">
-          {d && (
-            <p className={`text-xs font-medium ${d.positive ? "text-emerald-400" : "text-rose-400"}`}>
-              {d.label} leads created vs last month
-            </p>
-          )}
-          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline · rate = converted ÷ (created − dropped)</p>
+        <div className="mt-auto pt-3">
+          <p className="text-[10px] text-muted-foreground/40">Click to view pipeline · rolling all-time · rate = converted ÷ (total − dropped)</p>
         </div>
       </GlassCard>
     </motion.div>

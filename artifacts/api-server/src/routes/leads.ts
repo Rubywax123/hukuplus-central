@@ -136,60 +136,42 @@ router.get("/leads/counts", requireStaffAuth, async (_req, res): Promise<void> =
   }
 });
 
-// ─── GET /api/leads/monthly-stats — pipeline snapshot + monthly resolution ────
+// ─── GET /api/leads/monthly-stats — rolling pipeline snapshot ─────────────────
+// Despite the route name (kept for compatibility), this now returns rolling all-time totals.
 
 router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     const r = await client.query(`
       SELECT
-        -- global pipeline: new + acknowledged (incl. filed/done); only converted/dropped are out
-        COUNT(*) FILTER (WHERE status IN ('new', 'acknowledged'))::int
-          AS active_pipeline,
+        -- Live: new prospects not yet filed/dropped/converted
+        COUNT(*) FILTER (WHERE status = 'new' AND dismissed_at IS NULL)::int         AS live,
 
-        -- this month
-        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
-          AS this_month_created,
-        COUNT(*) FILTER (WHERE status = 'converted'
-          AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
-          AS this_month_conversions,
-        COUNT(*) FILTER (WHERE status = 'dropped'
-          AND date_trunc('month', dropped_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
-          AS this_month_dropped,
-        COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL AND status NOT IN ('converted', 'dropped')
-          AND date_trunc('month', dismissed_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
-          AS this_month_done,
+        -- Pipeline: acknowledged (being worked), not yet filed/dropped/converted
+        COUNT(*) FILTER (WHERE status = 'acknowledged' AND dismissed_at IS NULL)::int AS pipeline,
 
-        -- last month
-        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_created,
-        COUNT(*) FILTER (WHERE status = 'converted'
-          AND date_trunc('month', converted_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_conversions,
-        COUNT(*) FILTER (WHERE status = 'dropped'
-          AND date_trunc('month', dropped_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_dropped,
-        COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL AND status NOT IN ('converted', 'dropped')
-          AND date_trunc('month', dismissed_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_done
+        -- Filed: parked for future re-engagement (dismissed_at set, not converted/dropped)
+        COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL
+          AND status NOT IN ('converted', 'dropped'))::int                            AS filed,
+
+        -- Converted: all-time wins
+        COUNT(*) FILTER (WHERE status = 'converted')::int                             AS converted,
+
+        -- Dropped: all-time no-hopers / duplicates
+        COUNT(*) FILTER (WHERE status = 'dropped')::int                               AS dropped,
+
+        -- Total ever created
+        COUNT(*)::int                                                                  AS total
       FROM leads
     `);
     const row = r.rows[0];
-    res.json({
-      activePipeline: parseInt(row.active_pipeline, 10),
-      thisMonth: {
-        created:     parseInt(row.this_month_created, 10),
-        conversions: parseInt(row.this_month_conversions, 10),
-        dropped:     parseInt(row.this_month_dropped, 10),
-        done:        parseInt(row.this_month_done, 10),
-      },
-      lastMonth: {
-        created:     parseInt(row.last_month_created, 10),
-        conversions: parseInt(row.last_month_conversions, 10),
-        dropped:     parseInt(row.last_month_dropped, 10),
-        done:        parseInt(row.last_month_done, 10),
-      },
-    });
+    const live      = parseInt(row.live, 10);
+    const pipeline  = parseInt(row.pipeline, 10);
+    const filed     = parseInt(row.filed, 10);
+    const converted = parseInt(row.converted, 10);
+    const dropped   = parseInt(row.dropped, 10);
+    const total     = parseInt(row.total, 10);
+    res.json({ live, pipeline, filed, converted, dropped, total, active: live + pipeline });
   } finally {
     client.release();
   }
