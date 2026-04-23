@@ -218,6 +218,27 @@ router.put("/leads/:id/dismiss", requireStaffAuth, async (req, res): Promise<voi
   }
 });
 
+// ─── PUT /api/leads/:id/reengage — clear dismissed_at, bring back to active pipeline ──
+
+router.put("/leads/:id/reengage", requireStaffAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `UPDATE leads
+         SET dismissed_at = NULL, dismissed_by = NULL, updated_at = NOW()
+       WHERE id = $1 AND dismissed_at IS NOT NULL
+       RETURNING id`,
+      [id]
+    );
+    if (!r.rows[0]) { res.status(404).json({ error: "Lead not found or not filed" }); return; }
+    res.json({ ok: true });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── PUT /api/leads/:id/acknowledge ──────────────────────────────────────────
 
 router.put("/leads/:id/acknowledge", requireStaffAuth, async (req, res): Promise<void> => {

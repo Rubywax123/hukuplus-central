@@ -8,7 +8,7 @@ import {
   RefreshCw, MessageSquare, Zap, Egg, Filter, CheckCircle, XCircle, AlertCircle,
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
-  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil, RotateCcw,
+  LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil, RotateCcw, FolderOpen,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -3462,6 +3462,14 @@ function LeadsTab() {
     onSuccess: invalidateAll,
   });
 
+  const reengageMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${BASE}/api/leads/${id}/reengage`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: invalidateAll,
+  });
+
   const acknowledgeMutation = useMutation({
     mutationFn: async (id: number) => {
       const r = await fetch(`${BASE}/api/leads/${id}/acknowledge`, { method: "PUT", credentials: "include" });
@@ -4125,6 +4133,12 @@ function LeadsTab() {
                           Ack by {lead.acknowledged_by} · {lead.acknowledged_at ? fmt(lead.acknowledged_at) : ""}
                         </p>
                       )}
+                      {lead.dismissed_at && (
+                        <p className="text-[11px] text-amber-400/50 mt-0.5 flex items-center gap-1">
+                          <FolderOpen className="w-3 h-3" />
+                          Filed {fmt(lead.dismissed_at)}{lead.dismissed_by ? ` by ${lead.dismissed_by}` : ""}
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
                       {lead.status === "new" && editingLeadId !== lead.id && (
@@ -4139,7 +4153,19 @@ function LeadsTab() {
                           <CheckCircle2 className="w-3.5 h-3.5" /> File
                         </button>
                       )}
-                      {lead.status === "acknowledged" && editingLeadId !== lead.id && (
+                      {lead.status === "acknowledged" && lead.dismissed_at && editingLeadId !== lead.id && (
+                        <button
+                          onClick={() => reengageMutation.mutate(lead.id)}
+                          disabled={reengageMutation.isPending}
+                          title="Re-engage — bring back to active pipeline"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+                          {reengageMutation.isPending
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <RotateCcw className="w-3.5 h-3.5" />}
+                          Re-engage
+                        </button>
+                      )}
+                      {lead.status === "acknowledged" && !lead.dismissed_at && editingLeadId !== lead.id && (
                         <button
                           onClick={() => unacknowledgeMutation.mutate(lead.id)}
                           disabled={unacknowledgeMutation.isPending}
