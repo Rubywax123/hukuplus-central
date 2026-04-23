@@ -213,9 +213,11 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
   const dropped   = stats?.dropped   ?? 0;   // all-time no-hopers
   const total     = stats?.total     ?? 0;   // all-time created
 
-  // Rate = all-time conversions ÷ (total − dropped): every lead except no-hopers counts
-  const rateDenom = Math.max(total - dropped, 1);
-  const rate      = total > 0 ? Math.round((converted / rateDenom) * 100) : null;
+  // Rate = converted ÷ (active + converted)
+  // Active = currently live + pipeline (done and dropped are off the table entirely)
+  // Done leads are parked — they reduce the working pool but don't count against conversions
+  const rateDenom = active + converted;
+  const rate      = rateDenom > 0 ? Math.round((converted / rateDenom) * 100) : null;
 
   return (
     <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
@@ -258,7 +260,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
         </div>
 
         <div className="mt-auto pt-3">
-          <p className="text-[10px] text-muted-foreground/40">Click to view pipeline · rolling all-time · rate = converted ÷ (total − dropped)</p>
+          <p className="text-[10px] text-muted-foreground/40">Click to view pipeline · rate = converted ÷ (active + converted) · done &amp; dropped excluded</p>
         </div>
       </GlassCard>
     </motion.div>
