@@ -218,8 +218,9 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
   const total          = stats?.total          ?? 0;  // all-time created
   const pipelineFiled  = pipeline - pipelineActive;   // how many pipeline leads are parked
 
-  // Rate = converted ÷ (active + converted)
-  const rateDenom = active + converted;
+  // Rate = pipeline-based only: converted ÷ (pipeline + converted)
+  // pipeline = all acknowledged leads; raw leads excluded from rate entirely
+  const rateDenom = pipeline + converted;
   const rate      = rateDenom > 0 ? Math.round((converted / rateDenom) * 100) : null;
 
   const reengageAll = useMutation({
@@ -293,7 +294,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
         )}
 
         <div className="mt-auto pt-3">
-          <p className="text-[10px] text-muted-foreground/40">Click to view pipeline · rate = converted ÷ (active + converted) · done &amp; dropped excluded</p>
+          <p className="text-[10px] text-muted-foreground/40">Click to view pipeline · rate = converted ÷ (pipeline + converted) · raw leads excluded from rate</p>
         </div>
       </GlassCard>
     </motion.div>
