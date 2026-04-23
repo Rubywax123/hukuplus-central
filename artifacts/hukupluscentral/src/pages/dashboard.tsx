@@ -209,8 +209,8 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
   const dropped      = stats?.thisMonth.dropped     ?? 0;
   const done         = stats?.thisMonth.done        ?? 0;
   const created      = stats?.thisMonth.created     ?? 0;
-  // Rate = conversions / (created - done - dropped): of leads that "matter", how many converted?
-  const rateDenom    = Math.max(1, created - done - dropped);
+  // Rate = conversions / (created - dropped): done leads are parked pipeline, still count as working cases
+  const rateDenom    = Math.max(1, created - dropped);
   const rate         = Math.round((conversions / rateDenom) * 100);
 
   // Last month for comparison
@@ -218,7 +218,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
   const prevDropped     = stats?.lastMonth.dropped     ?? 0;
   const prevDone        = stats?.lastMonth.done        ?? 0;
   const prevCreated     = stats?.lastMonth.created     ?? 0;
-  const prevDenom       = Math.max(1, prevCreated - prevDone - prevDropped);
+  const prevDenom       = Math.max(1, prevCreated - prevDropped);
   const prevRate        = Math.round((prevConversions / prevDenom) * 100);
 
   const d      = delta(created, prevCreated);
@@ -258,7 +258,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
           </span>
           {prevCreated > 0 && (
             <span className="text-[10px] text-muted-foreground/50 ml-auto">
-              last: {prevConversions}/{prevCreated - prevDone - prevDropped} ({prevRate}%)
+              last: {prevConversions}/{prevCreated - prevDropped} ({prevRate}%)
             </span>
           )}
         </div>
@@ -269,7 +269,7 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsMonthlyStats | undefi
               {d.label} leads created vs last month
             </p>
           )}
-          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline · conversion = leads not done or dropped</p>
+          <p className="text-[10px] text-muted-foreground/40 mt-1">Click to view pipeline · rate = converted ÷ (created − dropped)</p>
         </div>
       </GlassCard>
     </motion.div>
