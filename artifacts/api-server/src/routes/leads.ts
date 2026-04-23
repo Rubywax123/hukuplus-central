@@ -166,6 +166,11 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
           AND date_trunc('month', dismissed_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int
           AS this_month_done,
 
+        -- this month still active (created this month, currently live/pipeline — not done/dropped/converted)
+        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', NOW() AT TIME ZONE 'UTC')
+          AND status IN ('new', 'acknowledged') AND dismissed_at IS NULL)::int
+          AS this_month_active,
+
         -- last month intake
         COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
           AS last_month_created,
@@ -183,7 +188,12 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
         -- last month done
         COUNT(*) FILTER (WHERE dismissed_at IS NOT NULL AND status NOT IN ('converted', 'dropped')
           AND date_trunc('month', dismissed_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC'))::int
-          AS last_month_done
+          AS last_month_done,
+
+        -- last month still active (created last month, currently live/pipeline — not done/dropped/converted)
+        COUNT(*) FILTER (WHERE date_trunc('month', created_at AT TIME ZONE 'UTC') = date_trunc('month', (NOW() - INTERVAL '1 month') AT TIME ZONE 'UTC')
+          AND status IN ('new', 'acknowledged') AND dismissed_at IS NULL)::int
+          AS last_month_active
       FROM leads
     `);
     const row = r.rows[0];
@@ -194,12 +204,14 @@ router.get("/leads/monthly-stats", requireStaffAuth, async (_req, res): Promise<
         conversions: parseInt(row.this_month_conversions, 10),
         dropped:     parseInt(row.this_month_dropped, 10),
         done:        parseInt(row.this_month_done, 10),
+        active:      parseInt(row.this_month_active, 10),
       },
       lastMonth: {
         created:     parseInt(row.last_month_created, 10),
         conversions: parseInt(row.last_month_conversions, 10),
         dropped:     parseInt(row.last_month_dropped, 10),
         done:        parseInt(row.last_month_done, 10),
+        active:      parseInt(row.last_month_active, 10),
       },
     });
   } finally {
