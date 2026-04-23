@@ -3905,18 +3905,10 @@ function LeadsTab() {
                                       {lead.messaged_at ? "Messaged" : "Mark messaged"}
                                     </button>
                                     <button
-                                      onClick={() => dismissMutation.mutate(lead.id)}
-                                      disabled={dismissMutation.isPending}
-                                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-white/10 border border-white/15 text-white hover:bg-white/15 transition-all disabled:opacity-40 ml-auto"
-                                    >
-                                      {dismissMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
-                                      Mark Done
-                                    </button>
-                                    <button
                                       onClick={() => dropMutation.mutate(lead.id)}
                                       disabled={dropMutation.isPending}
-                                      title="Mark as permanently inconvertible — removes from active pipeline count"
-                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 border border-rose-500/25 text-rose-400 hover:bg-rose-500/20 transition-all disabled:opacity-40"
+                                      title="Drop — permanently not convertible"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 border border-rose-500/25 text-rose-400 hover:bg-rose-500/20 transition-all disabled:opacity-40 ml-auto"
                                     >
                                       {dropMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                                       Drop
@@ -3958,15 +3950,13 @@ function LeadsTab() {
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {rawLeads.filter(l => l.dismissed_at).length > 0 && (
-              <button
-                onClick={() => reengageAllMutation.mutate()}
-                disabled={reengageAllMutation.isPending}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
-                {reengageAllMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-                Re-engage All Filed ({rawLeads.filter(l => l.dismissed_at).length})
-              </button>
-            )}
+            <button
+              onClick={() => reengageAllMutation.mutate()}
+              disabled={reengageAllMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
+              {reengageAllMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+              Re-engage All Filed
+            </button>
             <button onClick={handleExport}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors border border-white/10">
               <Download className="w-3.5 h-3.5" /> Export CSV
