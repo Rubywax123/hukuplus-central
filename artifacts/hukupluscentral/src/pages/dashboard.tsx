@@ -254,9 +254,11 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
           </div>
         </div>
 
-        {/* Big number: currently being worked (live + pipeline) */}
-        <h3 className="text-5xl font-display font-bold text-white mt-2">{active}</h3>
-        <p className="text-[11px] text-muted-foreground/50 mt-1">active working cases</p>
+        {/* Big number: pipeline count — all acknowledged leads */}
+        <h3 className="text-5xl font-display font-bold text-white mt-2">{pipeline}</h3>
+        <p className="text-[11px] text-muted-foreground/50 mt-1">
+          in pipeline{pipelineFiled > 0 ? ` · ${pipelineActive} active` : ""}
+        </p>
 
         {/* Outcomes row */}
         <div className="flex items-center gap-2 mt-3 flex-wrap">
