@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -204,6 +204,8 @@ function MonthlyMetricCard({ title, subtitle, value, previous, today, icon: Icon
 
 function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undefined; delay: number }) {
   const [, navigate] = useLocation();
+  const qc = useQueryClient();
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
 
   const live      = stats?.live      ?? 0;
   const pipeline  = stats?.pipeline  ?? 0;
@@ -214,10 +216,19 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
   const total     = stats?.total     ?? 0;   // all-time created
 
   // Rate = converted ÷ (active + converted)
-  // Active = currently live + pipeline (done and dropped are off the table entirely)
-  // Done leads are parked — they reduce the working pool but don't count against conversions
   const rateDenom = active + converted;
   const rate      = rateDenom > 0 ? Math.round((converted / rateDenom) * 100) : null;
+
+  const reengageAll = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`${BASE}/api/leads/reengage-all`, { method: "PUT", credentials: "include" });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads-pipeline-stats"] });
+    },
+  });
 
   return (
     <motion.div className="h-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
@@ -258,6 +269,25 @@ function LeadsPipelineCard({ stats, delay }: { stats: LeadsPipelineStats | undef
             </span>
           )}
         </div>
+
+        {/* Recovery banner — only when leads are incorrectly filed */}
+        {filed > 0 && active === 0 && (
+          <div
+            className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25"
+            onClick={e => e.stopPropagation()}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <p className="text-xs text-amber-300 flex-1">{filed} leads are filed — restore them?</p>
+            <button
+              onClick={e => { e.stopPropagation(); reengageAll.mutate(); }}
+              disabled={reengageAll.isPending}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/20 border border-amber-500/40 text-amber-200 hover:bg-amber-500/35 transition-all disabled:opacity-50 shrink-0"
+            >
+              {reengageAll.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+              {reengageAll.isPending ? "Restoring…" : "Restore all"}
+            </button>
+          </div>
+        )}
 
         <div className="mt-auto pt-3">
           <p className="text-[10px] text-muted-foreground/40">Click to view pipeline · rate = converted ÷ (active + converted) · done &amp; dropped excluded</p>
