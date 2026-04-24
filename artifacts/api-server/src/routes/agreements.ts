@@ -244,6 +244,152 @@ router.get("/agreements/:id/download-pdf", async (req, res): Promise<void> => {
   res.send(Buffer.from(pdfBytes));
 });
 
+// ─── Delivery helpers ─────────────────────────────────────────────────────────
+
+const APP_URL = (process.env.APP_URL ?? "https://huku-plus-central.replit.app").replace(/\/$/, "");
+const WATI_API_URL   = (process.env.WATI_API_URL ?? "").replace(/\/$/, "");
+const WATI_API_TOKEN = process.env.WATI_API_TOKEN ?? "";
+const FORMITIZE_API_KEY = process.env.FORMITIZE_API_KEY ?? "";
+const FORMITIZE_BASES = [
+  "https://service.formitize.com/api/v1",
+  "https://app.formitize.com/api/v2",
+];
+
+function cleanPhone(phone: string): string {
+  return phone.replace(/^\+/, "").replace(/[\s\-()]/g, "");
+}
+
+async function sendSignedPdfViaWhatsApp(
+  phone: string,
+  customerName: string,
+  pdfBytes: Uint8Array,
+  token: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!WATI_API_URL || !WATI_API_TOKEN) {
+    return { ok: false, error: "WATI not configured" };
+  }
+  const cleanedPhone = cleanPhone(phone);
+  if (!cleanedPhone) return { ok: false, error: "No phone number" };
+
+  try {
+    const pdfUrl = `${APP_URL}/api/sign/${token}/agreement.pdf`;
+    // Try URL-based send first (WATI sendSessionFile with URL body)
+    const urlRes = await fetch(`${WATI_API_URL}/api/v1/sendSessionFile/${cleanedPhone}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${WATI_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: pdfUrl,
+        mimeType: "application/pdf",
+        fileName: `${customerName} - Novafeed Agreement.pdf`,
+      }),
+    });
+    if (urlRes.ok) return { ok: true };
+
+    // Fall back to multipart binary upload
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new Blob([pdfBytes], { type: "application/pdf" }),
+      `${customerName} - Novafeed Agreement.pdf`,
+    );
+    const binaryRes = await fetch(`${WATI_API_URL}/api/v1/sendSessionFile/${cleanedPhone}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${WATI_API_TOKEN}` },
+      body: formData,
+    });
+    if (binaryRes.ok) return { ok: true };
+    const errText = await binaryRes.text().catch(() => "unknown");
+    return { ok: false, error: `WATI ${binaryRes.status}: ${errText.slice(0, 200)}` };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function attachPdfToFormitize(
+  jobId: string,
+  customerName: string,
+  pdfBytes: Uint8Array,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!FORMITIZE_API_KEY) return { ok: false, error: "FORMITIZE_API_KEY not set" };
+  // Try several known Formitize attachment endpoint patterns
+  const endpointPatterns = [
+    `/forms/${jobId}/attachment`,
+    `/jobs/${jobId}/attachment`,
+    `/submissions/${jobId}/attachment`,
+  ];
+  for (const base of FORMITIZE_BASES) {
+    for (const path of endpointPatterns) {
+      try {
+        const formData = new FormData();
+        formData.append(
+          "file",
+          new Blob([pdfBytes], { type: "application/pdf" }),
+          `${customerName} - Novafeed Agreement Signed.pdf`,
+        );
+        const res = await fetch(`${base}${path}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${FORMITIZE_API_KEY}` },
+          body: formData,
+        });
+        if (res.status >= 200 && res.status < 300) {
+          console.log(`[agreements] Formitize attach OK: ${base}${path}`);
+          return { ok: true };
+        }
+        if (res.status !== 404 && res.status !== 405) {
+          const text = await res.text().catch(() => "");
+          console.log(`[agreements] Formitize attach ${res.status} at ${base}${path}: ${text.slice(0, 100)}`);
+        }
+      } catch { /* try next */ }
+    }
+  }
+  return { ok: false, error: "All Formitize attachment endpoints failed" };
+}
+
+// ─── PUBLIC: Download agreement as PDF (uses signing token for auth) ──────────
+// Accessible without staff auth — token acts as the credential.
+// Returns the PDF in its current state (unsigned if pending, signed if executed).
+router.get("/sign/:token/agreement.pdf", async (req, res): Promise<void> => {
+  const token = req.params.token;
+  if (!token || token.length < 20) { res.status(400).send("Invalid token"); return; }
+
+  const [agreement] = await db.select().from(agreementsTable)
+    .where(eq(agreementsTable.signingToken, token));
+  if (!agreement) { res.status(404).send("Agreement not found"); return; }
+
+  const [retailer] = await db.select().from(retailersTable)
+    .where(eq(retailersTable.id, agreement.retailerId));
+  const [branch] = await db.select().from(branchesTable)
+    .where(eq(branchesTable.id, agreement.branchId));
+
+  const pdfBytes = await generateNovafeedAgreementPdf({
+    id: agreement.id,
+    customerName: agreement.customerName,
+    customerPhone: agreement.customerPhone ?? null,
+    loanAmount: agreement.loanAmount ?? null,
+    loanProduct: agreement.loanProduct ?? null,
+    status: agreement.status,
+    createdAt: agreement.createdAt ?? null,
+    signedAt: agreement.signedAt ?? null,
+    formitizeJobId: agreement.formitizeJobId ?? null,
+    signatureData: agreement.signatureData ?? null,
+    customerSignature2: (agreement as any).customerSignature2 ?? null,
+    customerSignature3: (agreement as any).customerSignature3 ?? null,
+    managerSignature: (agreement as any).managerSignature ?? null,
+    formData: (agreement as any).formData ?? null,
+    retailerName: retailer?.name ?? "",
+    branchName: branch?.name ?? "",
+  });
+
+  const filename = `${agreement.customerName.replace(/[^a-z0-9 ]/gi, "")} - Novafeed Agreement.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.send(Buffer.from(pdfBytes));
+});
+
 // PUBLIC: Get signing session info (no auth required)
 router.get("/sign/:token", async (req, res): Promise<void> => {
   const params = GetSigningSessionParams.safeParse(req.params);
@@ -394,7 +540,55 @@ router.post("/sign/:token/submit", async (req, res): Promise<void> => {
     referenceId: agreement.id,
   });
 
+  // Respond immediately — delivery runs in background
   res.json({ success: true, signedAt: signedAt.toISOString() });
+
+  // ── Background: generate signed PDF and deliver ───────────────────────────
+  setImmediate(async () => {
+    try {
+      const pdfBytes = await generateNovafeedAgreementPdf({
+        id: agreement.id,
+        customerName: agreement.customerName,
+        customerPhone: agreement.customerPhone ?? null,
+        loanAmount: agreement.loanAmount ?? null,
+        loanProduct: agreement.loanProduct ?? null,
+        status: "signed",
+        createdAt: agreement.createdAt ?? null,
+        signedAt,
+        formitizeJobId: agreement.formitizeJobId ?? null,
+        signatureData: parsed.data.signatureData,
+        customerSignature2: parsed.data.customerSignature2 ?? null,
+        customerSignature3: parsed.data.customerSignature3 ?? null,
+        managerSignature: parsed.data.managerSignature ?? null,
+        formData: (agreement as any).formData ?? null,
+        retailerName: retailer?.name ?? "",
+        branchName: branch?.name ?? "",
+      });
+
+      // WhatsApp delivery
+      if (agreement.customerPhone) {
+        const waResult = await sendSignedPdfViaWhatsApp(
+          agreement.customerPhone,
+          agreement.customerName,
+          pdfBytes,
+          params.data.token,
+        );
+        console.log(`[agreements] WhatsApp delivery for agreement ${agreement.id}: ${waResult.ok ? "OK" : waResult.error}`);
+      }
+
+      // Formitize attachment
+      if (agreement.formitizeJobId) {
+        const fmResult = await attachPdfToFormitize(
+          agreement.formitizeJobId,
+          agreement.customerName,
+          pdfBytes,
+        );
+        console.log(`[agreements] Formitize attach for agreement ${agreement.id}: ${fmResult.ok ? "OK" : fmResult.error}`);
+      }
+    } catch (err) {
+      console.error(`[agreements] Post-sign delivery error for agreement ${agreement.id}:`, err);
+    }
+  });
 });
 
 // ─── POST /agreements/:id/mark-done — toggle kiosk "done" flag ───────────────

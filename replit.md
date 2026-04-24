@@ -89,7 +89,8 @@ All routes mounted at `/api`:
 ### Public Signing Gateway (no auth required)
 - `GET /api/sign/:token` — get signing session info
 - `POST /api/sign/:token/verify` — verify Retailer+Branch+Customer identity
-- `POST /api/sign/:token/submit` — submit digital signature
+- `GET /api/sign/:token/agreement.pdf` — download agreement as PDF (token is the credential; no staff auth required; used for kiosk PDF viewer + WATI delivery URL)
+- `POST /api/sign/:token/submit` — submit all 4 digital signatures; triggers background delivery (WhatsApp via WATI + Formitize job attachment)
 
 ### Dashboard
 - `GET /api/dashboard/stats`

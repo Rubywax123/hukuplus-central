@@ -1,17 +1,18 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useGetSigningSession, useSubmitSignature } from "@workspace/api-client-react";
 import { GradientButton } from "@/components/ui-extras";
-import { CheckCircle, FileX, PenTool, RotateCcw, ChevronRight } from "lucide-react";
+import { CheckCircle, FileX, PenTool, RotateCcw, ChevronRight, FileText, MessageCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import SignatureCanvas from "react-signature-canvas";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
 function formatAmount(n: number) {
   return `USD ${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-type Step = "confirm" | "sig1" | "sig2" | "sig3" | "manager" | "done";
+type Step = "confirm" | "review" | "sig1" | "sig2" | "sig3" | "manager" | "done";
 
 const SIGNATURE_STEPS: { key: Step; label: string; sublabel: string; signer: "customer" | "manager" }[] = [
   { key: "sig1", label: "Signature 1 of 3", sublabel: "Customer — Acknowledgement of loan agreement terms", signer: "customer" },
@@ -61,7 +62,6 @@ function SignaturePad({
       exit={{ opacity: 0, x: -40 }}
       className="w-full max-w-2xl"
     >
-      {/* Step header */}
       <div className="text-center mb-6">
         <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold mb-3 ${
           signer === "manager"
@@ -74,7 +74,6 @@ function SignaturePad({
         <p className="text-white/40 text-sm">{sublabel}</p>
       </div>
 
-      {/* Who is signing */}
       <div className="flex items-center justify-between px-5 py-3 bg-white/[0.03] border border-white/[0.06] rounded-2xl mb-4 text-sm">
         <span className="text-white/40">{signer === "manager" ? "Store Manager" : customerName}</span>
         {signer === "manager" && (
@@ -82,7 +81,6 @@ function SignaturePad({
         )}
       </div>
 
-      {/* Canvas */}
       <div className="relative bg-white rounded-2xl overflow-hidden mb-2" style={{ height: "240px" }}>
         <SignatureCanvas
           ref={sigCanvas}
@@ -131,12 +129,15 @@ export default function PublicSigningPage({ token }: { token: string }) {
   const submitMutation = useSubmitSignature();
 
   const [step, setStep] = useState<Step>("confirm");
+  const [pdfLoaded, setPdfLoaded] = useState(false);
   const [signatures, setSignatures] = useState<{ sig1: string; sig2: string; sig3: string; manager: string }>({
     sig1: "", sig2: "", sig3: "", manager: "",
   });
 
   const returnPath = new URLSearchParams(window.location.search).get("return");
   const returnUrl = returnPath ? `${window.location.origin}${BASE}${returnPath}` : null;
+
+  const pdfUrl = `${API}/api/sign/${token}/agreement.pdf`;
 
   const handleSig = (key: keyof typeof signatures, value: string, nextStep: Step) => {
     const updated = { ...signatures, [key]: value };
@@ -159,19 +160,16 @@ export default function PublicSigningPage({ token }: { token: string }) {
     }
   };
 
-  /* Step progress indicator */
-  const stepIndex = ["confirm", "sig1", "sig2", "sig3", "manager", "done"].indexOf(step);
+  const stepIndex = ["confirm", "review", "sig1", "sig2", "sig3", "manager", "done"].indexOf(step);
   const totalSteps = 4;
-  const sigStepIndex = stepIndex - 1; // 0..3 during signing
+  const sigStepIndex = stepIndex - 2; // 0..3 during signing
 
-  /* ── Loading ── */
   if (isLoading) return (
     <div className="min-h-screen bg-[#04080f] flex items-center justify-center">
       <p className="text-white/30 text-lg tracking-widest animate-pulse">LOADING…</p>
     </div>
   );
 
-  /* ── Invalid ── */
   if (error || !session) return (
     <div className="min-h-screen bg-[#04080f] flex items-center justify-center p-6">
       <div className="bg-white/[0.04] border border-red-500/20 rounded-3xl p-10 max-w-sm w-full text-center">
@@ -182,7 +180,6 @@ export default function PublicSigningPage({ token }: { token: string }) {
     </div>
   );
 
-  /* ── Already signed ── */
   if (session.status === "signed" && step !== "done") return (
     <div className="min-h-screen bg-[#04080f] flex items-center justify-center p-6">
       <div className="bg-white/[0.04] border border-emerald-500/20 rounded-3xl p-10 max-w-sm w-full text-center">
@@ -207,7 +204,7 @@ export default function PublicSigningPage({ token }: { token: string }) {
           <p className="text-white/25 text-xs tracking-widest uppercase">HukuPlus Central</p>
           <p className="text-white font-semibold text-sm">{session.retailerName} · {session.branchName}</p>
         </div>
-        {step !== "confirm" && step !== "done" && (
+        {(["sig1", "sig2", "sig3", "manager"] as Step[]).includes(step) && (
           <div className="flex items-center gap-1.5">
             {[0, 1, 2, 3].map(i => (
               <div key={i} className={`h-1.5 rounded-full transition-all ${
@@ -228,7 +225,7 @@ export default function PublicSigningPage({ token }: { token: string }) {
       <div className="flex-1 flex flex-col items-center justify-start px-4 py-6 overflow-y-auto">
         <AnimatePresence mode="wait">
 
-          {/* ── Confirm ── */}
+          {/* ── Confirm: loan summary ── */}
           {step === "confirm" && (
             <motion.div
               key="confirm"
@@ -279,31 +276,90 @@ export default function PublicSigningPage({ token }: { token: string }) {
                     )}
                   </div>
                 )}
-                {session.formitizeFormUrl && (
-                  <div className="border-t border-white/[0.06] pt-4">
-                    <a href={session.formitizeFormUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-violet-400 text-sm underline underline-offset-4 hover:text-violet-300">
-                      View full agreement document →
-                    </a>
-                  </div>
-                )}
               </div>
 
               <div className="bg-amber-500/5 border border-amber-500/15 rounded-2xl p-4 mb-6 text-xs text-white/30 leading-relaxed">
-                By proceeding, I confirm I am <strong className="text-white/50">{session.customerName}</strong> and have read the terms of this {session.loanProduct} agreement for {formatAmount(session.loanAmount)} from {session.retailerName} ({session.branchName}).
+                By proceeding, I confirm I am <strong className="text-white/50">{session.customerName}</strong> and understand I will be signing a {session.loanProduct} agreement for {formatAmount(session.loanAmount)} from {session.retailerName} ({session.branchName}).
                 <br /><br />
-                <strong className="text-amber-400/60">You will be asked to sign 3 times, followed by the store manager's signature.</strong>
+                <strong className="text-amber-400/60">You will review the full agreement document, then sign 3 times, followed by the store manager's signature.</strong>
               </div>
 
               <button
-                onClick={() => setStep("sig1")}
+                onClick={() => setStep("review")}
                 className="block w-full py-5 rounded-2xl text-white text-xl font-bold text-center transition-all active:scale-95"
                 style={{
                   background: "linear-gradient(135deg, #5b21b6 0%, #7c3aed 50%, #9333ea 100%)",
                   boxShadow: "0 0 50px rgba(124, 58, 237, 0.3), inset 0 1px 0 rgba(255,255,255,0.1)"
                 }}
               >
-                Details Correct — Begin Signing
+                <span className="flex items-center justify-center gap-2">
+                  <FileText className="w-5 h-5" /> Details Correct — Review Agreement
+                </span>
+              </button>
+            </motion.div>
+          )}
+
+          {/* ── Review: full PDF agreement viewer ── */}
+          {step === "review" && (
+            <motion.div
+              key="review"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              className="w-full max-w-2xl flex flex-col"
+            >
+              <div className="text-center mb-4">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold mb-2 bg-violet-500/10 border border-violet-500/25 text-violet-400">
+                  <FileText className="w-3.5 h-3.5" />
+                  Read the Full Agreement
+                </div>
+                <p className="text-white/40 text-sm">Scroll through the entire document before signing.</p>
+              </div>
+
+              {/* PDF viewer */}
+              <div className="relative bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden mb-4"
+                style={{ height: "calc(100vh - 320px)", minHeight: "420px" }}>
+                {!pdfLoaded && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-[#04080f]">
+                    <FileText className="w-10 h-10 text-violet-400/50 animate-pulse" />
+                    <p className="text-white/30 text-sm">Loading agreement document…</p>
+                  </div>
+                )}
+                <iframe
+                  src={pdfUrl}
+                  title="Loan Agreement Document"
+                  className="w-full h-full border-0"
+                  onLoad={() => setPdfLoaded(true)}
+                />
+              </div>
+
+              {/* Direct PDF link as fallback */}
+              <div className="text-center mb-4">
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-violet-400/60 text-xs underline underline-offset-2 hover:text-violet-300"
+                >
+                  Open in new tab if document doesn't display ↗
+                </a>
+              </div>
+
+              <div className="bg-emerald-500/5 border border-emerald-500/15 rounded-2xl p-4 mb-4 text-xs text-white/40 leading-relaxed">
+                By clicking below, you confirm that you have read and understood all terms and conditions of this Novafeed Agreement.
+              </div>
+
+              <button
+                onClick={() => setStep("sig1")}
+                className="block w-full py-5 rounded-2xl text-white text-xl font-bold text-center transition-all active:scale-95"
+                style={{
+                  background: "linear-gradient(135deg, #065f46 0%, #059669 50%, #10b981 100%)",
+                  boxShadow: "0 0 40px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(255,255,255,0.1)"
+                }}
+              >
+                <span className="flex items-center justify-center gap-2">
+                  I Have Read This Agreement — Begin Signing <ChevronRight className="w-5 h-5" />
+                </span>
               </button>
             </motion.div>
           )}
@@ -347,12 +403,31 @@ export default function PublicSigningPage({ token }: { token: string }) {
               </motion.div>
 
               <h2 className="text-3xl font-bold text-white mb-3">Agreement Executed</h2>
-              <p className="text-white/40 text-sm mb-2">
+              <p className="text-white/40 text-sm mb-6">
                 All 4 signatures have been collected for <strong className="text-white/60">{session.customerName}</strong>.
               </p>
-              <p className="text-white/25 text-xs mb-10">
-                Sent to Tefco Finance for processing.
-              </p>
+
+              {/* Delivery notice */}
+              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-4 mb-8 text-left space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+                    <CheckCircle className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <div>
+                    <p className="text-white text-sm font-medium">Agreement recorded</p>
+                    <p className="text-white/30 text-xs">Saved to Tefco Finance Central</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                    <MessageCircle className="w-4 h-4 text-green-400" />
+                  </div>
+                  <div>
+                    <p className="text-white text-sm font-medium">Copy sent via WhatsApp</p>
+                    <p className="text-white/30 text-xs">Signed PDF being delivered to your registered number</p>
+                  </div>
+                </div>
+              </div>
 
               {returnUrl ? (
                 <a
