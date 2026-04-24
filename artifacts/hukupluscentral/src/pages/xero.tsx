@@ -30,6 +30,16 @@ interface SyncResult {
   checked: number;
   pushed: number;
   skipped: number;
+  completed: number;
+  errors: string[];
+}
+
+interface BackfillPaidResult {
+  success: boolean;
+  daysLookedBack: number;
+  checked: number;
+  completedCount: number;
+  completedInvoices: string[];
   errors: string[];
 }
 
@@ -96,6 +106,8 @@ export default function XeroIntegrationPage() {
   const qc = useQueryClient();
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [backfillResult, setBackfillResult] = useState<BackfillPaidResult | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
 
   const { data: xeroStatus, isLoading: statusLoading } = useQuery<XeroStatus>({
     queryKey: ["/api/xero/status"],
@@ -132,6 +144,20 @@ export default function XeroIntegrationPage() {
     },
     onError: (err: any) => {
       setSyncError(err.message ?? "Sync failed");
+    },
+  });
+
+  const backfillMutation = useMutation({
+    mutationFn: () =>
+      customFetch<BackfillPaidResult>("/api/xero/backfill-paid", { method: "POST" }),
+    onSuccess: (data) => {
+      setBackfillResult(data);
+      setBackfillError(null);
+      qc.invalidateQueries({ queryKey: ["/api/xero/sync-invoices/status"] });
+      refetchInvoices();
+    },
+    onError: (err: any) => {
+      setBackfillError(err.message ?? "Recover failed");
     },
   });
 
@@ -219,21 +245,31 @@ export default function XeroIntegrationPage() {
         </motion.div>
       </div>
 
-      {/* ── Sync Now button + result ── */}
+      {/* ── Sync Now button + Recover Paid + results ── */}
       {xeroStatus?.connected && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.20 }} className="mb-8">
           <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={() => { setSyncResult(null); setSyncError(null); syncMutation.mutate(); }}
-              disabled={syncMutation.isPending}
+              disabled={syncMutation.isPending || backfillMutation.isPending}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-lg shadow-primary/20"
             >
               {syncMutation.isPending
                 ? <><RefreshCw className="w-4 h-4 animate-spin" /> Syncing…</>
                 : <><Zap className="w-4 h-4" /> Sync Now</>}
             </button>
+            <button
+              onClick={() => { setBackfillResult(null); setBackfillError(null); backfillMutation.mutate(); }}
+              disabled={syncMutation.isPending || backfillMutation.isPending}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/30 rounded-xl font-semibold text-sm transition-all disabled:opacity-50"
+              title="Scans last 90 days of PAID invoices in Xero and marks any matching loans as completed"
+            >
+              {backfillMutation.isPending
+                ? <><RefreshCw className="w-4 h-4 animate-spin" /> Recovering…</>
+                : <><CheckCircle2 className="w-4 h-4" /> Recover Paid</>}
+            </button>
             <p className="text-xs text-muted-foreground">
-              Fetches all AUTHORISED/PARTIAL invoices from Xero and pushes any new ones to the Loan Register automatically.
+              Sync Now fetches new invoices. Use <strong className="text-foreground">Recover Paid</strong> if a payment in Xero isn't showing as completed.
             </p>
           </div>
 
@@ -249,7 +285,9 @@ export default function XeroIntegrationPage() {
                   : <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />}
                 <div>
                   <p className="font-semibold">
-                    Sync complete — {syncResult.checked} checked, {syncResult.pushed} pushed to Loan Register, {syncResult.skipped} skipped
+                    Sync complete — {syncResult.checked} checked, {syncResult.pushed} tracked
+                    {(syncResult.completed ?? 0) > 0 && `, ${syncResult.completed} marked completed`}
+                    , {syncResult.skipped} skipped
                   </p>
                   {syncResult.errors.map((e, i) => <p key={i} className="text-xs opacity-80 mt-1">{e}</p>)}
                 </div>
@@ -259,6 +297,43 @@ export default function XeroIntegrationPage() {
           {syncError && (
             <div className="mt-4 p-4 rounded-xl border bg-rose-500/10 border-rose-500/20 text-rose-300 text-sm flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" /> {syncError}
+            </div>
+          )}
+
+          {backfillResult && (
+            <div className={`mt-4 p-4 rounded-xl border text-sm ${
+              backfillResult.errors.length > 0
+                ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
+                : "bg-violet-500/10 border-violet-500/20 text-violet-300"
+            }`}>
+              <div className="flex items-start gap-2">
+                {backfillResult.errors.length > 0
+                  ? <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  : <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />}
+                <div>
+                  <p className="font-semibold">
+                    Recover Paid — {backfillResult.checked} PAID invoices scanned (last {backfillResult.daysLookedBack} days)
+                    {backfillResult.completedCount > 0
+                      ? `, ${backfillResult.completedCount} loan${backfillResult.completedCount !== 1 ? "s" : ""} marked completed`
+                      : ", no new completions found"}
+                  </p>
+                  {backfillResult.completedInvoices.length > 0 && (
+                    <ul className="mt-2 space-y-0.5">
+                      {backfillResult.completedInvoices.map((inv, i) => (
+                        <li key={i} className="text-xs opacity-80 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 shrink-0" /> {inv}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {backfillResult.errors.map((e, i) => <p key={i} className="text-xs opacity-80 mt-1">{e}</p>)}
+                </div>
+              </div>
+            </div>
+          )}
+          {backfillError && (
+            <div className="mt-4 p-4 rounded-xl border bg-rose-500/10 border-rose-500/20 text-rose-300 text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {backfillError}
             </div>
           )}
         </motion.div>

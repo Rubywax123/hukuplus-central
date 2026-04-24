@@ -326,6 +326,90 @@ router.post("/xero/sync-invoices", requireStaffAuth, requireSuperAdmin, async (r
   }
 });
 
+// ─── POST /xero/backfill-paid — detect PAID invoices not caught by normal sync ─
+// Fetches PAID invoices from the last N days (default 90) and marks any matching
+// agreements as completed. Useful for payments processed to Petty Cash or any
+// account that was missed because the invoice transitioned to PAID before sync ran.
+router.post("/xero/backfill-paid", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const auth = await getValidAccessToken();
+  if (!auth) return res.status(401).json({ error: "Xero not connected" });
+
+  const days = Math.min(parseInt(String(req.query.days ?? req.body?.days ?? 90)), 365);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const client = await pool.connect();
+  try {
+    const completed: string[] = [];
+    const errors: string[] = [];
+
+    let page = 1;
+    let totalChecked = 0;
+    while (true) {
+      const res2 = await fetch(
+        `https://api.xero.com/api.xro/2.0/Invoices?Type=ACCREC&Statuses=PAID&ModifiedAfter=${encodeURIComponent(since)}&includeArchived=false&page=${page}`,
+        {
+          headers: {
+            Authorization: `Bearer ${auth.accessToken}`,
+            "Xero-tenant-id": auth.tenantId,
+            Accept: "application/json",
+          },
+        }
+      );
+      if (!res2.ok) {
+        errors.push(`Xero fetch failed (${res2.status}) page ${page}`);
+        break;
+      }
+      const data = await res2.json() as any;
+      const invoices: any[] = (data.Invoices ?? []).filter(
+        (inv: any) => inv.Type === "ACCREC" && (inv.Total ?? 0) > 0
+      );
+      totalChecked += invoices.length;
+
+      for (const inv of invoices) {
+        const xeroInvoiceId: string = inv.InvoiceID;
+        const invNumber: string = inv.InvoiceNumber ?? xeroInvoiceId;
+        try {
+          const agRow = await client.query(
+            `SELECT id, status FROM agreements WHERE xero_invoice_id = $1 LIMIT 1`,
+            [xeroInvoiceId]
+          );
+          if (agRow.rows.length === 0) continue;
+          const ag = agRow.rows[0];
+          if (ag.status === "completed") continue;
+
+          await client.query(
+            `UPDATE agreements
+             SET status       = 'completed',
+                 completed_at = COALESCE(completed_at, NOW())
+             WHERE id = $1`,
+            [ag.id]
+          );
+          completed.push(`${invNumber} (${inv.Contact?.Name ?? ""})`);
+          console.log(`[xero:backfill-paid] Marked ${invNumber} agreement #${ag.id} completed`);
+        } catch (e: any) {
+          errors.push(`${invNumber}: ${e.message}`);
+        }
+      }
+
+      if (invoices.length < 100) break;
+      page++;
+    }
+
+    res.json({
+      success: true,
+      daysLookedBack: days,
+      checked: totalChecked,
+      completedCount: completed.length,
+      completedInvoices: completed,
+      errors,
+    });
+  } catch (err: any) {
+    console.error("[xero:backfill-paid] Error:", err.message);
+    res.status(500).json({ error: "Backfill failed", detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── GET /xero/pending-invoices — recent Xero invoices with import status ────
 // Returns last 30 days of ACCREC invoices showing which are already imported
 // into the Loan Register (via agreements table) and which are still pending.

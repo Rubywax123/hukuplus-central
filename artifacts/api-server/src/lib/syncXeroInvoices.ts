@@ -253,11 +253,12 @@ export interface SyncXeroResult {
   checked: number;
   pushed: number;
   skipped: number;
+  completed: number;
   errors: string[];
 }
 
 export async function syncXeroInvoices(): Promise<SyncXeroResult> {
-  const result: SyncXeroResult = { checked: 0, pushed: 0, skipped: 0, errors: [] };
+  const result: SyncXeroResult = { checked: 0, pushed: 0, skipped: 0, completed: 0, errors: [] };
 
   const auth = await getValidAccessToken();
   if (!auth) {
@@ -602,6 +603,77 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
       console.log(
         `[sync:xero-invoices] Tracked "${givenName} ${surname}" locally (Xero: ${inv.InvoiceNumber})`
       );
+    }
+
+    // ── Detect PAID invoices → mark agreements as completed ───────────────────
+    // The main loop above only fetches AUTHORISED/PARTIAL invoices. When a
+    // customer pays their invoice in Xero, the status changes to PAID and the
+    // invoice drops out of that query — so payments are never detected.
+    // This second pass fetches PAID invoices modified in the same window and
+    // marks any matching local agreement as completed.
+    try {
+      const paidInvoices: any[] = [];
+      let paidPage = 1;
+      while (true) {
+        const paidRes = await fetch(
+          `${XERO_BASE}/Invoices?Type=ACCREC&Statuses=PAID&ModifiedAfter=${encodeURIComponent(since)}&includeArchived=false&page=${paidPage}`,
+          { headers: xeroHeaders(auth) }
+        );
+        if (!paidRes.ok) {
+          result.errors.push(`Xero PAID invoice fetch failed (${paidRes.status}) page ${paidPage}`);
+          break;
+        }
+        const paidData = await paidRes.json() as any;
+        const pageInvoices: any[] = paidData.Invoices ?? [];
+        paidInvoices.push(...pageInvoices);
+        if (pageInvoices.length < 100) break;
+        paidPage++;
+      }
+
+      for (const inv of paidInvoices) {
+        const xeroInvoiceId: string = inv.InvoiceID;
+        const invNumber: string = inv.InvoiceNumber ?? xeroInvoiceId;
+
+        // Look up matching agreement in Central's DB
+        const agRow = await client.query(
+          `SELECT id, status FROM agreements WHERE xero_invoice_id = $1 LIMIT 1`,
+          [xeroInvoiceId]
+        );
+
+        if (agRow.rows.length === 0) {
+          // No local record yet — will be created on next new-invoice sync if relevant
+          continue;
+        }
+
+        const ag = agRow.rows[0];
+        if (ag.status === "completed") {
+          // Already marked completed — nothing to do
+          continue;
+        }
+
+        // Sum all payments on this invoice (Xero may have multiple payments)
+        const payments: any[] = inv.Payments ?? [];
+        const totalPaid = payments.reduce((sum: number, p: any) => {
+          return sum + (parseFloat(String(p.Amount ?? 0)) || 0);
+        }, 0);
+
+        const paidAmount = totalPaid > 0 ? totalPaid : (parseFloat(String(inv.Total ?? 0)) || 0);
+
+        await client.query(
+          `UPDATE agreements
+           SET status       = 'completed',
+               completed_at = COALESCE(completed_at, NOW())
+           WHERE id = $1`,
+          [ag.id]
+        );
+
+        result.completed++;
+        console.log(
+          `[sync:xero-invoices] PAID detected: ${invNumber} → agreement #${ag.id} marked completed (paid $${paidAmount.toFixed(2)})`
+        );
+      }
+    } catch (paidErr: any) {
+      result.errors.push(`PAID invoice detection error: ${paidErr.message}`);
     }
 
     // Always update last sync timestamp
