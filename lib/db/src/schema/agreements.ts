@@ -38,6 +38,7 @@ export const agreementsTable = pgTable("agreements", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   markedDoneAt: timestamp("marked_done_at", { withTimezone: true }),
   markedDoneBy: text("marked_done_by"),
+  xeroInvoiceId: text("xero_invoice_id"),
 });
 
 export const insertAgreementSchema = createInsertSchema(agreementsTable).omit({ id: true, createdAt: true });

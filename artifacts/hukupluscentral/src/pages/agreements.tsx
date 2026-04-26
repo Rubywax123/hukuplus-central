@@ -4,6 +4,7 @@ import { PageHeader, GlassCard, GradientButton, Badge, Modal, Input, Label, Sele
 import {
   Plus, Link as LinkIcon, CheckCircle2, Clock, XCircle, Search, Upload,
   FileText, Copy, Monitor, ScrollText, Banknote, Info, CheckSquare, RotateCcw,
+  Receipt, Loader2,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -115,6 +116,28 @@ export default function AgreementsPage() {
   const copyLink = (url: string, id?: number) => {
     navigator.clipboard.writeText(url);
     if (id !== undefined) { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }
+  };
+
+  // ── Xero Invoice ──────────────────────────────────────────────────────────
+  const [raiseLoading, setRaiseLoading] = useState<Set<number>>(new Set());
+  const raiseInvoice = async (id: number) => {
+    setRaiseLoading(prev => { const n = new Set(prev); n.add(id); return n; });
+    try {
+      const res = await fetch(`${BASE}/api/xero/raise-invoice/${id}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to raise Xero invoice");
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
+    } catch {
+      alert("Network error — please try again");
+    } finally {
+      setRaiseLoading(prev => { const n = new Set(prev); n.delete(id); return n; });
+    }
   };
 
   // ── Filtered list — uses active or done list based on view toggle ─────────
@@ -354,12 +377,13 @@ export default function AgreementsPage() {
                 <th className="p-4">Amount</th>
                 <th className="p-4">Form Type</th>
                 <th className="p-4">Status</th>
+                <th className="p-4">Invoice</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {isLoading && (
-                <tr><td colSpan={7} className="p-8 text-center animate-pulse text-muted-foreground">Loading...</td></tr>
+                <tr><td colSpan={8} className="p-8 text-center animate-pulse text-muted-foreground">Loading...</td></tr>
               )}
               {filtered.map((a) => (
                 <tr
@@ -411,6 +435,29 @@ export default function AgreementsPage() {
                       );
                     })()}
                   </td>
+                  {/* ── Xero Invoice cell ── */}
+                  <td className="p-4">
+                    {(a as any).xeroInvoiceId ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                        <Receipt className="w-3 h-3" />{(a as any).xeroInvoiceId.slice(0, 8)}…
+                      </span>
+                    ) : (a as any).formType === "agreement" && (a.loanAmount ?? 0) > 0 ? (
+                      <button
+                        onClick={() => raiseInvoice(a.id)}
+                        disabled={raiseLoading.has(a.id)}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-0.5 rounded-full transition-colors disabled:opacity-40"
+                        title="Raise Xero invoice"
+                      >
+                        {raiseLoading.has(a.id)
+                          ? <><Loader2 className="w-3 h-3 animate-spin" />Raising…</>
+                          : <><Receipt className="w-3 h-3" />Raise</>
+                        }
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
+                  </td>
+
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       {showDone ? (
@@ -474,7 +521,7 @@ export default function AgreementsPage() {
               ))}
               {filtered.length === 0 && !isLoading && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
                     {showDone
                       ? "No completed agreements yet. Mark items done from the active view."
                       : "No active agreements — everything is actioned."

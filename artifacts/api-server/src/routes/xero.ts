@@ -513,6 +513,50 @@ router.get("/xero/tracking-categories", requireStaffAuth, requireSuperAdmin, asy
   }
 });
 
+// ─── POST /xero/raise-invoice/:agreementId — manually create Xero invoice ─────
+// Allows admins to create a Xero invoice for an agreement that was missed
+// (e.g. Xero was disconnected when the webhook fired).
+router.post("/xero/raise-invoice/:agreementId", requireStaffAuth, async (req: Request, res: Response) => {
+  const id = parseInt(req.params.agreementId, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid agreement ID" }); return; }
+
+  const { rows } = await pool.query(
+    `SELECT a.id, a.customer_name, a.customer_phone, a.loan_amount,
+            a.facility_fee_amount, a.interest_amount,
+            a.xero_invoice_id,
+            r.name AS retailer_name, b.name AS branch_name
+     FROM agreements a
+     LEFT JOIN retailers r ON r.id = a.retailer_id
+     LEFT JOIN branches  b ON b.id = a.branch_id
+     WHERE a.id = $1`,
+    [id]
+  );
+  const agreement = rows[0];
+  if (!agreement) { res.status(404).json({ error: "Agreement not found" }); return; }
+  if (agreement.xero_invoice_id) {
+    res.status(409).json({ error: "Invoice already exists", xeroInvoiceId: agreement.xero_invoice_id });
+    return;
+  }
+
+  const { createXeroInvoice } = await import("../lib/createXeroInvoice");
+  const result = await createXeroInvoice({
+    agreementId: agreement.id,
+    customerName: agreement.customer_name,
+    customerPhone: agreement.customer_phone ?? null,
+    loanAmount: parseFloat(agreement.loan_amount) || 0,
+    facilityFeeAmount: agreement.facility_fee_amount ? parseFloat(agreement.facility_fee_amount) : null,
+    interestAmount: agreement.interest_amount ? parseFloat(agreement.interest_amount) : null,
+    retailerName: agreement.retailer_name ?? null,
+    branchName: agreement.branch_name ?? null,
+  });
+
+  if (!result.ok) {
+    res.status(502).json({ error: result.error });
+    return;
+  }
+  res.json({ ok: true, xeroInvoiceId: result.xeroInvoiceId, xeroInvoiceNumber: result.xeroInvoiceNumber });
+});
+
 // ─── GET /xero/sync-invoices/status — last sync timestamp + counts ────────────
 router.get("/xero/sync-invoices/status", requireStaffAuth, requireSuperAdmin, async (req: Request, res: Response) => {
   const client = await pool.connect();

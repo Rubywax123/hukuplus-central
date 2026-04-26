@@ -4,6 +4,7 @@ import { eq, ilike, desc } from "drizzle-orm";
 import crypto from "crypto";
 import multer from "multer";
 import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
+import { createXeroInvoice } from "../lib/createXeroInvoice";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -1738,6 +1739,29 @@ router.post("/formitize/webhook", async (req, res) => {
   });
 
   console.log(`[formitize:webhook] Created ${formType} #${agreement.id} — ${product} — ${customerName}`);
+
+  // ── Auto-raise Xero invoice (HukuPlus agreements only, non-blocking) ──────
+  if (isAgreement && loanAmount > 0) {
+    setImmediate(async () => {
+      try {
+        const result = await createXeroInvoice({
+          agreementId: agreement.id,
+          customerName,
+          customerPhone: customerPhone ?? null,
+          loanAmount,
+          facilityFeeAmount: facilityFeeAmount ?? null,
+          interestAmount: interestAmount ?? null,
+          retailerName: resolvedRetailerName ?? null,
+          branchName: resolvedBranchName ?? null,
+        });
+        if (!result.ok) {
+          console.warn(`[formitize:webhook] Xero invoice skipped for #${agreement.id}: ${result.error}`);
+        }
+      } catch (err: any) {
+        console.error(`[formitize:webhook] Xero invoice error for #${agreement.id}:`, err.message);
+      }
+    });
+  }
 
   res.status(201).json({
     ok: true,
