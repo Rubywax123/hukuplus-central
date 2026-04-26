@@ -1,4 +1,4 @@
-import { pool } from "@workspace/db";
+import { db, pool, activityTable } from "@workspace/db";
 
 const XERO_BASE = "https://api.xero.com/api.xro/2.0";
 
@@ -260,6 +260,17 @@ export async function createXeroInvoice(input: CreateXeroInvoiceInput): Promise<
     }
 
     console.log(`[xero-invoice] Created Xero invoice ${xeroInvoiceNumber} (${xeroInvoiceId}) for agreement #${agreementId} — ${customerName}`);
+
+    // Log to Central activity feed
+    await db.insert(activityTable).values({
+      type: "xero_invoice_raised",
+      description: `Xero invoice ${xeroInvoiceNumber} raised for ${customerName} — ${reference}`,
+      loanProduct: "HukuPlus",
+      referenceId: agreementId,
+      ...(retailerName ? { retailerName } : {}),
+      ...(branchName  ? { branchName  } : {}),
+    }).catch((e: any) => console.warn("[xero-invoice] Activity log failed:", e.message));
+
     return { ok: true, xeroInvoiceId, xeroInvoiceNumber };
   } catch (err: any) {
     console.error(`[xero-invoice] Unexpected error for agreement #${agreementId}:`, err.message);

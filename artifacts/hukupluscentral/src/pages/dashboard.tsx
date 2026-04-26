@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2 } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2, Receipt } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -998,25 +998,37 @@ export default function DashboardPage() {
           <h3 className="text-lg font-semibold mb-6">Recent Activity</h3>
           <div className="flex-1 overflow-y-auto pr-2 space-y-6">
             {!activity?.length && <p className="text-muted-foreground text-sm">No recent activity.</p>}
-            {activity?.map((item) => (
-              <div key={item.id} className="relative pl-6 before:absolute before:left-[11px] before:top-2 before:bottom-[-24px] last:before:bottom-0 before:w-px before:bg-white/10">
-                <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-card border-2 border-primary/50 flex items-center justify-center">
-                  <div className="w-2 h-2 rounded-full bg-primary" />
-                </div>
-                <div className="bg-white/5 rounded-xl p-3 border border-white/5">
-                  <p className="text-sm text-foreground">{item.description}</p>
-                  <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground font-medium">
-                    <span>{format(new Date(item.timestamp), "MMM d, h:mm a")}</span>
-                    {item.loanProduct && (
-                      <>
-                        <span className="w-1 h-1 rounded-full bg-white/20" />
-                        <span className="text-primary">{item.loanProduct}</span>
-                      </>
-                    )}
+            {activity?.map((item) => {
+              const isXeroInvoice = item.type === "xero_invoice_raised";
+              return (
+                <div key={item.id} className="relative pl-6 before:absolute before:left-[11px] before:top-2 before:bottom-[-24px] last:before:bottom-0 before:w-px before:bg-white/10">
+                  <div className={`absolute left-0 top-1 w-6 h-6 rounded-full border-2 flex items-center justify-center ${isXeroInvoice ? "bg-emerald-900/60 border-emerald-500/50" : "bg-card border-primary/50"}`}>
+                    {isXeroInvoice
+                      ? <Receipt className="w-3 h-3 text-emerald-400" />
+                      : <div className="w-2 h-2 rounded-full bg-primary" />
+                    }
+                  </div>
+                  <div className={`rounded-xl p-3 border ${isXeroInvoice ? "bg-emerald-500/5 border-emerald-500/15" : "bg-white/5 border-white/5"}`}>
+                    <p className="text-sm text-foreground">{item.description}</p>
+                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground font-medium">
+                      <span>{format(new Date(item.timestamp), "MMM d, h:mm a")}</span>
+                      {item.loanProduct && (
+                        <>
+                          <span className="w-1 h-1 rounded-full bg-white/20" />
+                          <span className="text-primary">{item.loanProduct}</span>
+                        </>
+                      )}
+                      {isXeroInvoice && (
+                        <>
+                          <span className="w-1 h-1 rounded-full bg-white/20" />
+                          <span className="text-emerald-400">Xero Invoice</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </GlassCard>
       </div>

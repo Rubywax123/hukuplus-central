@@ -538,16 +538,36 @@ router.post("/xero/raise-invoice/:agreementId", requireStaffAuth, async (req: Re
     return;
   }
 
+  // Accept optional field overrides from the request body (from the review modal)
+  const overrides = req.body ?? {};
+  const customerName     = typeof overrides.customerName     === "string" && overrides.customerName.trim()
+    ? overrides.customerName.trim()
+    : agreement.customer_name;
+  const loanAmount       = overrides.loanAmount       !== undefined ? parseFloat(overrides.loanAmount)       : (parseFloat(agreement.loan_amount)       || 0);
+  const facilityFeeAmount = overrides.facilityFeeAmount !== undefined ? parseFloat(overrides.facilityFeeAmount) : (agreement.facility_fee_amount ? parseFloat(agreement.facility_fee_amount) : null);
+  const interestAmount   = overrides.interestAmount   !== undefined ? parseFloat(overrides.interestAmount)   : (agreement.interest_amount  ? parseFloat(agreement.interest_amount)  : null);
+
+  // Persist any corrections back to the agreement record before raising
+  await pool.query(
+    `UPDATE agreements
+     SET customer_name       = $1,
+         loan_amount         = $2,
+         facility_fee_amount = $3,
+         interest_amount     = $4
+     WHERE id = $5`,
+    [customerName, loanAmount, facilityFeeAmount, interestAmount, id]
+  );
+
   const { createXeroInvoice } = await import("../lib/createXeroInvoice");
   const result = await createXeroInvoice({
     agreementId: agreement.id,
-    customerName: agreement.customer_name,
+    customerName,
     customerPhone: agreement.customer_phone ?? null,
-    loanAmount: parseFloat(agreement.loan_amount) || 0,
-    facilityFeeAmount: agreement.facility_fee_amount ? parseFloat(agreement.facility_fee_amount) : null,
-    interestAmount: agreement.interest_amount ? parseFloat(agreement.interest_amount) : null,
+    loanAmount,
+    facilityFeeAmount: isNaN(facilityFeeAmount!) ? null : facilityFeeAmount,
+    interestAmount:    isNaN(interestAmount!)    ? null : interestAmount,
     retailerName: agreement.retailer_name ?? null,
-    branchName: agreement.branch_name ?? null,
+    branchName:   agreement.branch_name   ?? null,
   });
 
   if (!result.ok) {

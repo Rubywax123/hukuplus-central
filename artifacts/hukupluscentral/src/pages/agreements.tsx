@@ -118,25 +118,57 @@ export default function AgreementsPage() {
     if (id !== undefined) { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }
   };
 
-  // ── Xero Invoice ──────────────────────────────────────────────────────────
-  const [raiseLoading, setRaiseLoading] = useState<Set<number>>(new Set());
-  const raiseInvoice = async (id: number) => {
-    setRaiseLoading(prev => { const n = new Set(prev); n.add(id); return n; });
+  // ── Xero Invoice raise modal ──────────────────────────────────────────────
+  const [raiseModal, setRaiseModal] = useState<{
+    open: boolean;
+    agreement: any | null;
+    customerName: string;
+    loanAmount: string;
+    facilityFeeAmount: string;
+    interestAmount: string;
+  }>({ open: false, agreement: null, customerName: "", loanAmount: "", facilityFeeAmount: "", interestAmount: "" });
+  const [raiseLoading, setRaiseLoading] = useState(false);
+  const [raiseError,   setRaiseError]   = useState("");
+
+  const openRaiseModal = (a: any) => {
+    setRaiseError("");
+    setRaiseModal({
+      open: true,
+      agreement: a,
+      customerName:      a.customerName ?? "",
+      loanAmount:        a.loanAmount     != null ? String(a.loanAmount)         : "",
+      facilityFeeAmount: (a as any).facilityFeeAmount != null ? String((a as any).facilityFeeAmount) : "",
+      interestAmount:    (a as any).interestAmount    != null ? String((a as any).interestAmount)    : "",
+    });
+  };
+
+  const submitRaiseInvoice = async () => {
+    if (!raiseModal.agreement) return;
+    setRaiseLoading(true);
+    setRaiseError("");
     try {
-      const res = await fetch(`${BASE}/api/xero/raise-invoice/${id}`, {
+      const res = await fetch(`${BASE}/api/xero/raise-invoice/${raiseModal.agreement.id}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({
+          customerName:      raiseModal.customerName.trim(),
+          loanAmount:        parseFloat(raiseModal.loanAmount)        || 0,
+          facilityFeeAmount: raiseModal.facilityFeeAmount ? parseFloat(raiseModal.facilityFeeAmount) : null,
+          interestAmount:    raiseModal.interestAmount    ? parseFloat(raiseModal.interestAmount)    : null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || "Failed to raise Xero invoice");
+        setRaiseError(data.error || "Failed to raise Xero invoice");
         return;
       }
+      setRaiseModal(m => ({ ...m, open: false, agreement: null }));
       queryClient.invalidateQueries({ queryKey: [`/api/agreements`] });
     } catch {
-      alert("Network error — please try again");
+      setRaiseError("Network error — please try again");
     } finally {
-      setRaiseLoading(prev => { const n = new Set(prev); n.delete(id); return n; });
+      setRaiseLoading(false);
     }
   };
 
@@ -443,15 +475,11 @@ export default function AgreementsPage() {
                       </span>
                     ) : (a as any).formType === "agreement" && (a.loanAmount ?? 0) > 0 ? (
                       <button
-                        onClick={() => raiseInvoice(a.id)}
-                        disabled={raiseLoading.has(a.id)}
-                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-0.5 rounded-full transition-colors disabled:opacity-40"
-                        title="Raise Xero invoice"
+                        onClick={() => openRaiseModal(a)}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-0.5 rounded-full transition-colors"
+                        title="Review and raise Xero invoice"
                       >
-                        {raiseLoading.has(a.id)
-                          ? <><Loader2 className="w-3 h-3 animate-spin" />Raising…</>
-                          : <><Receipt className="w-3 h-3" />Raise</>
-                        }
+                        <Receipt className="w-3 h-3" />Raise
                       </button>
                     ) : (
                       <span className="text-muted-foreground text-xs">—</span>
@@ -542,6 +570,121 @@ export default function AgreementsPage() {
           </div>
         )}
       </GlassCard>
+
+      {/* ── Raise Xero Invoice Modal ── */}
+      <Modal
+        isOpen={raiseModal.open}
+        onClose={() => !raiseLoading && setRaiseModal(m => ({ ...m, open: false }))}
+        title="Raise Xero Invoice"
+      >
+        <div className="space-y-4">
+          {/* Context strip */}
+          {raiseModal.agreement && (
+            <div className="text-xs text-muted-foreground bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-center gap-3">
+              <Receipt className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>
+                Agreement #{raiseModal.agreement.id}
+                {raiseModal.agreement.branchName && ` · ${raiseModal.agreement.branchName}`}
+              </span>
+            </div>
+          )}
+
+          <p className="text-sm text-muted-foreground">
+            Review and correct the details below before raising the invoice in Xero. Any edits here are also saved back to the agreement record.
+          </p>
+
+          <div>
+            <Label>Customer Name</Label>
+            <Input
+              value={raiseModal.customerName}
+              onChange={e => setRaiseModal(m => ({ ...m, customerName: e.target.value }))}
+              placeholder="Full name as it should appear in Xero"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label>Loan Amount (USD)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={raiseModal.loanAmount}
+                onChange={e => setRaiseModal(m => ({ ...m, loanAmount: e.target.value }))}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Facility Fee (USD)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={raiseModal.facilityFeeAmount}
+                onChange={e => setRaiseModal(m => ({ ...m, facilityFeeAmount: e.target.value }))}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Interest (USD)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={raiseModal.interestAmount}
+                onChange={e => setRaiseModal(m => ({ ...m, interestAmount: e.target.value }))}
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+
+          {/* Live invoice preview */}
+          {(() => {
+            const loan = parseFloat(raiseModal.loanAmount) || 0;
+            const fee  = parseFloat(raiseModal.facilityFeeAmount) || 0;
+            const int_ = parseFloat(raiseModal.interestAmount) || 0;
+            const total = loan + fee + int_;
+            return (
+              <div className="bg-amber-500/5 border border-amber-500/15 rounded-lg px-4 py-3 text-sm">
+                <p className="text-amber-300 font-semibold mb-2 text-xs uppercase tracking-wider">Invoice preview</p>
+                <div className="space-y-1 text-muted-foreground">
+                  {loan > 0  && <div className="flex justify-between"><span>HukuPlus Loan (621)</span><span className="text-white">${loan.toFixed(2)}</span></div>}
+                  {fee  > 0  && <div className="flex justify-between"><span>Facility Fee (202)</span><span className="text-white">${fee.toFixed(2)}</span></div>}
+                  {int_ > 0  && <div className="flex justify-between"><span>42 days interest (201)</span><span className="text-white">${int_.toFixed(2)}</span></div>}
+                  {total > 0 && <div className="flex justify-between border-t border-white/10 mt-2 pt-2 font-semibold text-white"><span>Total</span><span>${total.toFixed(2)}</span></div>}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">Reference: <span className="font-mono text-amber-300">${loan > 0 ? Math.round(loan) : "?"}</span> · Status: <span className="text-yellow-400">Awaiting Approval</span></p>
+              </div>
+            );
+          })()}
+
+          {raiseError && (
+            <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{raiseError}</p>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setRaiseModal(m => ({ ...m, open: false }))}
+              disabled={raiseLoading}
+              className="flex-1 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm font-medium transition-colors border border-white/10 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitRaiseInvoice}
+              disabled={raiseLoading || !raiseModal.customerName.trim() || (parseFloat(raiseModal.loanAmount) || 0) <= 0}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-sm font-semibold transition-colors disabled:opacity-40"
+            >
+              {raiseLoading
+                ? <><Loader2 className="w-4 h-4 animate-spin" />Raising…</>
+                : <><Receipt className="w-4 h-4" />Raise Invoice</>
+              }
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ── Issue Agreement Modal ── */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Issue Novafeeds Kiosk Agreement">
