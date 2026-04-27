@@ -9,3 +9,4 @@ export * from "./agreements";
 export * from "./activity";
 export * from "./portalUsers";
 export * from "./staffUsers";
+export * from "./storeVisits";

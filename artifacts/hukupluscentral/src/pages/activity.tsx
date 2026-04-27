@@ -9,7 +9,7 @@ import {
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
   LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil, RotateCcw, FolderOpen,
-  Receipt,
+  Receipt, MapPin, CalendarDays, Building2, ClipboardList, CheckSquare, ChevronLeft, ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -4748,7 +4748,418 @@ function LeadsTab() {
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type Tab = "formitize" | "loans" | "drawdowns" | "messages" | "whatsapp" | "leads";
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB — STORE VISITS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface StoreVisit {
+  id: number;
+  visit_date: string;
+  retailer_id: number;
+  branch_id: number | null;
+  staff_user_id: number;
+  staff_name: string;
+  status: "planned" | "visited" | "missed";
+  plan_notes: string | null;
+  visit_notes: string | null;
+  visited_at: string | null;
+  retailer_name: string;
+  branch_name: string | null;
+  branch_location: string | null;
+}
+
+interface StoreRetailer { id: number; name: string; }
+interface StoreBranch   { id: number; name: string; location?: string; }
+
+function todayStr() {
+  return format(new Date(), "yyyy-MM-dd");
+}
+function fmtDate(d: string) {
+  try { return format(new Date(d + "T00:00:00"), "EEE d MMM yyyy"); } catch { return d; }
+}
+function addDays(d: string, n: number) {
+  const dt = new Date(d + "T00:00:00");
+  dt.setDate(dt.getDate() + n);
+  return format(dt, "yyyy-MM-dd");
+}
+
+function StoreVisitsTab() {
+  const qc = useQueryClient();
+  const { user } = useStaffAuth();
+
+  // ── Date navigation ─────────────────────────────────────────────────────────
+  const [viewDate, setViewDate] = useState(todayStr());
+  const [filterMode, setFilterMode] = useState<"date" | "upcoming" | "past">("date");
+
+  // ── Plan form state ─────────────────────────────────────────────────────────
+  const [showPlanForm, setShowPlanForm] = useState(false);
+  const [planDate, setPlanDate]         = useState(todayStr());
+  const [planRetailerId, setPlanRetailerId] = useState<number | "">("");
+  const [planBranchId,   setPlanBranchId]   = useState<number | "">("");
+  const [planNotes, setPlanNotes]           = useState("");
+
+  // ── Mark-as-visited inline state ────────────────────────────────────────────
+  const [visitingId,    setVisitingId]    = useState<number | null>(null);
+  const [visitingNotes, setVisitingNotes] = useState("");
+
+  // ── Retailers for the plan form ─────────────────────────────────────────────
+  const { data: retailers = [] } = useQuery<StoreRetailer[]>({
+    queryKey: ["retailers-list"],
+    queryFn: () => fetch(`${BASE}/api/retailers`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: planBranches = [] } = useQuery<StoreBranch[]>({
+    queryKey: ["branches-for-visit", planRetailerId],
+    queryFn: () =>
+      planRetailerId
+        ? fetch(`${BASE}/api/retailers/${planRetailerId}/branches`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
+        : Promise.resolve([]),
+    enabled: !!planRetailerId,
+  });
+
+  useEffect(() => { setPlanBranchId(""); }, [planRetailerId]);
+
+  // ── Visits query ────────────────────────────────────────────────────────────
+  const visitsQueryKey = ["store-visits", filterMode, viewDate];
+  const { data: visits = [], isLoading: visitsLoading } = useQuery<StoreVisit[]>({
+    queryKey: visitsQueryKey,
+    queryFn: () => {
+      let qs = "";
+      if (filterMode === "date")     qs = `?date=${viewDate}`;
+      else if (filterMode === "upcoming") qs = `?dateFrom=${todayStr()}`;
+      else if (filterMode === "past")     qs = `?dateTo=${addDays(todayStr(), -1)}`;
+      return fetch(`${BASE}/api/store-visits${qs}`, { credentials: "include" }).then(r => r.ok ? r.json() : []);
+    },
+    refetchInterval: 60_000,
+  });
+
+  // ── Create mutation ─────────────────────────────────────────────────────────
+  const createVisit = useMutation({
+    mutationFn: (body: object) =>
+      fetch(`${BASE}/api/store-visits`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["store-visits"] });
+      setPlanDate(todayStr());
+      setPlanRetailerId("");
+      setPlanBranchId("");
+      setPlanNotes("");
+      setShowPlanForm(false);
+    },
+  });
+
+  // ── Update (mark visited / edit notes) mutation ─────────────────────────────
+  const updateVisit = useMutation({
+    mutationFn: ({ id, ...body }: { id: number; [k: string]: any }) =>
+      fetch(`${BASE}/api/store-visits/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["store-visits"] });
+      setVisitingId(null);
+      setVisitingNotes("");
+    },
+  });
+
+  // ── Delete mutation ─────────────────────────────────────────────────────────
+  const deleteVisit = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/store-visits/${id}`, { method: "DELETE", credentials: "include" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["store-visits"] }),
+  });
+
+  // ── Derived helpers ─────────────────────────────────────────────────────────
+  const handleSubmitPlan = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planRetailerId) return;
+    createVisit.mutate({
+      visitDate:  planDate,
+      retailerId: planRetailerId,
+      branchId:   planBranchId || null,
+      planNotes:  planNotes || null,
+    });
+  };
+
+  const handleMarkVisited = (visit: StoreVisit) => {
+    updateVisit.mutate({ id: visit.id, status: "visited", visitNotes: visitingNotes || null });
+  };
+
+  const statusBadge = (status: StoreVisit["status"]) => {
+    if (status === "visited") return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
+        <CheckSquare className="w-3 h-3" /> Visited
+      </span>
+    );
+    if (status === "missed") return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-500/15 text-red-400 border border-red-500/30">
+        <XCircle className="w-3 h-3" /> Missed
+      </span>
+    );
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+        <Clock className="w-3 h-3" /> Planned
+      </span>
+    );
+  };
+
+  const isMyVisit = (v: StoreVisit) => String(v.staff_user_id) === String(user?.id);
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Filter / date navigation ── */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+          {(["date", "upcoming", "past"] as const).map(m => (
+            <button key={m} onClick={() => setFilterMode(m)}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${filterMode === m ? "bg-amber-500 text-black" : "text-muted-foreground hover:text-foreground"}`}>
+              {m === "date" ? "By Date" : m === "upcoming" ? "Upcoming" : "Past Visits"}
+            </button>
+          ))}
+        </div>
+
+        {filterMode === "date" && (
+          <div className="flex items-center gap-2">
+            <button onClick={() => setViewDate(d => addDays(d, -1))}
+              className="w-8 h-8 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <input type="date" value={viewDate} onChange={e => setViewDate(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-amber-500" />
+            <button onClick={() => setViewDate(d => addDays(d, 1))}
+              className="w-8 h-8 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+              <ChevronRightIcon className="w-4 h-4" />
+            </button>
+            {viewDate !== todayStr() && (
+              <button onClick={() => setViewDate(todayStr())}
+                className="px-3 py-1.5 text-xs font-semibold bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 transition-colors">
+                Today
+              </button>
+            )}
+          </div>
+        )}
+
+        <button onClick={() => setShowPlanForm(v => !v)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition-colors">
+          <Plus className="w-4 h-4" />
+          Plan a Visit
+        </button>
+      </div>
+
+      {/* ── Plan form ── */}
+      <AnimatePresence>
+        {showPlanForm && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-4">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-amber-400" /> New Visit Plan
+            </h3>
+            <form onSubmit={handleSubmitPlan} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground font-medium">Visit Date</label>
+                  <input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} required
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground font-medium">Retailer / Store</label>
+                  <select value={planRetailerId} onChange={e => setPlanRetailerId(e.target.value ? Number(e.target.value) : "")} required
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500">
+                    <option value="">Select retailer…</option>
+                    {retailers.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground font-medium">Branch (optional)</label>
+                  <select value={planBranchId} onChange={e => setPlanBranchId(e.target.value ? Number(e.target.value) : "")}
+                    disabled={!planRetailerId || planBranches.length === 0}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-40">
+                    <option value="">All branches / no specific branch</option>
+                    {planBranches.map(b => <option key={b.id} value={b.id}>{b.name}{b.location ? ` — ${b.location}` : ""}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground font-medium">Planning Notes (optional)</label>
+                <textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} rows={2}
+                  placeholder="Purpose of visit, items to discuss, products to promote…"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowPlanForm(false)}
+                  className="px-4 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" disabled={createVisit.isPending || !planRetailerId}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors disabled:opacity-50 flex items-center gap-2">
+                  {createVisit.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Add to Schedule
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Visit list ── */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+            <ClipboardList className="w-4 h-4" />
+            {filterMode === "date"
+              ? (viewDate === todayStr() ? "Today's Schedule" : `Schedule — ${fmtDate(viewDate)}`)
+              : filterMode === "upcoming" ? "Upcoming Visits"
+              : "Past Visits"}
+            {!visitsLoading && (
+              <span className="text-xs font-normal">({visits.length})</span>
+            )}
+          </h3>
+        </div>
+
+        {visitsLoading ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          </div>
+        ) : visits.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+              <MapPin className="w-5 h-5 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">No visits scheduled</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {filterMode === "date"
+                  ? "Use the 'Plan a Visit' button to add stores to your schedule."
+                  : "Nothing to show for this period."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {visits.map(visit => (
+              <div key={visit.id}
+                className={`bg-white/5 border rounded-xl p-4 space-y-3 transition-colors ${
+                  visit.status === "visited" ? "border-green-500/20" :
+                  visit.status === "missed"  ? "border-red-500/20"   : "border-white/10"
+                }`}>
+                {/* Header row */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      visit.status === "visited" ? "bg-green-500/15" :
+                      visit.status === "missed"  ? "bg-red-500/15"   : "bg-amber-500/15"
+                    }`}>
+                      <MapPin className={`w-4 h-4 ${
+                        visit.status === "visited" ? "text-green-400" :
+                        visit.status === "missed"  ? "text-red-400"   : "text-amber-400"
+                      }`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{visit.retailer_name}</p>
+                      {visit.branch_name && (
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <Building2 className="w-3 h-3 flex-shrink-0" />
+                          {visit.branch_name}{visit.branch_location ? ` · ${visit.branch_location}` : ""}
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {filterMode !== "date" && <span className="mr-2">{fmtDate(visit.visit_date)}</span>}
+                        Planned by {visit.staff_name}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {statusBadge(visit.status)}
+                    {visit.status !== "visited" && (isMyVisit(visit) || user?.role === "super_admin") && (
+                      <button onClick={() => deleteVisit.mutate(visit.id)}
+                        title="Remove plan"
+                        className="w-7 h-7 rounded-lg hover:bg-red-500/15 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Plan notes */}
+                {visit.plan_notes && (
+                  <div className="text-xs text-muted-foreground bg-white/3 rounded-lg px-3 py-2 border border-white/5">
+                    <span className="font-medium text-foreground/60">Plan: </span>{visit.plan_notes}
+                  </div>
+                )}
+
+                {/* Visited state */}
+                {visit.status === "visited" && (
+                  <div className="space-y-1.5">
+                    {visit.visit_notes && (
+                      <div className="text-xs text-muted-foreground bg-green-500/5 rounded-lg px-3 py-2 border border-green-500/15">
+                        <span className="font-medium text-green-400/80">Report: </span>{visit.visit_notes}
+                      </div>
+                    )}
+                    {visit.visited_at && (
+                      <p className="text-xs text-muted-foreground pl-1">
+                        Visited {ago(visit.visited_at)}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Mark as visited inline */}
+                {visit.status !== "visited" && (
+                  <>
+                    {visitingId === visit.id ? (
+                      <div className="space-y-2 pt-1 border-t border-white/5">
+                        <textarea
+                          value={visitingNotes}
+                          onChange={e => setVisitingNotes(e.target.value)}
+                          rows={2}
+                          placeholder="Visit report / comments (optional)…"
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-green-500 resize-none"
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <button onClick={() => { setVisitingId(null); setVisitingNotes(""); }}
+                            className="px-3 py-1.5 text-xs rounded-lg border border-white/10 hover:bg-white/5 transition-colors">
+                            Cancel
+                          </button>
+                          <button onClick={() => handleMarkVisited(visit)}
+                            disabled={updateVisit.isPending}
+                            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-500 text-white transition-colors disabled:opacity-50 flex items-center gap-1">
+                            {updateVisit.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckSquare className="w-3 h-3" />}
+                            Confirm Visit
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 pt-1 border-t border-white/5">
+                        <button onClick={() => { setVisitingId(visit.id); setVisitingNotes(""); }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/20 transition-colors">
+                          <CheckSquare className="w-3.5 h-3.5" /> Mark as Visited
+                        </button>
+                        <button onClick={() => updateVisit.mutate({ id: visit.id, status: "missed" })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground border border-white/10 transition-colors">
+                          <XCircle className="w-3.5 h-3.5" /> Mark as Missed
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type Tab = "formitize" | "loans" | "drawdowns" | "messages" | "whatsapp" | "leads" | "store_visits";
 
 interface TabDef {
   id: Tab;
@@ -4758,6 +5169,7 @@ interface TabDef {
 }
 
 const ADMIN_TABS: Tab[] = ["formitize", "loans", "drawdowns", "messages"];
+const ALL_STAFF_TABS: Tab[] = ["store_visits", "leads", "whatsapp"];
 
 export default function ActivityPage() {
   const { user } = useStaffAuth();
@@ -4842,12 +5254,13 @@ export default function ActivityPage() {
   const leadsBadge     = leadsCount?.feedCount ?? 0;
 
   const ALL_TABS: TabDef[] = [
-    { id: "formitize",  label: "Formitize",       icon: <Bell className="w-4 h-4" /> },
-    { id: "loans",      label: "Loan Requests",   icon: <Egg className="w-4 h-4" /> },
-    { id: "drawdowns",  label: "Drawdowns",       icon: <ArrowDownCircle className="w-4 h-4" /> },
-    { id: "messages",   label: "Store Messages",  icon: <MessageSquare className="w-4 h-4" /> },
-    { id: "leads",      label: "Leads",            icon: <UserPlus className="w-4 h-4" /> },
-    { id: "whatsapp",   label: "WhatsApp",         icon: <MessageCircle className="w-4 h-4" /> },
+    { id: "formitize",    label: "Formitize",       icon: <Bell className="w-4 h-4" /> },
+    { id: "loans",        label: "Loan Requests",   icon: <Egg className="w-4 h-4" /> },
+    { id: "drawdowns",    label: "Drawdowns",       icon: <ArrowDownCircle className="w-4 h-4" /> },
+    { id: "messages",     label: "Store Messages",  icon: <MessageSquare className="w-4 h-4" /> },
+    { id: "store_visits", label: "Store Visits",    icon: <MapPin className="w-4 h-4" /> },
+    { id: "leads",        label: "Leads",            icon: <UserPlus className="w-4 h-4" /> },
+    { id: "whatsapp",     label: "WhatsApp",         icon: <MessageCircle className="w-4 h-4" /> },
   ];
 
   const TABS = isAdmin ? ALL_TABS : ALL_TABS.filter(t => !ADMIN_TABS.includes(t.id));
@@ -4901,12 +5314,13 @@ export default function ActivityPage() {
         </div>
       ) : (
         <>
-          {tab === "formitize"  && <FormitizeTab />}
-          {tab === "loans"      && <LoansTab />}
-          {tab === "drawdowns"  && <DrawdownsTab />}
-          {tab === "messages"   && <MessagesTab />}
-          {tab === "leads"      && <LeadsTab />}
-          {tab === "whatsapp"   && <WhatsAppTab />}
+          {tab === "formitize"    && <FormitizeTab />}
+          {tab === "loans"        && <LoansTab />}
+          {tab === "drawdowns"    && <DrawdownsTab />}
+          {tab === "messages"     && <MessagesTab />}
+          {tab === "store_visits" && <StoreVisitsTab />}
+          {tab === "leads"        && <LeadsTab />}
+          {tab === "whatsapp"     && <WhatsAppTab />}
         </>
       )}
     </div>
