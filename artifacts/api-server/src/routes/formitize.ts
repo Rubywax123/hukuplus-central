@@ -1640,14 +1640,22 @@ router.post("/formitize/webhook", async (req, res) => {
     const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
     return isNaN(n) || n <= 0 ? null : n;
   }
-  const facilityFeeAmount = parseCurrency(findField(
-    "facilityfeeamount", "facility fee amount", "facilityfee", "facility fee",
-    "arrangementfee", "arrangement fee"
-  ));
-  const interestAmount = parseCurrency(findField(
-    "totalinterestpayable", "total interest payable", "totalinterest",
-    "interest amount", "interestamount", "total interest"
-  ));
+  // formCalculate_2 = facility fee output (Formitize calc field, lowercased in fieldMap)
+  // formCalculate_1 = interest output (Formitize calc field, lowercased in fieldMap)
+  const facilityFeeAmount = parseCurrency(
+    fieldMap["formcalculate_2"] ||
+    findField(
+      "facilityfeeamount", "facility fee amount", "facilityfee", "facility fee",
+      "arrangementfee", "arrangement fee"
+    )
+  );
+  const interestAmount = parseCurrency(
+    fieldMap["formcalculate_1"] ||
+    findField(
+      "totalinterestpayable", "total interest payable", "totalinterest",
+      "interest amount", "interestamount", "total interest"
+    )
+  );
   const monthlyInstalment = parseCurrency(findField(
     "monthlyinstalmentamount", "monthly instalment amount", "monthlyinstalment",
     "monthly instalment", "instalment amount", "instalmentamount",

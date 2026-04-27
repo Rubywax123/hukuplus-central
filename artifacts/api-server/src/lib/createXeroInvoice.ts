@@ -1,54 +1,7 @@
 import { db, pool, activityTable } from "@workspace/db";
+import { getXeroAuth, xeroHeaders } from "./xeroAuth";
 
 const XERO_BASE = "https://api.xero.com/api.xro/2.0";
-
-// ─── Xero auth (mirrors syncXeroInvoices pattern) ─────────────────────────────
-
-async function getXeroAuth(): Promise<{ accessToken: string; tenantId: string } | null> {
-  const client = await pool.connect();
-  try {
-    const result = await client.query("SELECT * FROM xero_tokens WHERE id = 1");
-    const tokens = result.rows[0];
-    if (!tokens) return null;
-
-    const expiresAt = new Date(tokens.expires_at);
-    if (expiresAt.getTime() - Date.now() < 5 * 60 * 1000) {
-      const res = await fetch("https://identity.xero.com/connect/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: tokens.refresh_token,
-          client_id: process.env.XERO_CLIENT_ID!,
-          client_secret: process.env.XERO_CLIENT_SECRET!,
-        }),
-      });
-      if (!res.ok) {
-        console.warn("[xero-invoice] Token refresh failed:", await res.text());
-        return null;
-      }
-      const data = await res.json() as any;
-      const newExpiry = new Date(Date.now() + data.expires_in * 1000);
-      await client.query(
-        `UPDATE xero_tokens SET access_token=$1, refresh_token=$2, expires_at=$3, updated_at=NOW() WHERE id=1`,
-        [data.access_token, data.refresh_token ?? tokens.refresh_token, newExpiry]
-      );
-      return { accessToken: data.access_token, tenantId: tokens.tenant_id };
-    }
-    return { accessToken: tokens.access_token, tenantId: tokens.tenant_id };
-  } finally {
-    client.release();
-  }
-}
-
-function xeroHeaders(auth: { accessToken: string; tenantId: string }) {
-  return {
-    Authorization: `Bearer ${auth.accessToken}`,
-    "Xero-tenant-id": auth.tenantId,
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-}
 
 // ─── Find or resolve Xero contact ─────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ import { runMigrations } from "./lib/migrate";
 import { syncHukuPlusStores, syncRevolverStores, syncRevolverData } from "./routes/sync";
 import { syncXeroInvoices } from "./lib/syncXeroInvoices";
 import { autoSnapshotPreviousMonth } from "./lib/snapshotMonths";
+import { proactiveXeroRefresh } from "./lib/xeroAuth";
 
 const rawPort = process.env["PORT"];
 
@@ -94,6 +95,10 @@ async function runSnapshotCheck() {
 }
 
 function startSyncScheduler() {
+  // Proactively refresh Xero token on startup so it is fresh before any webhook fires.
+  // If already valid it still refreshes to push the expiry window forward.
+  proactiveXeroRefresh().catch(() => {});
+
   // Store sync: run once on startup, then every hour
   runStoreSync();
   setInterval(runStoreSync, STORE_SYNC_INTERVAL_MS);
