@@ -127,6 +127,7 @@ export async function createXeroInvoice(input: CreateXeroInvoiceInput): Promise<
 
   // 3. Build line items
   const todayStr = new Date().toISOString().split("T")[0];
+  const dueDate = new Date(Date.now() + 42 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const reference = `$${parseFloat(String(loanAmount)).toFixed(0)}`;
 
   const lineItems: any[] = [
@@ -167,6 +168,7 @@ export async function createXeroInvoice(input: CreateXeroInvoiceInput): Promise<
         Status: "SUBMITTED",
         Contact: contactId ? { ContactID: contactId } : { Name: customerName },
         Date: todayStr,
+        DueDate: dueDate,
         Reference: reference,
         LineItems: lineItems,
       },
