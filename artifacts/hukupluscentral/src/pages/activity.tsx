@@ -4791,12 +4791,14 @@ function StoreVisitsTab() {
   const [viewDate, setViewDate] = useState(todayStr());
   const [filterMode, setFilterMode] = useState<"date" | "upcoming" | "past">("date");
 
-  // ── Plan form state ─────────────────────────────────────────────────────────
+  // ── Plan / Log form state ────────────────────────────────────────────────────
   const [showPlanForm, setShowPlanForm] = useState(false);
+  const [formMode, setFormMode]         = useState<"plan" | "log">("plan");
   const [planDate, setPlanDate]         = useState(todayStr());
   const [planRetailerId, setPlanRetailerId] = useState<number | "">("");
   const [planBranchId,   setPlanBranchId]   = useState<number | "">("");
   const [planNotes, setPlanNotes]           = useState("");
+  const [logNotes,  setLogNotes]            = useState("");
 
   // ── Mark-as-visited inline state ────────────────────────────────────────────
   const [visitingId,    setVisitingId]    = useState<number | null>(null);
@@ -4849,6 +4851,7 @@ function StoreVisitsTab() {
       setPlanRetailerId("");
       setPlanBranchId("");
       setPlanNotes("");
+      setLogNotes("");
       setShowPlanForm(false);
     },
   });
@@ -4880,12 +4883,22 @@ function StoreVisitsTab() {
   const handleSubmitPlan = (e: React.FormEvent) => {
     e.preventDefault();
     if (!planRetailerId) return;
-    createVisit.mutate({
-      visitDate:  planDate,
-      retailerId: planRetailerId,
-      branchId:   planBranchId || null,
-      planNotes:  planNotes || null,
-    });
+    if (formMode === "log") {
+      createVisit.mutate({
+        visitDate:  planDate,
+        retailerId: planRetailerId,
+        branchId:   planBranchId || null,
+        visitNotes: logNotes || null,
+        status:     "visited",
+      });
+    } else {
+      createVisit.mutate({
+        visitDate:  planDate,
+        retailerId: planRetailerId,
+        branchId:   planBranchId || null,
+        planNotes:  planNotes || null,
+      });
+    }
   };
 
   const handleMarkVisited = (visit: StoreVisit) => {
@@ -4947,11 +4960,18 @@ function StoreVisitsTab() {
           </div>
         )}
 
-        <button onClick={() => setShowPlanForm(v => !v)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition-colors">
-          <Plus className="w-4 h-4" />
-          Plan a Visit
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => { setFormMode("plan"); setShowPlanForm(v => !v); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${showPlanForm && formMode === "plan" ? "bg-amber-500 text-black" : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30"}`}>
+            <CalendarDays className="w-4 h-4" />
+            Plan a Visit
+          </button>
+          <button onClick={() => { setFormMode("log"); setShowPlanForm(v => formMode === "log" ? !v : true); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${showPlanForm && formMode === "log" ? "bg-green-600 text-white" : "bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30"}`}>
+            <CheckSquare className="w-4 h-4" />
+            Log a Visit
+          </button>
+        </div>
       </div>
 
       {/* ── Plan form ── */}
@@ -4960,12 +4980,21 @@ function StoreVisitsTab() {
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
             className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-4">
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-amber-400" /> New Visit Plan
+              {formMode === "log"
+                ? <><CheckSquare className="w-4 h-4 text-green-400" /> Log an Unplanned Visit</>
+                : <><CalendarDays className="w-4 h-4 text-amber-400" /> New Visit Plan</>}
             </h3>
+            {formMode === "log" && (
+              <p className="text-xs text-muted-foreground -mt-1">
+                Record feedback for a store you visited without a prior plan.
+              </p>
+            )}
             <form onSubmit={handleSubmitPlan} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground font-medium">Visit Date</label>
+                  <label className="text-xs text-muted-foreground font-medium">
+                    {formMode === "log" ? "Date Visited" : "Visit Date"}
+                  </label>
                   <input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} required
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500" />
                 </div>
@@ -4987,22 +5016,41 @@ function StoreVisitsTab() {
                   </select>
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground font-medium">Planning Notes (optional)</label>
-                <textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} rows={2}
-                  placeholder="Purpose of visit, items to discuss, products to promote…"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none" />
-              </div>
+
+              {formMode === "plan" ? (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground font-medium">Planning Notes (optional)</label>
+                  <textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} rows={2}
+                    placeholder="Purpose of visit, items to discuss, products to promote…"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none" />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground font-medium">Visit Report / Comments</label>
+                  <textarea value={logNotes} onChange={e => setLogNotes(e.target.value)} rows={3}
+                    placeholder="What was discussed, feedback received, follow-up actions, stock levels…"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-green-500 resize-none" />
+                </div>
+              )}
+
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => setShowPlanForm(false)}
                   className="px-4 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={createVisit.isPending || !planRetailerId}
-                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors disabled:opacity-50 flex items-center gap-2">
-                  {createVisit.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                  Add to Schedule
-                </button>
+                {formMode === "plan" ? (
+                  <button type="submit" disabled={createVisit.isPending || !planRetailerId}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors disabled:opacity-50 flex items-center gap-2">
+                    {createVisit.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    Add to Schedule
+                  </button>
+                ) : (
+                  <button type="submit" disabled={createVisit.isPending || !planRetailerId}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-green-600 hover:bg-green-500 text-white transition-colors disabled:opacity-50 flex items-center gap-2">
+                    {createVisit.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckSquare className="w-3.5 h-3.5" />}
+                    Save Visit Report
+                  </button>
+                )}
               </div>
             </form>
           </motion.div>

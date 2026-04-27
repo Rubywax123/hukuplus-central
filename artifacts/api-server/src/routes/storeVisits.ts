@@ -47,11 +47,13 @@ router.get("/store-visits", requireStaffAuth, async (req, res): Promise<void> =>
 // ─── POST /api/store-visits ───────────────────────────────────────────────────
 router.post("/store-visits", requireStaffAuth, async (req, res): Promise<void> => {
   try {
-    const { visitDate, retailerId, branchId, planNotes } = req.body as {
+    const { visitDate, retailerId, branchId, planNotes, visitNotes, status } = req.body as {
       visitDate: string;
       retailerId: number;
       branchId?: number | null;
       planNotes?: string;
+      visitNotes?: string;
+      status?: string;
     };
 
     if (!visitDate || !retailerId) {
@@ -59,14 +61,18 @@ router.post("/store-visits", requireStaffAuth, async (req, res): Promise<void> =
       return;
     }
 
-    const staffUserId = req.staffUser!.staffUserId;
-    const staffName   = req.staffUser!.name;
+    const staffUserId  = req.staffUser!.staffUserId;
+    const staffName    = req.staffUser!.name;
+    const resolvedStatus = status === "visited" ? "visited" : "planned";
+    const visitedAt    = resolvedStatus === "visited" ? new Date() : null;
 
     const { rows } = await pool.query(
-      `INSERT INTO store_visits (visit_date, retailer_id, branch_id, staff_user_id, staff_name, plan_notes, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 'planned')
-         RETURNING *`,
-      [visitDate, retailerId, branchId ?? null, staffUserId, staffName, planNotes ?? null],
+      `INSERT INTO store_visits
+              (visit_date, retailer_id, branch_id, staff_user_id, staff_name, plan_notes, visit_notes, status, visited_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [visitDate, retailerId, branchId ?? null, staffUserId, staffName,
+       planNotes ?? null, visitNotes ?? null, resolvedStatus, visitedAt],
     );
     res.status(201).json(rows[0]);
   } catch (err: any) {
