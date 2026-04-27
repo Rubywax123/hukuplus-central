@@ -168,7 +168,7 @@ export async function createXeroInvoice(input: CreateXeroInvoiceInput): Promise<
         Contact: contactId ? { ContactID: contactId } : { Name: customerName },
         Date: todayStr,
         Reference: reference,
-        LineAmountTypes: "EXCLUSIVE",
+        LineAmountTypes: "NOTAX",
         LineItems: lineItems,
       },
     ],
