@@ -4775,7 +4775,14 @@ function todayStr() {
   return format(new Date(), "yyyy-MM-dd");
 }
 function fmtDate(d: string) {
-  try { return format(new Date(d + "T00:00:00"), "EEE d MMM yyyy"); } catch { return d; }
+  try {
+    const clean = d.length > 10 ? d.slice(0, 10) : d;
+    return format(new Date(clean + "T00:00:00"), "EEE d MMM yyyy");
+  } catch { return d; }
+}
+function isToday(d: string) {
+  const clean = d.length > 10 ? d.slice(0, 10) : d;
+  return clean === todayStr();
 }
 function addDays(d: string, n: number) {
   const dt = new Date(d + "T00:00:00");
@@ -5118,9 +5125,14 @@ function StoreVisitsTab() {
                           {visit.branch_name}{visit.branch_location ? ` · ${visit.branch_location}` : ""}
                         </p>
                       )}
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {filterMode !== "date" && <span className="mr-2">{fmtDate(visit.visit_date)}</span>}
-                        Planned by {visit.staff_name}
+                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center flex-wrap gap-x-1.5">
+                        {filterMode !== "date" && (
+                          <span className={`font-medium ${isToday(visit.visit_date) ? "text-amber-400" : ""}`}>
+                            {isToday(visit.visit_date) ? "Today" : fmtDate(visit.visit_date)}
+                          </span>
+                        )}
+                        {filterMode !== "date" && <span>·</span>}
+                        <span>By {visit.staff_name}</span>
                       </p>
                     </div>
                   </div>
