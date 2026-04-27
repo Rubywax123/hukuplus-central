@@ -4811,6 +4811,13 @@ function StoreVisitsTab() {
   const [visitingId,    setVisitingId]    = useState<number | null>(null);
   const [visitingNotes, setVisitingNotes] = useState("");
 
+  // ── Edit inline state ────────────────────────────────────────────────────────
+  const [editingId,       setEditingId]       = useState<number | null>(null);
+  const [editDate,        setEditDate]        = useState("");
+  const [editRetailerId,  setEditRetailerId]  = useState<number | "">("");
+  const [editBranchId,    setEditBranchId]    = useState<number | "">("");
+  const [editPlanNotes,   setEditPlanNotes]   = useState("");
+
   // ── Retailers for the plan form (deduplicated — one entry per retailer) ──────
   const { data: retailers = [] } = useQuery<StoreRetailer[]>({
     queryKey: ["retailers-unique"],
@@ -4827,7 +4834,17 @@ function StoreVisitsTab() {
     enabled: !!planRetailerId,
   });
 
+  const { data: editBranches = [] } = useQuery<StoreBranch[]>({
+    queryKey: ["branches-for-edit", editRetailerId],
+    queryFn: () =>
+      editRetailerId
+        ? fetch(`${BASE}/api/retailers/${editRetailerId}/branches`, { credentials: "include" }).then(r => r.ok ? r.json() : [])
+        : Promise.resolve([]),
+    enabled: !!editRetailerId,
+  });
+
   useEffect(() => { setPlanBranchId(""); }, [planRetailerId]);
+  useEffect(() => { setEditBranchId(""); }, [editRetailerId]);
 
   // ── Visits query ────────────────────────────────────────────────────────────
   const visitsQueryKey = ["store-visits", filterMode, viewDate];
@@ -4910,6 +4927,36 @@ function StoreVisitsTab() {
 
   const handleMarkVisited = (visit: StoreVisit) => {
     updateVisit.mutate({ id: visit.id, status: "visited", visitNotes: visitingNotes || null });
+  };
+
+  const openEdit = (visit: StoreVisit) => {
+    const clean = visit.visit_date.length > 10 ? visit.visit_date.slice(0, 10) : visit.visit_date;
+    setEditingId(visit.id);
+    setEditDate(clean);
+    setEditRetailerId(visit.retailer_id);
+    setEditBranchId(visit.branch_id ?? "");
+    setEditPlanNotes(visit.plan_notes ?? "");
+    setVisitingId(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDate("");
+    setEditRetailerId("");
+    setEditBranchId("");
+    setEditPlanNotes("");
+  };
+
+  const handleSaveEdit = (id: number) => {
+    if (!editRetailerId) return;
+    updateVisit.mutate({
+      id,
+      visitDate:  editDate,
+      retailerId: editRetailerId,
+      branchId:   editBranchId || null,
+      planNotes:  editPlanNotes || null,
+    });
+    cancelEdit();
   };
 
   const statusBadge = (status: StoreVisit["status"]) => {
@@ -5136,24 +5183,79 @@ function StoreVisitsTab() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
                     {statusBadge(visit.status)}
                     {visit.status !== "visited" && (isMyVisit(visit) || user?.role === "super_admin") && (
-                      <button onClick={() => deleteVisit.mutate(visit.id)}
-                        title="Remove plan"
-                        className="w-7 h-7 rounded-lg hover:bg-red-500/15 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        <button onClick={() => editingId === visit.id ? cancelEdit() : openEdit(visit)}
+                          title="Edit plan"
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${editingId === visit.id ? "bg-amber-500/20 text-amber-400" : "hover:bg-white/10 text-muted-foreground hover:text-foreground"}`}>
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => deleteVisit.mutate(visit.id)}
+                          title="Remove plan"
+                          className="w-7 h-7 rounded-lg hover:bg-red-500/15 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
 
-                {/* Plan notes */}
-                {visit.plan_notes && (
-                  <div className="text-xs text-muted-foreground bg-white/3 rounded-lg px-3 py-2 border border-white/5">
-                    <span className="font-medium text-foreground/60">Plan: </span>{visit.plan_notes}
+                {/* Inline edit form */}
+                {editingId === visit.id && (
+                  <div className="space-y-3 pt-1 border-t border-amber-500/20">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground font-medium">Visit Date</label>
+                        <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} required
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground font-medium">Retailer</label>
+                        <select value={editRetailerId} onChange={e => setEditRetailerId(e.target.value ? Number(e.target.value) : "")}
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500">
+                          {retailers.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground font-medium">Branch</label>
+                        <select value={editBranchId} onChange={e => setEditBranchId(e.target.value ? Number(e.target.value) : "")}
+                          disabled={!editRetailerId || editBranches.length === 0}
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-40">
+                          <option value="">No specific branch</option>
+                          {editBranches.map(b => <option key={b.id} value={b.id}>{b.name}{b.location ? ` — ${b.location}` : ""}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground font-medium">Planning Notes</label>
+                      <textarea value={editPlanNotes} onChange={e => setEditPlanNotes(e.target.value)} rows={2}
+                        placeholder="Purpose of visit, items to discuss…"
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none" />
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={cancelEdit}
+                        className="px-3 py-1.5 text-xs rounded-lg border border-white/10 hover:bg-white/5 transition-colors">
+                        Cancel
+                      </button>
+                      <button onClick={() => handleSaveEdit(visit.id)} disabled={updateVisit.isPending || !editRetailerId}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors disabled:opacity-50 flex items-center gap-1">
+                        {updateVisit.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                        Save Changes
+                      </button>
+                    </div>
                   </div>
                 )}
+
+                {/* Plan notes (hidden while editing) */}
+                {!editingId || editingId !== visit.id ? (
+                  visit.plan_notes && (
+                    <div className="text-xs text-muted-foreground bg-white/3 rounded-lg px-3 py-2 border border-white/5">
+                      <span className="font-medium text-foreground/60">Plan: </span>{visit.plan_notes}
+                    </div>
+                  )
+                ) : null}
 
                 {/* Visited state */}
                 {visit.status === "visited" && (
@@ -5171,8 +5273,8 @@ function StoreVisitsTab() {
                   </div>
                 )}
 
-                {/* Mark as visited inline */}
-                {visit.status !== "visited" && (
+                {/* Mark as visited inline (hidden while editing) */}
+                {visit.status !== "visited" && editingId !== visit.id && (
                   <>
                     {visitingId === visit.id ? (
                       <div className="space-y-2 pt-1 border-t border-white/5">

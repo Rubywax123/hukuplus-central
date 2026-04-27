@@ -85,10 +85,13 @@ router.post("/store-visits", requireStaffAuth, async (req, res): Promise<void> =
 router.patch("/store-visits/:id", requireStaffAuth, async (req, res): Promise<void> => {
   try {
     const id = Number(req.params.id);
-    const { status, visitNotes, planNotes } = req.body as {
+    const { status, visitNotes, planNotes, visitDate, retailerId, branchId } = req.body as {
       status?: string;
       visitNotes?: string;
       planNotes?: string;
+      visitDate?: string;
+      retailerId?: number;
+      branchId?: number | null;
     };
 
     const sets: string[] = ["updated_at = NOW()"];
@@ -102,8 +105,11 @@ router.patch("/store-visits/:id", requireStaffAuth, async (req, res): Promise<vo
         sets.push(`visited_at = NOW()`);
       }
     }
-    if (visitNotes !== undefined) { sets.push(`visit_notes = $${i++}`); params.push(visitNotes); }
-    if (planNotes  !== undefined) { sets.push(`plan_notes  = $${i++}`); params.push(planNotes);  }
+    if (visitNotes  !== undefined) { sets.push(`visit_notes  = $${i++}`); params.push(visitNotes); }
+    if (planNotes   !== undefined) { sets.push(`plan_notes   = $${i++}`); params.push(planNotes);  }
+    if (visitDate   !== undefined) { sets.push(`visit_date   = $${i++}`); params.push(visitDate);  }
+    if (retailerId  !== undefined) { sets.push(`retailer_id  = $${i++}`); params.push(retailerId); }
+    if (branchId    !== undefined) { sets.push(`branch_id    = $${i++}`); params.push(branchId ?? null); }
 
     params.push(id);
     const { rows } = await pool.query(
