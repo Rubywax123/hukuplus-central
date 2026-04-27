@@ -4811,9 +4811,9 @@ function StoreVisitsTab() {
   const [visitingId,    setVisitingId]    = useState<number | null>(null);
   const [visitingNotes, setVisitingNotes] = useState("");
 
-  // ── Retailers for the plan form ─────────────────────────────────────────────
+  // ── Retailers for the plan form (deduplicated — one entry per retailer) ──────
   const { data: retailers = [] } = useQuery<StoreRetailer[]>({
-    queryKey: ["retailers-list"],
+    queryKey: ["retailers-unique"],
     queryFn: () => fetch(`${BASE}/api/retailers`, { credentials: "include" }).then(r => r.ok ? r.json() : []),
     staleTime: 5 * 60 * 1000,
   });
