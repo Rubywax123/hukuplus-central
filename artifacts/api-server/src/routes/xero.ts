@@ -597,5 +597,25 @@ router.get("/xero/sync-invoices/status", requireStaffAuth, requireSuperAdmin, as
   }
 });
 
+// ─── POST /xero/clear-invoice/:agreementId — unlink a voided Xero invoice ─────
+// Clears the xero_invoice_id on an agreement so a new invoice can be raised.
+// Use after voiding the wrong invoice in Xero itself.
+router.post("/xero/clear-invoice/:agreementId", requireStaffAuth, async (req: Request, res: Response) => {
+  const id = parseInt(req.params.agreementId, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid agreement ID" }); return; }
+
+  const client = await pool.connect();
+  try {
+    const { rowCount } = await client.query(
+      `UPDATE agreements SET xero_invoice_id = NULL WHERE id = $1`,
+      [id]
+    );
+    if (!rowCount) { res.status(404).json({ error: "Agreement not found" }); return; }
+    res.json({ ok: true });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;
 

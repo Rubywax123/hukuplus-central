@@ -57,18 +57,38 @@ async function findTrackingOption(
     const retailerNorm = norm(retailerName);
     const branchNorm   = norm(branchName);
 
+    // Pass 1 — prefer options that contain BOTH retailer AND branch (e.g. "Profeeds Mazowe")
     for (const cat of categories) {
       if (cat.Status === "ARCHIVED") continue;
-      const options: any[] = cat.Options ?? [];
-      for (const opt of options) {
+      for (const opt of (cat.Options ?? []) as any[]) {
         if (opt.Status === "ARCHIVED") continue;
         const optNorm = norm(opt.Name ?? "");
-        // Match if option contains both retailer and branch, or retailer alone
-        if (optNorm.includes(retailerNorm) || optNorm.includes(branchNorm)) {
+        if (
+          optNorm.includes(retailerNorm) &&
+          branchNorm.length > 0 &&
+          optNorm.includes(branchNorm)
+        ) {
           return { categoryName: cat.Name, optionName: opt.Name };
         }
       }
     }
+
+    // Pass 2 — fall back to retailer-only match (e.g. "Profeeds" when branch unknown)
+    for (const cat of categories) {
+      if (cat.Status === "ARCHIVED") continue;
+      for (const opt of (cat.Options ?? []) as any[]) {
+        if (opt.Status === "ARCHIVED") continue;
+        const optNorm = norm(opt.Name ?? "");
+        if (optNorm.includes(retailerNorm)) {
+          console.warn(
+            `[xero-invoice] Exact branch match not found for "${branchName}" — ` +
+            `falling back to "${opt.Name}" (retailer-only match).`
+          );
+          return { categoryName: cat.Name, optionName: opt.Name };
+        }
+      }
+    }
+
     console.warn(`[xero-invoice] No tracking option found for "${retailerName}" / "${branchName}"`);
     return null;
   } catch (err: any) {

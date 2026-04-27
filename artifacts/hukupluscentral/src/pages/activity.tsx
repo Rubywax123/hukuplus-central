@@ -122,7 +122,7 @@ const FILE_DOC_TYPES = [
   { value: "Other",         label: "Other"          },
 ];
 
-function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned, onRaiseInvoice }: {
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned, onRaiseInvoice, onReraiseInvoice }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
@@ -132,6 +132,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
   onViewProfile?: () => void;
   onReassigned?: (retailerName: string, branchName: string | null) => void;
   onRaiseInvoice?: () => void;
+  onReraiseInvoice?: () => void;
 }) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
@@ -294,8 +295,17 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
               </span>
             )}
             {n.xero_invoice_id ? (
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">
                 <Receipt className="w-3 h-3" /> Xero invoice raised
+                {onReraiseInvoice && (
+                  <button
+                    onClick={onReraiseInvoice}
+                    className="ml-1 text-amber-400 hover:text-amber-300 underline underline-offset-2"
+                    title="Void in Xero first, then click to re-raise"
+                  >
+                    Re-raise
+                  </button>
+                )}
               </span>
             ) : null}
           </div>
@@ -507,6 +517,20 @@ function FormitizeTab() {
     });
   };
 
+  const openReraiseModal = async (n: FNotification) => {
+    if (!n.agreement_id) return;
+    // Clear the existing invoice link so the raise endpoint won't reject with 409
+    try {
+      await fetch(`${BASE}/api/xero/clear-invoice/${n.agreement_id}`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch { /* non-fatal — raise endpoint will show an error if still linked */ }
+    // Invalidate so the card refreshes, then open the raise modal
+    await qc.invalidateQueries({ queryKey: ["notifications"] });
+    openRaiseModal({ ...n, xero_invoice_id: null });
+  };
+
   const submitRaiseInvoice = async () => {
     if (!raiseModal.notification?.agreement_id) return;
     setRaiseLoading(true);
@@ -673,6 +697,7 @@ function FormitizeTab() {
                 onViewProfile={n.customer_id ? () => navigate(`/customers?customerId=${n.customer_id}`) : undefined}
                 onReassigned={() => qc.invalidateQueries({ queryKey: ["notifications"] })}
                 onRaiseInvoice={n.task_type === "agreement" && n.agreement_id && !n.xero_invoice_id ? () => openRaiseModal(n) : undefined}
+                onReraiseInvoice={n.task_type === "agreement" && n.agreement_id && !!n.xero_invoice_id ? () => openReraiseModal(n) : undefined}
               />
             ))}
           </AnimatePresence>
