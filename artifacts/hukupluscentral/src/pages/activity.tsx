@@ -9,6 +9,7 @@ import {
   Send, CheckCircle2, Plus, Loader2, X, ArrowDownCircle, MessageCircle, Phone,
   DollarSign, CreditCard, FileText, AlertTriangle, ArrowRight, Lock, ExternalLink,
   LayoutTemplate, Search, Link2, UserPlus, Download, Clipboard, Trash2, Pencil, RotateCcw, FolderOpen,
+  Receipt,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -99,6 +100,12 @@ interface FNotification {
   status: "new" | "actioned";
   notes: string | null;
   created_at: string;
+  // Joined from agreements table (agreement-type notifications only)
+  agreement_id: number | null;
+  loan_amount: number | null;
+  facility_fee_amount: number | null;
+  interest_amount: number | null;
+  xero_invoice_id: string | null;
 }
 
 interface CountsResponse {
@@ -115,7 +122,7 @@ const FILE_DOC_TYPES = [
   { value: "Other",         label: "Other"          },
 ];
 
-function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned }: {
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned, onRaiseInvoice }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
@@ -124,6 +131,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
   onFileCRM?: (note: string) => void;
   onViewProfile?: () => void;
   onReassigned?: (retailerName: string, branchName: string | null) => void;
+  onRaiseInvoice?: () => void;
 }) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
@@ -266,6 +274,32 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
         {n.xero_bank_transaction_id && (
           <p className="text-xs text-white/30 mt-0.5">Xero TX: {n.xero_bank_transaction_id}</p>
         )}
+
+        {/* ── Agreement financial summary (agreement-type only) ── */}
+        {n.task_type === "agreement" && n.agreement_id && (
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
+            {n.loan_amount != null && Number(n.loan_amount) > 0 && (
+              <span className="text-xs text-white/60 bg-white/5 border border-white/10 rounded px-2 py-0.5">
+                Loan <span className="text-white font-medium">${Number(n.loan_amount).toFixed(0)}</span>
+              </span>
+            )}
+            {n.facility_fee_amount != null && Number(n.facility_fee_amount) > 0 && (
+              <span className="text-xs text-white/60 bg-white/5 border border-white/10 rounded px-2 py-0.5">
+                Facility fee <span className="text-white font-medium">${Number(n.facility_fee_amount).toFixed(2)}</span>
+              </span>
+            )}
+            {n.interest_amount != null && Number(n.interest_amount) > 0 && (
+              <span className="text-xs text-white/60 bg-white/5 border border-white/10 rounded px-2 py-0.5">
+                Interest <span className="text-white font-medium">${Number(n.interest_amount).toFixed(2)}</span>
+              </span>
+            )}
+            {n.xero_invoice_id ? (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">
+                <Receipt className="w-3 h-3" /> Xero invoice raised
+              </span>
+            ) : null}
+          </div>
+        )}
         {n.notes && !isNew && (
           <p className="text-xs text-sky-300/60 mt-1 flex items-center gap-1">
             <FileText className="w-3 h-3" />{n.notes}
@@ -284,6 +318,17 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
           >
             <ExternalLink className="w-3.5 h-3.5" />
             View Profile
+          </button>
+        )}
+        {/* ── Raise Xero Invoice button (agreement-type, not yet invoiced) ── */}
+        {n.task_type === "agreement" && n.agreement_id && !n.xero_invoice_id && onRaiseInvoice && (
+          <button
+            onClick={onRaiseInvoice}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all"
+            title="Review and raise Xero invoice"
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            Raise Invoice
           </button>
         )}
         {n.task_type === "payment" && onProcessPayment && isNew && (
@@ -438,6 +483,57 @@ function FormitizeTab() {
   const [paymentNotification, setPaymentNotification] = useState<FNotification | null>(null);
   const [disbursementNotification, setDisbursementNotification] = useState<FNotification | null>(null);
 
+  // ── Raise Xero Invoice modal ───────────────────────────────────────────────
+  const [raiseModal, setRaiseModal] = useState<{
+    open: boolean;
+    notification: FNotification | null;
+    customerName: string;
+    loanAmount: string;
+    facilityFeeAmount: string;
+    interestAmount: string;
+  }>({ open: false, notification: null, customerName: "", loanAmount: "", facilityFeeAmount: "", interestAmount: "" });
+  const [raiseLoading, setRaiseLoading] = useState(false);
+  const [raiseError, setRaiseError] = useState("");
+
+  const openRaiseModal = (n: FNotification) => {
+    setRaiseError("");
+    setRaiseModal({
+      open: true,
+      notification: n,
+      customerName:      n.customer_name ?? "",
+      loanAmount:        n.loan_amount        != null ? String(n.loan_amount)        : "",
+      facilityFeeAmount: n.facility_fee_amount != null ? String(n.facility_fee_amount) : "",
+      interestAmount:    n.interest_amount     != null ? String(n.interest_amount)     : "",
+    });
+  };
+
+  const submitRaiseInvoice = async () => {
+    if (!raiseModal.notification?.agreement_id) return;
+    setRaiseLoading(true);
+    setRaiseError("");
+    try {
+      const res = await fetch(`${BASE}/api/xero/raise-invoice/${raiseModal.notification.agreement_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          customerName:      raiseModal.customerName.trim(),
+          loanAmount:        parseFloat(raiseModal.loanAmount)        || 0,
+          facilityFeeAmount: raiseModal.facilityFeeAmount ? parseFloat(raiseModal.facilityFeeAmount) : null,
+          interestAmount:    raiseModal.interestAmount    ? parseFloat(raiseModal.interestAmount)    : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRaiseError(data.error || "Failed to raise invoice"); return; }
+      setRaiseModal(m => ({ ...m, open: false, notification: null }));
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    } catch {
+      setRaiseError("Network error — please try again");
+    } finally {
+      setRaiseLoading(false);
+    }
+  };
+
   const statusFilter = showActioned ? "all" : "new";
 
   const { data: notifications = [], isLoading, refetch } = useQuery<FNotification[]>({
@@ -576,6 +672,7 @@ function FormitizeTab() {
                 onFileCRM={DISBURSEMENT_TYPES.has(n.task_type) ? (note) => markOneMutation.mutate({ id: n.id, status: "actioned", notes: note }) : undefined}
                 onViewProfile={n.customer_id ? () => navigate(`/customers?customerId=${n.customer_id}`) : undefined}
                 onReassigned={() => qc.invalidateQueries({ queryKey: ["notifications"] })}
+                onRaiseInvoice={n.task_type === "agreement" && n.agreement_id && !n.xero_invoice_id ? () => openRaiseModal(n) : undefined}
               />
             ))}
           </AnimatePresence>
@@ -607,6 +704,123 @@ function FormitizeTab() {
             qc.invalidateQueries({ queryKey: ["notification-counts"] });
           }}
         />
+      )}
+    </AnimatePresence>
+
+    {/* ── Raise Xero Invoice Modal ── */}
+    <AnimatePresence>
+      {raiseModal.open && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={e => { if (e.target === e.currentTarget && !raiseLoading) setRaiseModal(m => ({ ...m, open: false })); }}
+        >
+          <motion.div
+            initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }}
+            className="bg-[#1a1a2e] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-amber-400" />
+                Raise Xero Invoice
+              </h2>
+              <button onClick={() => !raiseLoading && setRaiseModal(m => ({ ...m, open: false }))} className="text-white/40 hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {raiseModal.notification && (
+              <div className="text-xs text-muted-foreground bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
+                <Store className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                <span>
+                  {raiseModal.notification.customer_name}
+                  {raiseModal.notification.retailer_name && ` · ${raiseModal.notification.retailer_name}`}
+                  {raiseModal.notification.branch_name && ` — ${raiseModal.notification.branch_name}`}
+                </span>
+              </div>
+            )}
+
+            <p className="text-sm text-muted-foreground">Review and correct details before raising in Xero. Edits here are saved back to the agreement record.</p>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Customer Name</label>
+              <input
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400/50"
+                value={raiseModal.customerName}
+                onChange={e => setRaiseModal(m => ({ ...m, customerName: e.target.value }))}
+                placeholder="Full name as it appears in Xero"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: "Loan Amount", key: "loanAmount" as const, placeholder: "0.00" },
+                { label: "Facility Fee", key: "facilityFeeAmount" as const, placeholder: "0.00" },
+                { label: "Interest", key: "interestAmount" as const, placeholder: "0.00" },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">{f.label} (USD)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400/50"
+                    value={raiseModal[f.key]}
+                    onChange={e => setRaiseModal(m => ({ ...m, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Live invoice preview */}
+            {(() => {
+              const loan = parseFloat(raiseModal.loanAmount) || 0;
+              const fee  = parseFloat(raiseModal.facilityFeeAmount) || 0;
+              const int_ = parseFloat(raiseModal.interestAmount) || 0;
+              const total = loan + fee + int_;
+              return (
+                <div className="bg-amber-500/5 border border-amber-500/15 rounded-lg px-4 py-3 text-sm">
+                  <p className="text-amber-300 font-semibold mb-2 text-xs uppercase tracking-wider">Invoice preview</p>
+                  <div className="space-y-1 text-muted-foreground">
+                    {loan > 0  && <div className="flex justify-between"><span>HukuPlus Loan (621)</span><span className="text-white">${loan.toFixed(2)}</span></div>}
+                    {fee  > 0  && <div className="flex justify-between"><span>Facility Fee (202)</span><span className="text-white">${fee.toFixed(2)}</span></div>}
+                    {int_ > 0  && <div className="flex justify-between"><span>42 days interest (201)</span><span className="text-white">${int_.toFixed(2)}</span></div>}
+                    {total > 0 && <div className="flex justify-between border-t border-white/10 mt-2 pt-2 font-semibold text-white"><span>Total</span><span>${total.toFixed(2)}</span></div>}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Reference: <span className="font-mono text-amber-300">${loan > 0 ? Math.round(loan) : "?"}</span>
+                    {" · "}Status: <span className="text-yellow-400">Awaiting Approval</span>
+                  </p>
+                </div>
+              );
+            })()}
+
+            {raiseError && (
+              <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{raiseError}</p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setRaiseModal(m => ({ ...m, open: false }))}
+                disabled={raiseLoading}
+                className="flex-1 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm font-medium border border-white/10 transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitRaiseInvoice}
+                disabled={raiseLoading || !raiseModal.customerName.trim() || (parseFloat(raiseModal.loanAmount) || 0) <= 0}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-sm font-semibold transition-colors disabled:opacity-40"
+              >
+                {raiseLoading
+                  ? <><Loader2 className="w-4 h-4 animate-spin" />Raising…</>
+                  : <><Receipt className="w-4 h-4" />Raise Invoice</>
+                }
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
       )}
     </AnimatePresence>
     </>

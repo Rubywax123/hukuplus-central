@@ -1779,12 +1779,26 @@ router.get("/formitize/notifications", requireStaffAuth, requireSuperAdmin, asyn
   try {
     const { product, task_type, status } = req.query;
     const params: any[] = [];
-    let where = "WHERE 1=1";
-    if (product && product !== "all") { params.push(product); where += ` AND product = $${params.length}`; }
-    if (task_type && task_type !== "all") { params.push(task_type); where += ` AND task_type = $${params.length}`; }
-    if (status && status !== "all") { params.push(status); where += ` AND status = $${params.length}`; }
+    const conditions: string[] = [];
+    if (product && product !== "all") { params.push(product); conditions.push(`fn.product = $${params.length}`); }
+    if (task_type && task_type !== "all") { params.push(task_type); conditions.push(`fn.task_type = $${params.length}`); }
+    if (status && status !== "all") { params.push(status); conditions.push(`fn.status = $${params.length}`); }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await pool.query(
-      `SELECT * FROM formitize_notifications ${where} ORDER BY created_at DESC LIMIT 500`,
+      `SELECT
+         fn.*,
+         a.id               AS agreement_id,
+         a.loan_amount,
+         a.facility_fee_amount,
+         a.interest_amount,
+         a.xero_invoice_id
+       FROM formitize_notifications fn
+       LEFT JOIN agreements a
+         ON a.formitize_job_id = fn.formitize_job_id
+         AND fn.formitize_job_id IS NOT NULL
+       ${where}
+       ORDER BY fn.created_at DESC
+       LIMIT 500`,
       params
     );
     res.json(result.rows);
