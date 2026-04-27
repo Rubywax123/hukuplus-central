@@ -1750,17 +1750,80 @@ router.post("/formitize/webhook", async (req, res) => {
 
   // ── Auto-raise Xero invoice (HukuPlus agreements only, non-blocking) ──────
   if (isAgreement && loanAmount > 0) {
+    // Capture the Marishoma loan number before entering the async closure —
+    // calculated fields (formCalculate_*) are NOT sent by Formitize webhooks,
+    // so we look up loanRaisingFee + accruedInterest from the Loan Register instead.
+    const marishomaLoanNo = fieldMap["marishomaloanno"] || null;
+
     setImmediate(async () => {
       try {
+        let resolvedFacilityFee: number | null = facilityFeeAmount ?? null;
+        let resolvedInterest:    number | null = interestAmount    ?? null;
+
+        // Look up fees from the Loan Register if either is missing
+        if ((resolvedFacilityFee == null || resolvedInterest == null) && marishomaLoanNo) {
+          try {
+            const LR_URL = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
+            const LR_KEY = process.env.HUKUPLUS_API_KEY;
+            const lrHdrs: Record<string, string> = { "Content-Type": "application/json" };
+            if (LR_KEY) {
+              lrHdrs["Authorization"]    = `Bearer ${LR_KEY}`;
+              lrHdrs["X-Central-System"] = "HukuPlusCentral";
+            }
+            // Try a direct loanNumber filter first; fall back to scanning the full list
+            const lrRes = await fetch(
+              `${LR_URL}/api/central/loans?loanNumber=${encodeURIComponent(marishomaLoanNo)}`,
+              { headers: lrHdrs },
+            );
+            if (lrRes.ok) {
+              const lrData = await lrRes.json() as any;
+              const loans: any[] = Array.isArray(lrData)
+                ? lrData
+                : (lrData.loans ?? lrData.data ?? []);
+              const loan = loans.find(
+                (l: any) => String(l.loanNumber) === String(marishomaLoanNo),
+              );
+              if (loan) {
+                if (resolvedFacilityFee == null && loan.loanRaisingFee != null) {
+                  resolvedFacilityFee = parseFloat(String(loan.loanRaisingFee)) || null;
+                }
+                if (resolvedInterest == null && loan.accruedInterest != null) {
+                  resolvedInterest = parseFloat(String(loan.accruedInterest)) || null;
+                }
+                console.log(
+                  `[xero-invoice] LR fees for loan #${marishomaLoanNo}: ` +
+                  `facilityFee=${resolvedFacilityFee} interest=${resolvedInterest}`,
+                );
+                // Persist back to the agreement so manual re-raise also sees them
+                if (resolvedFacilityFee != null || resolvedInterest != null) {
+                  await pool.query(
+                    `UPDATE agreements
+                        SET facility_fee_amount = COALESCE($1, facility_fee_amount),
+                            interest_amount     = COALESCE($2, interest_amount)
+                      WHERE id = $3`,
+                    [resolvedFacilityFee, resolvedInterest, agreement.id],
+                  );
+                }
+              } else {
+                console.warn(`[xero-invoice] LR loan #${marishomaLoanNo} not found — fees will be omitted`);
+              }
+            } else {
+              console.warn(`[xero-invoice] LR fee lookup HTTP ${lrRes.status} for loan #${marishomaLoanNo}`);
+            }
+          } catch (lrErr: any) {
+            console.warn(`[xero-invoice] LR fee lookup failed for loan #${marishomaLoanNo}:`, lrErr.message);
+          }
+        }
+
         const result = await createXeroInvoice({
           agreementId: agreement.id,
           customerName,
           customerPhone: customerPhone ?? null,
           loanAmount,
-          facilityFeeAmount: facilityFeeAmount ?? null,
-          interestAmount: interestAmount ?? null,
+          facilityFeeAmount: resolvedFacilityFee,
+          interestAmount:    resolvedInterest,
           retailerName: resolvedRetailerName ?? null,
-          branchName: resolvedBranchName ?? null,
+          branchName:   resolvedBranchName   ?? null,
         });
         if (!result.ok) {
           console.warn(`[formitize:webhook] Xero invoice skipped for #${agreement.id}: ${result.error}`);
