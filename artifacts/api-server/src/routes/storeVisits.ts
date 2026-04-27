@@ -124,6 +124,109 @@ router.patch("/store-visits/:id", requireStaffAuth, async (req, res): Promise<vo
   }
 });
 
+// ─── GET /api/store-visits/analytics ─────────────────────────────────────────
+// Optional query params: dateFrom, dateTo (YYYY-MM-DD). Only counts "visited" records.
+router.get("/store-visits/analytics", requireStaffAuth, async (req, res): Promise<void> => {
+  try {
+    const { dateFrom, dateTo } = req.query as Record<string, string>;
+
+    const dateConds: string[] = ["sv.status = 'visited'"];
+    const dateParams: any[] = [];
+    let pi = 1;
+    if (dateFrom) { dateConds.push(`sv.visit_date >= $${pi++}`); dateParams.push(dateFrom); }
+    if (dateTo)   { dateConds.push(`sv.visit_date <= $${pi++}`); dateParams.push(dateTo);   }
+    const dateWhere = dateConds.join(" AND ");
+
+    // ── Per-retailer aggregates ──────────────────────────────────────────────
+    const { rows: byRetailer } = await pool.query<{
+      retailer_id: number; retailer_name: string;
+      total_visits: string; last_visit_date: string; first_visit_date: string;
+    }>(
+      `SELECT sv.retailer_id,
+              r.name                               AS retailer_name,
+              COUNT(*)                             AS total_visits,
+              MAX(sv.visit_date::text)             AS last_visit_date,
+              MIN(sv.visit_date::text)             AS first_visit_date
+         FROM store_visits sv
+         JOIN retailers r ON r.id = sv.retailer_id
+        WHERE ${dateWhere}
+        GROUP BY sv.retailer_id, r.name
+        ORDER BY total_visits DESC`,
+      dateParams,
+    );
+
+    // ── Monthly per-retailer breakdown ───────────────────────────────────────
+    const { rows: monthlyByRetailer } = await pool.query<{
+      retailer_id: number; month: string; count: string;
+    }>(
+      `SELECT sv.retailer_id,
+              TO_CHAR(sv.visit_date, 'YYYY-MM') AS month,
+              COUNT(*)                           AS count
+         FROM store_visits sv
+        WHERE ${dateWhere}
+        GROUP BY sv.retailer_id, month
+        ORDER BY sv.retailer_id, month`,
+      dateParams,
+    );
+
+    // ── Overall monthly trend ────────────────────────────────────────────────
+    const { rows: monthlyTrend } = await pool.query<{ month: string; count: string }>(
+      `SELECT TO_CHAR(sv.visit_date, 'YYYY-MM') AS month,
+              COUNT(*)                           AS count
+         FROM store_visits sv
+        WHERE ${dateWhere}
+        GROUP BY month
+        ORDER BY month`,
+      dateParams,
+    );
+
+    // ── Overall summary ──────────────────────────────────────────────────────
+    const totalVisits       = byRetailer.reduce((s, r) => s + Number(r.total_visits), 0);
+    const uniqueRetailers   = byRetailer.length;
+    const mostVisited       = byRetailer[0] ?? null;
+
+    // Build monthly map per retailer
+    const monthlyMap: Record<number, { month: string; count: number }[]> = {};
+    for (const row of monthlyByRetailer) {
+      if (!monthlyMap[row.retailer_id]) monthlyMap[row.retailer_id] = [];
+      monthlyMap[row.retailer_id].push({ month: row.month, count: Number(row.count) });
+    }
+
+    // Calculate avg days between visits per retailer
+    const retailerRows = byRetailer.map(r => {
+      const tv = Number(r.total_visits);
+      let avgDaysBetween: number | null = null;
+      if (tv > 1 && r.first_visit_date && r.last_visit_date) {
+        const ms  = new Date(r.last_visit_date).getTime() - new Date(r.first_visit_date).getTime();
+        avgDaysBetween = Math.round(ms / (1000 * 60 * 60 * 24) / (tv - 1));
+      }
+      return {
+        retailer_id:     r.retailer_id,
+        retailer_name:   r.retailer_name,
+        total_visits:    tv,
+        last_visit_date: r.last_visit_date ?? null,
+        first_visit_date: r.first_visit_date ?? null,
+        avg_days_between: avgDaysBetween,
+        monthly:         monthlyMap[r.retailer_id] ?? [],
+      };
+    });
+
+    res.json({
+      summary: {
+        total_visits:        totalVisits,
+        unique_retailers:    uniqueRetailers,
+        most_visited_name:   mostVisited?.retailer_name ?? null,
+        most_visited_count:  mostVisited ? Number(mostVisited.total_visits) : 0,
+      },
+      by_retailer: retailerRows,
+      monthly_trend: monthlyTrend.map(r => ({ month: r.month, count: Number(r.count) })),
+    });
+  } catch (err: any) {
+    console.error("[store-visits/analytics] GET error:", err.message);
+    res.status(500).json({ error: "Failed to fetch analytics" });
+  }
+});
+
 // ─── DELETE /api/store-visits/:id ────────────────────────────────────────────
 router.delete("/store-visits/:id", requireStaffAuth, async (req, res): Promise<void> => {
   try {
