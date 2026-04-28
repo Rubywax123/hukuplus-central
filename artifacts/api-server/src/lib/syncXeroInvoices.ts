@@ -624,10 +624,7 @@ export async function syncXeroInvoices(): Promise<SyncXeroResult> {
         const paidAmount = totalPaid > 0 ? totalPaid : (parseFloat(String(inv.Total ?? 0)) || 0);
 
         await client.query(
-          `UPDATE agreements
-           SET status       = 'completed',
-               completed_at = COALESCE(completed_at, NOW())
-           WHERE id = $1`,
+          `UPDATE agreements SET status = 'completed' WHERE id = $1`,
           [ag.id]
         );
 

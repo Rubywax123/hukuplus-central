@@ -5,6 +5,7 @@ import crypto from "crypto";
 import multer from "multer";
 import { requireStaffAuth, requireSuperAdmin } from "../middlewares/staffAuthMiddleware";
 import { createXeroInvoice } from "../lib/createXeroInvoice";
+import { getXeroAuth, xeroHeaders } from "../lib/xeroAuth";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -1642,12 +1643,16 @@ router.post("/formitize/webhook", async (req, res) => {
   }
   // formCalculate_2 = facility fee output (Formitize calc field, lowercased in fieldMap)
   // formCalculate_1 = interest output (Formitize calc field, lowercased in fieldMap)
+  // NOTE: HukuPlus Loan Agreement sends the facility fee as unnamed field "0"
+  //       (Formitize calculated fields are not transmitted in webhooks, but
+  //        the fee field is a regular numeric field serialised with key "0").
   const facilityFeeAmount = parseCurrency(
     fieldMap["formcalculate_2"] ||
     findField(
       "facilityfeeamount", "facility fee amount", "facilityfee", "facility fee",
       "arrangementfee", "arrangement fee"
-    )
+    ) ||
+    fieldMap["0"]   // HukuPlus Loan Agreement: facility fee arrives as field "0"
   );
   const interestAmount = parseCurrency(
     fieldMap["formcalculate_1"] ||
@@ -1827,6 +1832,105 @@ router.post("/formitize/webhook", async (req, res) => {
         });
         if (!result.ok) {
           console.warn(`[formitize:webhook] Xero invoice skipped for #${agreement.id}: ${result.error}`);
+          return;
+        }
+
+        // ── Background retry: add interest to invoice once LR has the loan ────
+        // Interest is a calculated field Formitize does NOT send in the webhook,
+        // so we poll the Loan Register until the loan record appears (the LR is
+        // updated asynchronously by the Marishoma team after disbursement).
+        if (result.xeroInvoiceId && resolvedInterest == null && marishomaLoanNo) {
+          const xeroInvId = result.xeroInvoiceId;
+          const XERO_BASE = "https://api.xero.com/api.xro/2.0";
+          const LR_URL   = process.env.HUKUPLUS_URL || "https://loan-manager-automate.replit.app";
+          const LR_KEY   = process.env.HUKUPLUS_API_KEY;
+          const lrHdrs: Record<string, string> = { "Content-Type": "application/json" };
+          if (LR_KEY) { lrHdrs["Authorization"] = `Bearer ${LR_KEY}`; lrHdrs["X-Central-System"] = "HukuPlusCentral"; }
+
+          const RETRY_DELAYS_MS = [30_000, 90_000, 180_000, 360_000]; // 30s 90s 3m 6m
+
+          const tryAddInterest = async (delays: number[]): Promise<void> => {
+            if (delays.length === 0) {
+              console.warn(`[xero-invoice] Interest retries exhausted for loan #${marishomaLoanNo} — update ${xeroInvId} manually`);
+              return;
+            }
+            await new Promise<void>(r => setTimeout(r, delays[0]));
+            try {
+              const lrRes = await fetch(
+                `${LR_URL}/api/central/loans?loanNumber=${encodeURIComponent(marishomaLoanNo)}`,
+                { headers: lrHdrs },
+              );
+              if (!lrRes.ok) return tryAddInterest(delays.slice(1));
+
+              const lrData = await lrRes.json() as any;
+              const loans: any[] = Array.isArray(lrData) ? lrData : (lrData.loans ?? lrData.data ?? []);
+              const loan = loans.find((l: any) => String(l.loanNumber) === String(marishomaLoanNo));
+              if (!loan) return tryAddInterest(delays.slice(1));
+
+              const foundInterest = loan.accruedInterest != null ? parseFloat(String(loan.accruedInterest)) || null : null;
+              if (!foundInterest) return tryAddInterest(delays.slice(1));
+
+              console.log(`[xero-invoice] Retry found interest $${foundInterest} for loan #${marishomaLoanNo} — patching ${xeroInvId}`);
+
+              // Persist interest to the agreement record
+              await pool.query(
+                `UPDATE agreements SET interest_amount = $1 WHERE id = $2`,
+                [String(foundInterest), agreement.id],
+              );
+
+              // Fetch the live Xero invoice to get existing line items
+              const auth = await getXeroAuth();
+              if (!auth) { console.warn("[xero-invoice] Retry: Xero not connected — cannot patch interest"); return; }
+
+              const getRes = await fetch(`${XERO_BASE}/Invoices/${xeroInvId}`, {
+                headers: { ...xeroHeaders(auth), Accept: "application/json" },
+              });
+              if (!getRes.ok) { console.warn(`[xero-invoice] Retry: GET ${xeroInvId} failed`); return; }
+
+              const getJson = await getRes.json() as any;
+              const inv = getJson.Invoices?.[0];
+              if (!inv) return;
+              if (["PAID", "VOIDED", "DELETED"].includes(inv.Status ?? "")) {
+                console.warn(`[xero-invoice] ${xeroInvId} is ${inv.Status} — cannot add interest line`);
+                return;
+              }
+
+              // Bail if interest line already exists
+              const existingLines: any[] = inv.LineItems ?? [];
+              if (existingLines.some((l: any) => l.AccountCode === "201" || String(l.Description ?? "").toLowerCase().includes("interest"))) {
+                console.log(`[xero-invoice] Interest line already present on ${xeroInvId}`);
+                return;
+              }
+
+              // Preserve existing line items + add interest
+              const updatedLines = [
+                ...existingLines.map((l: any) => ({
+                  Description: l.Description, Quantity: l.Quantity,
+                  UnitAmount: l.UnitAmount, AccountCode: l.AccountCode,
+                  ...(l.Tracking?.length > 0 ? { Tracking: l.Tracking } : {}),
+                })),
+                { Description: "42 days interest", Quantity: 1.0, UnitAmount: foundInterest, AccountCode: "201" },
+              ];
+
+              const patchRes = await fetch(`${XERO_BASE}/Invoices/${xeroInvId}`, {
+                method: "POST",
+                headers: xeroHeaders(auth),
+                body: JSON.stringify({ Invoices: [{ InvoiceID: xeroInvId, LineItems: updatedLines }] }),
+              });
+
+              if (patchRes.ok) {
+                console.log(`[xero-invoice] Interest $${foundInterest} added to ${xeroInvId} (retry after ${Math.round(delays[0]/1000)}s)`);
+              } else {
+                const errText = await patchRes.text();
+                console.warn(`[xero-invoice] Patch interest on ${xeroInvId} failed: ${errText.slice(0, 200)}`);
+              }
+            } catch (retryErr: any) {
+              console.warn(`[xero-invoice] Retry error: ${retryErr.message}`);
+              return tryAddInterest(delays.slice(1));
+            }
+          };
+
+          setImmediate(() => tryAddInterest(RETRY_DELAYS_MS));
         }
       } catch (err: any) {
         console.error(`[formitize:webhook] Xero invoice error for #${agreement.id}:`, err.message);
