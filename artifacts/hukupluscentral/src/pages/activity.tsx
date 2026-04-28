@@ -127,7 +127,7 @@ const FILE_DOC_TYPES = [
   { value: "Other",         label: "Other"          },
 ];
 
-function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned, onRaiseInvoice, onReraiseInvoice }: {
+function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDisbursement, onFileCRM, onViewProfile, onReassigned, onRaiseInvoice, onReraiseInvoice, onFixFees }: {
   n: FNotification;
   onAction: () => void;
   loading: boolean;
@@ -138,6 +138,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
   onReassigned?: (retailerName: string, branchName: string | null) => void;
   onRaiseInvoice?: () => void;
   onReraiseInvoice?: () => void;
+  onFixFees?: () => void;
 }) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
@@ -302,11 +303,20 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
             {n.xero_invoice_id ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">
                 <Receipt className="w-3 h-3" /> Xero invoice raised
+                {onFixFees && (
+                  <button
+                    onClick={onFixFees}
+                    className="ml-1 text-sky-400 hover:text-sky-300 underline underline-offset-2"
+                    title="Correct the facility fee or interest and push to Xero"
+                  >
+                    Fix fees
+                  </button>
+                )}
                 {onReraiseInvoice && (
                   <button
                     onClick={onReraiseInvoice}
                     className="ml-1 text-amber-400 hover:text-amber-300 underline underline-offset-2"
-                    title="Void in Xero first, then click to re-raise"
+                    title="Void in Xero first, then click to re-raise a new invoice"
                   >
                     Re-raise
                   </button>
@@ -510,6 +520,54 @@ function FormitizeTab() {
   const [raiseLoading, setRaiseLoading] = useState(false);
   const [raiseError, setRaiseError] = useState("");
 
+  // ── Fix Fees modal (patch existing Xero invoice line items) ───────────────
+  const [fixFeesModal, setFixFeesModal] = useState<{
+    open: boolean;
+    notification: FNotification | null;
+    facilityFeeAmount: string;
+    interestAmount: string;
+  }>({ open: false, notification: null, facilityFeeAmount: "", interestAmount: "" });
+  const [fixFeesLoading, setFixFeesLoading] = useState(false);
+  const [fixFeesError, setFixFeesError] = useState("");
+  const [fixFeesSuccess, setFixFeesSuccess] = useState("");
+
+  const openFixFeesModal = (n: FNotification) => {
+    setFixFeesError("");
+    setFixFeesSuccess("");
+    setFixFeesModal({
+      open: true,
+      notification: n,
+      facilityFeeAmount: n.facility_fee_amount != null ? String(n.facility_fee_amount) : "",
+      interestAmount:    n.interest_amount     != null ? String(n.interest_amount)     : "",
+    });
+  };
+
+  const submitFixFees = async () => {
+    if (!fixFeesModal.notification?.agreement_id) return;
+    setFixFeesLoading(true);
+    setFixFeesError("");
+    setFixFeesSuccess("");
+    try {
+      const res = await fetch(`${BASE}/api/xero/patch-invoice-fees/${fixFeesModal.notification.agreement_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          facilityFeeAmount: fixFeesModal.facilityFeeAmount !== "" ? parseFloat(fixFeesModal.facilityFeeAmount) : null,
+          interestAmount:    fixFeesModal.interestAmount    !== "" ? parseFloat(fixFeesModal.interestAmount)    : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setFixFeesError(data.error || "Failed to update invoice"); return; }
+      setFixFeesSuccess(`Invoice updated successfully${data.invoiceNumber ? ` (${data.invoiceNumber})` : ""}.`);
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    } catch {
+      setFixFeesError("Network error — please try again");
+    } finally {
+      setFixFeesLoading(false);
+    }
+  };
+
   const openRaiseModal = (n: FNotification) => {
     setRaiseError("");
     setRaiseModal({
@@ -703,6 +761,7 @@ function FormitizeTab() {
                 onReassigned={() => qc.invalidateQueries({ queryKey: ["notifications"] })}
                 onRaiseInvoice={n.task_type === "agreement" && n.agreement_id && !n.xero_invoice_id ? () => openRaiseModal(n) : undefined}
                 onReraiseInvoice={n.task_type === "agreement" && n.agreement_id && !!n.xero_invoice_id ? () => openReraiseModal(n) : undefined}
+                onFixFees={n.task_type === "agreement" && n.agreement_id && !!n.xero_invoice_id ? () => openFixFeesModal(n) : undefined}
               />
             ))}
           </AnimatePresence>
@@ -848,6 +907,111 @@ function FormitizeTab() {
                   : <><Receipt className="w-4 h-4" />Raise Invoice</>
                 }
               </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      {fixFeesModal.open && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={e => { if (e.target === e.currentTarget && !fixFeesLoading) setFixFeesModal(m => ({ ...m, open: false })); }}
+        >
+          <motion.div
+            initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }}
+            className="bg-[#1a1a2e] border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-sky-400" />
+                Fix Invoice Fees
+              </h2>
+              <button onClick={() => !fixFeesLoading && setFixFeesModal(m => ({ ...m, open: false }))} className="text-white/40 hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {fixFeesModal.notification && (
+              <div className="text-xs text-muted-foreground bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
+                <Store className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                <span>
+                  {fixFeesModal.notification.customer_name}
+                  {fixFeesModal.notification.retailer_name && ` · ${fixFeesModal.notification.retailer_name}`}
+                  {fixFeesModal.notification.branch_name && ` — ${fixFeesModal.notification.branch_name}`}
+                </span>
+              </div>
+            )}
+
+            <p className="text-sm text-muted-foreground">
+              Enter the correct amounts. The agreement record and existing Xero invoice line items will both be updated — no void needed.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Facility Fee", key: "facilityFeeAmount" as const },
+                { label: "Interest",     key: "interestAmount"    as const },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">{f.label} (USD)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-sky-400/50"
+                    value={fixFeesModal[f.key]}
+                    onChange={e => setFixFeesModal(m => ({ ...m, [f.key]: e.target.value }))}
+                    placeholder="0.00"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Preview */}
+            {fixFeesModal.notification && (() => {
+              const loan = parseFloat(String(fixFeesModal.notification.loan_amount ?? 0)) || 0;
+              const fee  = parseFloat(fixFeesModal.facilityFeeAmount) || 0;
+              const int_ = parseFloat(fixFeesModal.interestAmount) || 0;
+              const total = loan + fee + int_;
+              return (
+                <div className="bg-sky-500/5 border border-sky-500/15 rounded-lg px-4 py-3 text-sm">
+                  <p className="text-sky-300 font-semibold mb-2 text-xs uppercase tracking-wider">Updated invoice preview</p>
+                  <div className="space-y-1 text-muted-foreground">
+                    {loan > 0  && <div className="flex justify-between"><span>HukuPlus Loan (621)</span><span className="text-white">${loan.toFixed(2)}</span></div>}
+                    {fee  > 0  && <div className="flex justify-between"><span>Facility Fee (202)</span><span className="text-white">${fee.toFixed(2)}</span></div>}
+                    {int_ > 0  && <div className="flex justify-between"><span>42 days interest (201)</span><span className="text-white">${int_.toFixed(2)}</span></div>}
+                    {total > 0 && <div className="flex justify-between border-t border-white/10 mt-2 pt-2 font-semibold text-white"><span>Total</span><span>${total.toFixed(2)}</span></div>}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {fixFeesError && (
+              <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{fixFeesError}</p>
+            )}
+            {fixFeesSuccess && (
+              <p className="text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">{fixFeesSuccess}</p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setFixFeesModal(m => ({ ...m, open: false }))}
+                disabled={fixFeesLoading}
+                className="flex-1 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm font-medium border border-white/10 transition-colors disabled:opacity-40"
+              >
+                {fixFeesSuccess ? "Close" : "Cancel"}
+              </button>
+              {!fixFeesSuccess && (
+                <button
+                  type="button"
+                  onClick={submitFixFees}
+                  disabled={fixFeesLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-sm font-semibold transition-colors disabled:opacity-40"
+                >
+                  {fixFeesLoading
+                    ? <><Loader2 className="w-4 h-4 animate-spin" />Updating…</>
+                    : <><Receipt className="w-4 h-4" />Save & Push to Xero</>
+                  }
+                </button>
+              )}
             </div>
           </motion.div>
         </motion.div>

@@ -597,6 +597,116 @@ router.get("/xero/sync-invoices/status", requireStaffAuth, requireSuperAdmin, as
   }
 });
 
+// ─── POST /xero/patch-invoice-fees/:agreementId — update fee/interest on existing invoice ──
+// Saves corrected facility_fee_amount and interest_amount to the agreement record
+// then replaces the line items on the existing Xero invoice (while DRAFT/SUBMITTED).
+router.post("/xero/patch-invoice-fees/:agreementId", requireStaffAuth, async (req: Request, res: Response) => {
+  const id = parseInt(req.params.agreementId, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid agreement ID" }); return; }
+
+  const { facilityFeeAmount, interestAmount } = req.body ?? {};
+
+  const { rows } = await pool.query(
+    `SELECT a.id, a.customer_name, a.loan_amount,
+            a.facility_fee_amount, a.interest_amount,
+            a.xero_invoice_id,
+            r.name AS retailer_name, b.name AS branch_name
+     FROM agreements a
+     LEFT JOIN retailers r ON r.id = a.retailer_id
+     LEFT JOIN branches  b ON b.id = a.branch_id
+     WHERE a.id = $1`,
+    [id]
+  );
+  const agreement = rows[0];
+  if (!agreement) { res.status(404).json({ error: "Agreement not found" }); return; }
+  if (!agreement.xero_invoice_id) { res.status(400).json({ error: "No Xero invoice linked to this agreement" }); return; }
+
+  const fee      = facilityFeeAmount != null ? parseFloat(facilityFeeAmount) : parseFloat(agreement.facility_fee_amount ?? "0");
+  const interest = interestAmount    != null ? parseFloat(interestAmount)    : parseFloat(agreement.interest_amount    ?? "0");
+  const loan     = parseFloat(agreement.loan_amount ?? "0");
+
+  // 1. Persist corrected values to DB
+  await pool.query(
+    `UPDATE agreements SET facility_fee_amount = $1, interest_amount = $2 WHERE id = $3`,
+    [isNaN(fee) ? null : fee, isNaN(interest) ? null : interest, id]
+  );
+
+  // 2. Get Xero auth
+  const { getXeroAuth, xeroHeaders } = await import("../lib/xeroAuth");
+  const auth = await getXeroAuth();
+  if (!auth) { res.status(502).json({ error: "Xero not connected — please reconnect in Settings" }); return; }
+
+  const XERO_BASE = "https://api.xero.com/api.xro/2.0";
+
+  // 3. Fetch existing invoice to get status and tracking
+  let existingTracking: any[] = [];
+  try {
+    const getRes = await fetch(`${XERO_BASE}/Invoices/${agreement.xero_invoice_id}`, { headers: xeroHeaders(auth) });
+    if (getRes.ok) {
+      const d = await getRes.json() as any;
+      const inv = d.Invoices?.[0];
+      const status = inv?.Status ?? "";
+      if (["PAID", "VOIDED", "DELETED"].includes(status)) {
+        res.status(409).json({ error: `Invoice is ${status} in Xero — it cannot be edited. Void or delete it in Xero first, then use Re-raise.` });
+        return;
+      }
+      // Carry over tracking from the principal line if present
+      existingTracking = inv?.LineItems?.[0]?.Tracking ?? [];
+    }
+  } catch { /* proceed without tracking if fetch fails */ }
+
+  // 4. Rebuild line items
+  const lineItems: any[] = [
+    {
+      Description: "HukuPlus Loan",
+      Quantity: 1.0,
+      UnitAmount: loan,
+      AccountCode: "621",
+      ...(existingTracking.length > 0 ? { Tracking: existingTracking } : {}),
+    },
+  ];
+  if (!isNaN(fee) && fee > 0) {
+    lineItems.push({
+      Description: "Facility Fee",
+      Quantity: 1.0,
+      UnitAmount: fee,
+      AccountCode: "202",
+      ...(existingTracking.length > 0 ? { Tracking: existingTracking } : {}),
+    });
+  }
+  if (!isNaN(interest) && interest > 0) {
+    lineItems.push({
+      Description: "42 days interest",
+      Quantity: 1.0,
+      UnitAmount: interest,
+      AccountCode: "201",
+      ...(existingTracking.length > 0 ? { Tracking: existingTracking } : {}),
+    });
+  }
+
+  // 5. Patch the invoice in Xero
+  try {
+    const patchRes = await fetch(`${XERO_BASE}/Invoices/${agreement.xero_invoice_id}`, {
+      method: "POST",
+      headers: xeroHeaders(auth),
+      body: JSON.stringify({ Invoices: [{ InvoiceID: agreement.xero_invoice_id, LineItems: lineItems }] }),
+    });
+    const raw = await patchRes.text();
+    let data: any;
+    try { data = JSON.parse(raw); } catch { data = { raw }; }
+    if (!patchRes.ok) {
+      const errMsg = data?.Elements?.[0]?.ValidationErrors?.[0]?.Message ?? data?.Message ?? raw.slice(0, 300);
+      res.status(502).json({ error: errMsg });
+      return;
+    }
+    const invNum = data.Invoices?.[0]?.InvoiceNumber ?? agreement.xero_invoice_id;
+    console.log(`[xero-invoice] Patched fees on ${invNum} for agreement #${id} — fee $${fee} interest $${interest}`);
+    res.json({ ok: true, invoiceNumber: invNum });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /xero/clear-invoice/:agreementId — unlink a voided Xero invoice ─────
 // Clears the xero_invoice_id on an agreement so a new invoice can be raised.
 // Use after voiding the wrong invoice in Xero itself.
