@@ -91,8 +91,8 @@ router.get("/leads", requireStaffAuth, async (req, res): Promise<void> => {
       where = "WHERE l.status = 'new' AND l.dismissed_at IS NULL";
       orderBy = "ORDER BY l.created_at DESC";
     } else if (status === "pipeline") {
-      // Pipeline = all acknowledged leads regardless of dismissed_at; excludes converted
-      where = "WHERE l.status = 'acknowledged'";
+      // Pipeline = acknowledged leads that have NOT been filed (dismissed_at IS NULL)
+      where = "WHERE l.status = 'acknowledged' AND l.dismissed_at IS NULL";
       orderBy = "ORDER BY l.created_at DESC";
     } else if (status === "filed") {
       // Filed = any dismissed lead not yet converted or dropped (new + acknowledged)

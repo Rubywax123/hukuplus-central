@@ -4341,6 +4341,15 @@ function LeadsTab() {
                                       {lead.messaged_at ? "Messaged" : "Mark messaged"}
                                     </button>
                                     <button
+                                      onClick={() => dismissMutation.mutate(lead.id)}
+                                      disabled={dismissMutation.isPending}
+                                      title="Archive — hide from Feed, keep in Filed tab"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 border border-white/15 text-white/50 hover:bg-amber-500/10 hover:border-amber-500/25 hover:text-amber-300 transition-all disabled:opacity-40"
+                                    >
+                                      {dismissMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderOpen className="w-3.5 h-3.5" />}
+                                      Archive
+                                    </button>
+                                    <button
                                       onClick={() => dropMutation.mutate(lead.id)}
                                       disabled={dropMutation.isPending}
                                       title="Drop — permanently not convertible"
@@ -4602,19 +4611,19 @@ function LeadsTab() {
                           <CheckCircle2 className="w-3.5 h-3.5" /> File
                         </button>
                       )}
-                      {lead.status === "acknowledged" && lead.dismissed_at && editingLeadId !== lead.id && (
+                      {lead.status === "acknowledged" && editingLeadId !== lead.id && (
                         <button
-                          onClick={() => reengageMutation.mutate(lead.id)}
-                          disabled={reengageMutation.isPending}
-                          title="Re-engage — bring back to active pipeline"
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all disabled:opacity-40">
-                          {reengageMutation.isPending
+                          onClick={() => dismissMutation.mutate(lead.id)}
+                          disabled={dismissMutation.isPending}
+                          title="Archive — hide from Pipeline, keep in Filed tab"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 border border-white/15 text-white/50 hover:bg-amber-500/10 hover:border-amber-500/25 hover:text-amber-300 transition-all disabled:opacity-40">
+                          {dismissMutation.isPending
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <RotateCcw className="w-3.5 h-3.5" />}
-                          Re-engage
+                            : <FolderOpen className="w-3.5 h-3.5" />}
+                          Archive
                         </button>
                       )}
-                      {lead.status === "acknowledged" && !lead.dismissed_at && editingLeadId !== lead.id && (
+                      {lead.status === "acknowledged" && editingLeadId !== lead.id && (
                         <button
                           onClick={() => unacknowledgeMutation.mutate(lead.id)}
                           disabled={unacknowledgeMutation.isPending}
