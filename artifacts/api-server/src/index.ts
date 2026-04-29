@@ -4,6 +4,7 @@ import { syncHukuPlusStores, syncRevolverStores, syncRevolverData } from "./rout
 import { syncXeroInvoices } from "./lib/syncXeroInvoices";
 import { autoSnapshotPreviousMonth } from "./lib/snapshotMonths";
 import { proactiveXeroRefresh } from "./lib/xeroAuth";
+import { backfillMissingInterest } from "./lib/backfillInterest";
 
 const rawPort = process.env["PORT"];
 
@@ -19,9 +20,10 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const STORE_SYNC_INTERVAL_MS     = 60 * 60 * 1000; // 1 hour  — HukuPlus + Revolver store data
-const XERO_SYNC_INTERVAL_MS      =  5 * 60 * 1000; // 5 minutes — Xero invoice → Loan Register
-const SNAPSHOT_CHECK_INTERVAL_MS =  6 * 60 * 60 * 1000; // 6 hours — monthly snapshot rollover
+const STORE_SYNC_INTERVAL_MS      = 60 * 60 * 1000;       // 1 hour  — HukuPlus + Revolver store data
+const XERO_SYNC_INTERVAL_MS       =  5 * 60 * 1000;       // 5 minutes — Xero invoice → Loan Register
+const SNAPSHOT_CHECK_INTERVAL_MS  =  6 * 60 * 60 * 1000;  // 6 hours — monthly snapshot rollover
+const INTEREST_BACKFILL_INTERVAL_MS = 30 * 60 * 1000;     // 30 minutes — add missing interest to Xero invoices
 
 async function runStoreSync() {
   // Step 1: pull from HukuPlus into Central
@@ -94,6 +96,22 @@ async function runSnapshotCheck() {
   }
 }
 
+async function runInterestBackfill() {
+  try {
+    const result = await backfillMissingInterest();
+    if (result.patched > 0 || result.errors.length > 0) {
+      console.log(
+        `[backfill:interest] Done — ${result.checked} checked, ${result.patched} patched, ${result.skipped} skipped.`
+      );
+    }
+    if (result.errors.length > 0) {
+      console.warn("[backfill:interest] Errors:", result.errors.join("; "));
+    }
+  } catch (err: any) {
+    console.error("[backfill:interest] Failed:", err.message);
+  }
+}
+
 function startSyncScheduler() {
   // Proactively refresh Xero token on startup so it is fresh before any webhook fires.
   // If already valid it still refreshes to push the expiry window forward.
@@ -113,7 +131,15 @@ function startSyncScheduler() {
   runSnapshotCheck();
   setInterval(runSnapshotCheck, SNAPSHOT_CHECK_INTERVAL_MS);
 
-  console.log("[sync] Scheduler started — stores every 60 min, Xero every 5 min, snapshot check every 6 h.");
+  // Interest backfill: run 2 minutes after startup, then every 30 minutes
+  // Finds HukuPlus agreements missing interest and patches their Xero invoices
+  // once the Loan Register has had time to create its entry from the invoice.
+  setTimeout(() => {
+    runInterestBackfill();
+    setInterval(runInterestBackfill, INTEREST_BACKFILL_INTERVAL_MS);
+  }, 2 * 60 * 1000);
+
+  console.log("[sync] Scheduler started — stores every 60 min, Xero every 5 min, snapshot check every 6 h, interest backfill every 30 min.");
 }
 
 runMigrations()

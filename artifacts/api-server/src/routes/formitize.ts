@@ -1847,7 +1847,10 @@ router.post("/formitize/webhook", async (req, res) => {
           const lrHdrs: Record<string, string> = { "Content-Type": "application/json" };
           if (LR_KEY) { lrHdrs["Authorization"] = `Bearer ${LR_KEY}`; lrHdrs["X-Central-System"] = "HukuPlusCentral"; }
 
-          const RETRY_DELAYS_MS = [30_000, 90_000, 180_000, 360_000]; // 30s 90s 3m 6m
+          // LR creates its entry only after it syncs from Xero — which may take hours.
+          // Retry at 5 min, 20 min, 1 hr, 2 hr, 4 hr. Anything that still fails gets
+          // picked up by the scheduled backfillMissingInterest job every 30 minutes.
+          const RETRY_DELAYS_MS = [5*60_000, 20*60_000, 60*60_000, 2*60*60_000, 4*60*60_000];
 
           const tryAddInterest = async (delays: number[]): Promise<void> => {
             if (delays.length === 0) {
