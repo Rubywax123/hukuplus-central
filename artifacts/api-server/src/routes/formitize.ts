@@ -1654,13 +1654,30 @@ router.post("/formitize/webhook", async (req, res) => {
     ) ||
     fieldMap["0"]   // HukuPlus Loan Agreement: facility fee arrives as field "0"
   );
+
+  // HukuPlus charges 108% APR applied to the actual term in days.
+  // interest = principal × 1.08 × (days / 365)
+  // The form calculates this but Formitize strips calculated fields from webhooks,
+  // so we re-derive it from the disbursement and settlement date fields.
+  function calcHukuPlusInterest(principal: number, disbStr: string | null, settleStr: string | null): number | null {
+    if (!principal || !disbStr || !settleStr) return null;
+    const disb   = new Date(disbStr);
+    const settle = new Date(settleStr);
+    if (isNaN(disb.getTime()) || isNaN(settle.getTime())) return null;
+    const days = Math.round((settle.getTime() - disb.getTime()) / (1000 * 60 * 60 * 24));
+    if (days <= 0) return null;
+    return Math.round(principal * 1.08 * (days / 365) * 100) / 100;
+  }
+
   const interestAmount = parseCurrency(
     fieldMap["formcalculate_1"] ||
     findField(
       "totalinterestpayable", "total interest payable", "totalinterest",
       "interest amount", "interestamount", "total interest"
     )
-  );
+  ) ?? (product === "HukuPlus"
+    ? calcHukuPlusInterest(loanAmount, disbursementDate, repaymentDate)
+    : null);
   const monthlyInstalment = parseCurrency(findField(
     "monthlyinstalmentamount", "monthly instalment amount", "monthlyinstalment",
     "monthly instalment", "instalment amount", "instalmentamount",
@@ -1835,10 +1852,10 @@ router.post("/formitize/webhook", async (req, res) => {
           return;
         }
 
-        // ── Background retry: add interest to invoice once LR has the loan ────
-        // Interest is a calculated field Formitize does NOT send in the webhook,
-        // so we poll the Loan Register until the loan record appears (the LR is
-        // updated asynchronously by the Marishoma team after disbursement).
+        // ── Background retry: fallback for the rare case dates were missing ─────
+        // Normally interest is computed from disbursement/settlement dates at
+        // webhook time (108% APR × days). This retry only fires when those dates
+        // are absent, which should not happen for standard HukuPlus agreements.
         if (result.xeroInvoiceId && resolvedInterest == null && marishomaLoanNo) {
           const xeroInvId = result.xeroInvoiceId;
           const XERO_BASE = "https://api.xero.com/api.xro/2.0";
