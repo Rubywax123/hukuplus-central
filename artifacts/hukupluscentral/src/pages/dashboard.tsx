@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2, Receipt } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2, Receipt, Ban } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -27,6 +27,14 @@ interface MonthSnapshot {
   reApplications: number;
   agreementsIssued: number;
   isLive: boolean;
+}
+
+interface LRCohortMonth {
+  month: string;
+  monthLabel: string;
+  disbursed: number;
+  overdue: number;
+  bad: number;
 }
 
 interface ApplicationRow {
@@ -135,6 +143,15 @@ function useReapplicationConversion() {
     queryKey: ["reapplication-conversion"],
     queryFn: () => fetch(`${BASE}/api/dashboard/reapplication-conversion`, { credentials: "include" }).then(r => r.json()),
     refetchInterval: 5 * 60 * 1000,
+  });
+}
+
+function useLRCohortStats() {
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  return useQuery<LRCohortMonth[]>({
+    queryKey: ["lr-cohort-stats"],
+    queryFn: () => fetch(`${BASE}/api/dashboard/lr-cohort-stats`, { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 15 * 60 * 1000,
   });
 }
 
@@ -859,6 +876,96 @@ function RevolverSummarySection({ data, delay }: { data: RevolverSummary | undef
   );
 }
 
+// ─── LR Cohort Health ─────────────────────────────────────────────────────────
+
+function LRCohortSection({ data, delay }: { data: LRCohortMonth[] | undefined; delay: number }) {
+  if (!data || data.length === 0) return null;
+
+  // Skip the current month's active loans — they're not overdue yet
+  // (all overdue/bad counts should be 0 for the current bucket, but
+  // we only show overdue/bad once a month has loans that have passed due)
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} className="mb-10">
+      <div className="flex items-center gap-2 mb-4">
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+          HukuPlus Cohort Health
+        </h2>
+        <span className="text-xs text-muted-foreground/50 font-medium">· Overdue &amp; bad loans by disbursement month · Active register only</span>
+      </div>
+
+      {/* Scrollable month cards */}
+      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-white/10">
+        {data.map((m) => {
+          const overdueRate = m.disbursed > 0 ? Math.round((m.overdue / m.disbursed) * 100) : 0;
+          const badRate     = m.disbursed > 0 ? Math.round((m.bad    / m.disbursed) * 100) : 0;
+          const hasIssues   = m.overdue > 0 || m.bad > 0;
+
+          return (
+            <GlassCard
+              key={m.month}
+              className={`flex-shrink-0 w-44 p-4 flex flex-col gap-2 relative overflow-hidden
+                ${m.bad > 0 ? "border-red-500/25" : m.overdue > 0 ? "border-amber-500/20" : "border-white/5"}`}
+            >
+              {/* Glow spot */}
+              {hasIssues && (
+                <div className={`absolute -right-4 -top-4 w-16 h-16 rounded-full blur-2xl opacity-20
+                  ${m.bad > 0 ? "bg-red-500" : "bg-amber-500"}`} />
+              )}
+
+              {/* Month label */}
+              <div>
+                <p className="text-xs font-semibold text-white/90 leading-tight">{m.monthLabel}</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5">{m.disbursed} loans disbursed</p>
+              </div>
+
+              {/* Overdue */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle className={`w-3 h-3 flex-shrink-0 ${m.overdue > 0 ? "text-amber-400" : "text-white/20"}`} />
+                  <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Overdue</span>
+                </div>
+                <div className="text-right">
+                  <span className={`text-sm font-bold tabular-nums ${m.overdue > 0 ? "text-amber-400" : "text-white/30"}`}>
+                    {m.overdue}
+                  </span>
+                  {m.overdue > 0 && (
+                    <span className="text-[10px] text-amber-500/70 ml-1">{overdueRate}%</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Bad loans */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Ban className={`w-3 h-3 flex-shrink-0 ${m.bad > 0 ? "text-red-400" : "text-white/20"}`} />
+                  <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Bad Loans</span>
+                </div>
+                <div className="text-right">
+                  <span className={`text-sm font-bold tabular-nums ${m.bad > 0 ? "text-red-400" : "text-white/30"}`}>
+                    {m.bad}
+                  </span>
+                  {m.bad > 0 && (
+                    <span className="text-[10px] text-red-500/70 ml-1">{badRate}%</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Clean month indicator */}
+              {!hasIssues && (
+                <div className="flex items-center gap-1 mt-0.5">
+                  <CheckCircle className="w-3 h-3 text-emerald-400/60" />
+                  <span className="text-[10px] text-emerald-400/60">All clear</span>
+                </div>
+              )}
+            </GlassCard>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -869,6 +976,7 @@ export default function DashboardPage() {
   const { data: leadsStats } = useLeadsMonthlyStats();
   const { data: conversionData } = useReapplicationConversion();
   const { data: revolverSummary } = useRevolverSummary();
+  const { data: lrCohort } = useLRCohortStats();
   const [drillDown, setDrillDown] = useState<"application" | "reapplication" | null>(null);
   const [showConversion, setShowConversion] = useState(false);
 
@@ -936,6 +1044,9 @@ export default function DashboardPage() {
 
       {/* ── Revolver section ── */}
       <RevolverSummarySection data={revolverSummary} delay={0.35} />
+
+      {/* ── HukuPlus cohort health ── */}
+      <LRCohortSection data={lrCohort} delay={0.38} />
 
       {/* ── Historical comparison ── */}
       {!historyLoading && history && history.length > 0 && (

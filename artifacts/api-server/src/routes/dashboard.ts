@@ -448,6 +448,67 @@ router.delete("/dashboard/applications/:jobId", async (req, res): Promise<void> 
   }
 });
 
+// ── LR cohort health: per-disbursement-month overdue + bad loan counts ────────
+// For each month a cohort of loans was disbursed, shows how many are now sitting
+// in overdue (past due date, still active) and how many are bad loans.
+// This is always live — data comes directly from the Loan Register API.
+router.get("/dashboard/lr-cohort-stats", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const loans = await fetchLRLoans();
+  if (!loans) {
+    res.status(503).json({ error: "Loan Register unavailable" });
+    return;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const monthMap = new Map<string, { disbursed: number; overdue: number; bad: number }>();
+
+  for (const loan of loans) {
+    if (String(loan.loanType ?? "").toLowerCase() !== "hukuplus") continue;
+    const disbStr = loan.disbursementDate;
+    if (!disbStr) continue;
+
+    // Group by YYYY-MM (ISO date prefix)
+    const month = String(disbStr).slice(0, 7);
+    if (!monthMap.has(month)) monthMap.set(month, { disbursed: 0, overdue: 0, bad: 0 });
+    const entry = monthMap.get(month)!;
+    entry.disbursed++;
+
+    const isCompleted = String(loan.status ?? "").toLowerCase() === "completed";
+    if (isCompleted) continue;
+
+    // Bad loan: referred to lawyers
+    if (loan.referredToLawyers) {
+      entry.bad++;
+      continue;
+    }
+
+    // Overdue: past due date and not yet completed or referred
+    if (loan.dueDate) {
+      const due = new Date(loan.dueDate);
+      due.setHours(0, 0, 0, 0);
+      if (today > due) {
+        entry.overdue++;
+      }
+    }
+  }
+
+  // Sort months newest-first, attach human label
+  const result = Array.from(monthMap.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([month, stats]) => {
+      const [year, mon] = month.split("-").map(Number);
+      const monthLabel = new Date(year, mon - 1, 1)
+        .toLocaleString("en-US", { month: "short", year: "numeric" });
+      return { month, monthLabel, ...stats };
+    });
+
+  res.json(result);
+});
+
 // ── Full monthly history: stored snapshots + live current month ───────────────
 router.get("/dashboard/monthly-history", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
