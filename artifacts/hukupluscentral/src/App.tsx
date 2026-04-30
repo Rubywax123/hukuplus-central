@@ -27,7 +27,7 @@ import ApplyHukuPlusPage from "@/pages/apply-hukuplus";
 import ApplyRevolverPage from "@/pages/apply-revolver";
 import MyCustomersPage from "@/pages/my-customers";
 import SettingsPage from "@/pages/settings";
-import PipelinePage from "@/pages/pipeline";
+import BookingsPage from "@/pages/bookings";
 import NotFound from "@/pages/not-found";
 
 function Redirect({ to }: { to: string }) {
@@ -99,10 +99,11 @@ function Router() {
             <Route path="/comms">{() => <SalesAgentGuard><CommsPage /></SalesAgentGuard>}</Route>
             <Route path="/activity" component={ActivityPage} />
             <Route path="/my-customers" component={MyCustomersPage} />
-            <Route path="/pipeline">{() => <SalesAgentGuard><PipelinePage /></SalesAgentGuard>}</Route>
+            <Route path="/bookings">{() => <SalesAgentGuard><BookingsPage /></SalesAgentGuard>}</Route>
             <Route path="/xero">{() => <SalesAgentGuard><XeroIntegrationPage /></SalesAgentGuard>}</Route>
             <Route path="/settings">{() => <SalesAgentGuard><SettingsPage /></SalesAgentGuard>}</Route>
-            {/* Legacy redirects — now folded into the Customers hub */}
+            {/* Legacy redirects */}
+            <Route path="/pipeline">{() => <Redirect to="/bookings" />}</Route>
             <Route path="/retailers">{() => <Redirect to="/customers?tab=retailers" />}</Route>
             <Route path="/team">{() => <Redirect to="/customers?tab=staff" />}</Route>
             <Route component={NotFound} />

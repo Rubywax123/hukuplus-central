@@ -13,7 +13,7 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/customers", label: "Customers", icon: ContactRound },
-  { path: "/pipeline", label: "Pipeline", icon: CalendarDays },
+  { path: "/bookings", label: "Bookings", icon: CalendarDays },
   { path: "/agreements", label: "Kiosk", icon: Monitor },
   { path: "/activity", label: "Activity", icon: Activity, badge: "activity" as const },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
@@ -333,7 +333,7 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
     : [
         { path: "/",           label: "Home",     Icon: LayoutDashboard },
         { path: "/customers",  label: "Customers",Icon: ContactRound },
-        { path: "/pipeline",   label: "Pipeline", Icon: CalendarDays },
+        { path: "/bookings",   label: "Bookings", Icon: CalendarDays },
         { path: "/activity",   label: "Activity", Icon: Activity,   badge: activityBadge },
         { path: "/agreements", label: "Kiosk",    Icon: Monitor },
       ];

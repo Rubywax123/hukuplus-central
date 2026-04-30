@@ -904,7 +904,7 @@ function PipelineSummaryCard({ data, delay }: { data: PipelineSummary | undefine
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} className="mb-10">
       <GlassCard
         className="cursor-pointer group hover:border-teal-500/30 transition-colors"
-        onClick={() => navigate("/pipeline")}
+        onClick={() => navigate("/bookings")}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -912,7 +912,7 @@ function PipelineSummaryCard({ data, delay }: { data: PipelineSummary | undefine
               <CalendarDays className="w-4 h-4" />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Disbursement Pipeline</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Bookings</p>
               <p className="text-xs text-muted-foreground/50">applications pending stock collection</p>
             </div>
           </div>

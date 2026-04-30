@@ -264,7 +264,7 @@ function NoDatSection({ items }: { items: PipelineItem[] }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function PipelinePage() {
+export default function BookingsPage() {
   const { data, isLoading, refetch, isFetching } = usePipeline();
 
   const now = new Date();
@@ -273,8 +273,8 @@ export default function PipelinePage() {
   return (
     <div className="pb-10">
       <PageHeader
-        title="Disbursement Pipeline"
-        description="Upcoming stock collection bookings — applications not yet converted to agreements."
+        title="Bookings"
+        description="Upcoming stock collection dates — applications not yet converted to agreements."
       />
 
       {/* Summary bar */}
