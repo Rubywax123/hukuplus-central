@@ -29,14 +29,15 @@ function fmtAmt(n: number | string | null | undefined): string {
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
-const PW = 595, PH = 841;          // A4 points
-const ML = 50, MR = 50, MT = 40;   // left / right / top margin
-const CW = PW - ML - MR;           // content width
+const PW = 595, PH = 841;
+const ML = 45, MR = 45, MT = 42;
+const CW = PW - ML - MR;
 const TEAL: RGB  = rgb(0, 0.38, 0.40);
 const DARK: RGB  = rgb(0.08, 0.08, 0.08);
 const MID:  RGB  = rgb(0.35, 0.35, 0.35);
 const GREY: RGB  = rgb(0.55, 0.55, 0.55);
 const LGREY: RGB = rgb(0.92, 0.92, 0.92);
+const WHITE: RGB = rgb(1, 1, 1);
 
 // ─── core drawing helpers ─────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ function drawLine(ctx: Ctx, color: RGB = LGREY, thickness = 0.5) {
 }
 
 function text(ctx: Ctx, str: string, x: number, size = 9, color: RGB = DARK, bold = false, font?: any) {
+  if (!str) return;
   ctx.page.drawText(str, { x, y: ctx.y, size, font: font ?? (bold ? ctx.bold : ctx.reg), color });
 }
 
@@ -79,7 +81,6 @@ function heading(ctx: Ctx, str: string, size = 8) {
   ctx.y -= 10;
 }
 
-// Two-column field row
 function fieldRow(ctx: Ctx, l1: string, v1: string, l2?: string, v2?: string) {
   const col2x = ML + CW / 2 + 8;
   text(ctx, l1.toUpperCase(), ML, 6.5, GREY, false, ctx.bold);
@@ -90,7 +91,6 @@ function fieldRow(ctx: Ctx, l1: string, v1: string, l2?: string, v2?: string) {
   ctx.y -= 16;
 }
 
-// Full-width field row
 function fieldFull(ctx: Ctx, label: string, value: string) {
   text(ctx, label.toUpperCase(), ML, 6.5, GREY, false, ctx.bold);
   ctx.y -= 8;
@@ -98,18 +98,24 @@ function fieldFull(ctx: Ctx, label: string, value: string) {
   ctx.y -= 16;
 }
 
-// Draw a signature block (label + image or blank line)
+function fieldRowRight(ctx: Ctx, label: string, value: string) {
+  const vx = ML + CW - 80;
+  text(ctx, label.toUpperCase(), ML, 6.5, GREY, false, ctx.bold);
+  ctx.y -= 8;
+  text(ctx, value || "—", ML, 9, DARK, false, ctx.reg);
+  text(ctx, value || "—", vx, 9, DARK, true, ctx.bold);
+  ctx.y -= 16;
+}
+
 async function sigBlock(ctx: Ctx, label: string, sublabel: string, sigData: string | null, w = CW / 2 - 8) {
-  const SH = 80;
+  const SH = 72;
   const x  = ML;
   const yB = ctx.y - SH;
 
-  // Box
-  ctx.page.drawRectangle({ x, y: yB, width: w, height: SH, borderColor: rgb(0.8,0.8,0.8), borderWidth: 0.5, color: rgb(1,1,1) });
-  // Top label bar
-  ctx.page.drawRectangle({ x, y: yB + SH - 20, width: w, height: 20, color: rgb(0.96,0.96,0.96) });
-  text({ ...ctx, y: yB + SH - 8 }, label, x + 5, 7, DARK, true);
-  text({ ...ctx, y: yB + SH - 16 }, sublabel, x + 5, 5.5, GREY);
+  ctx.page.drawRectangle({ x, y: yB, width: w, height: SH, borderColor: rgb(0.8,0.8,0.8), borderWidth: 0.5, color: WHITE });
+  ctx.page.drawRectangle({ x, y: yB + SH - 18, width: w, height: 18, color: rgb(0.96,0.96,0.96) });
+  text({ ...ctx, y: yB + SH - 7 }, label, x + 5, 7, DARK, true);
+  text({ ...ctx, y: yB + SH - 14 }, sublabel, x + 5, 5.5, GREY);
 
   if (sigData) {
     try {
@@ -117,34 +123,37 @@ async function sigBlock(ctx: Ctx, label: string, sublabel: string, sigData: stri
       const buf = Buffer.from(b64, "base64");
       const img = await ctx.doc.embedPng(buf).catch(() => ctx.doc.embedJpg(buf));
       const { width: iw, height: ih } = img.scale(1);
-      const scale = Math.min((w - 12) / iw, (SH - 26) / ih, 1);
+      const scale = Math.min((w - 12) / iw, (SH - 24) / ih, 1);
       ctx.page.drawImage(img, { x: x + 6, y: yB + 5, width: iw * scale, height: ih * scale });
     } catch { /* skip */ }
   } else {
-    // Blank signature line
-    const ly = yB + 22;
+    const ly = yB + 20;
     ctx.page.drawLine({ start: { x: x + 8, y: ly }, end: { x: x + w - 8, y: ly }, thickness: 0.4, color: rgb(0.7,0.7,0.7) });
-    text({ ...ctx, y: ly + 3 }, "Signature", x + 8, 7, rgb(0.8,0.8,0.8) );
+    text({ ...ctx, y: ly + 3 }, "Signature", x + 8, 7, rgb(0.8,0.8,0.8));
   }
 
   ctx.y -= SH + 8;
 }
 
-// ─── page factory ─────────────────────────────────────────────────────────────
+function printSigLine(ctx: Ctx, label: string) {
+  text(ctx, label, ML, 8, MID);
+  ctx.y -= 14;
+  ctx.page.drawLine({ start: { x: ML, y: ctx.y }, end: { x: ML + CW / 2, y: ctx.y }, thickness: 0.4, color: rgb(0.6,0.6,0.6) });
+  ctx.y -= 16;
+}
 
 async function newPage(doc: PDFDocument, bold: any, reg: any, sm: any, pageNum: number, total: number, customer: string, jobRef: string): Promise<Ctx> {
   const page = doc.addPage([PW, PH]);
 
-  // ── header band ──
-  page.drawRectangle({ x: 0, y: PH - 38, width: PW, height: 38, color: TEAL });
+  page.drawRectangle({ x: 0, y: PH - 36, width: PW, height: 36, color: TEAL });
   page.drawText("TEFCO FINANCE (PVT) LTD — NOVAFEED AGREEMENT", {
-    x: ML, y: PH - 22, size: 9.5, font: bold, color: rgb(1,1,1),
+    x: ML, y: PH - 20, size: 9.5, font: bold, color: WHITE,
   });
   page.drawText(`Ref: ${jobRef}   ·   ${customer}   ·   Page ${pageNum} of ${total}`, {
-    x: ML, y: PH - 34, size: 7, font: reg, color: rgb(0.85,1,1),
+    x: ML, y: PH - 31, size: 7, font: reg, color: rgb(0.85,1,1),
   });
 
-  const y = PH - 38 - MT;
+  const y = PH - 36 - MT;
   return { doc, page, bold, reg, sm, y };
 }
 
@@ -176,21 +185,54 @@ export async function generateNovafeedAgreementPdf(data: AgreementData): Promise
   const sm    = await doc.embedFont(StandardFonts.Helvetica);
   const fd    = data.formData ?? {};
 
-  // Pull extra fields from formData
-  const nationalId   = field(fd, "borrowerid", "nationalid", "id number", "idnumber", "formtext_3") || "—";
-  const disbDate     = field(fd, "applieddisbursement", "disbursementdate", "disbursement date", "disbursement") || fmtDate(data.createdAt as string);
-  const settleDate   = field(fd, "appliedsettlement", "settlementdate", "settlement date", "settlement") || "—";
-  const loanTerm     = field(fd, "loanterm", "term months", "term", "months") || "—";
-  const interestRate = field(fd, "terminterest", "interestrate", "interest rate", "interest") || "—";
-  const loanType     = field(fd, "loantype", "loan type", "type") || data.loanProduct || "Novafeeds";
-  const totalRepay   = field(fd, "totalrepayment", "totalrepay", "total repayment", "amountdue") || fmtAmt(data.loanAmount);
-  const numChicks    = field(fd, "numberofchicks", "chick quantity", "chickquantity", "chicks", "quantity") || "—";
-  const chickPrice   = field(fd, "chickprice", "price per chick", "pricepchick") || "—";
-  const feedQty      = field(fd, "feedquantity", "feedqty", "feed bags", "bags") || "—";
-  const agentName    = field(fd, "agent", "agentname", "salesagent", "sales agent", "supervisor") || "Tefco Finance Agent";
+  // ── Extract all fields from formData ──────────────────────────────────────
+  const loanType       = field(fd, "loan type", "loantype", "type best describes", "what type") || data.loanProduct || "Tier 2";
+  const salesMethod    = field(fd, "customer sales method", "salesmethod", "sales method") || "—";
+  const storeChain     = field(fd, "store chain", "storechain", "chain") || data.retailerName || "—";
+  const storeBranch    = field(fd, "store branch", "storebranch", "branch name", "branch") || data.branchName || "—";
+  const storeEmail     = field(fd, "store email", "storeemail", "email") || "—";
+  const storePhone     = field(fd, "store telephone", "storephone", "store tel", "retailer phone") || "—";
+  const storeManager   = field(fd, "store manager", "storemanager", "manager name", "manager") || "—";
+  const retailerRef    = field(fd, "retailer reference", "retailerref", "retailer ref no", "ref no") || "—";
+  const loanNo         = field(fd, "marishoma loan", "loan no", "loan number", "loanno") || "—";
 
-  const jobRef   = data.formitizeJobId || String(data.id);
-  const sigDate  = fmtDate(data.signedAt as string);
+  const dob            = field(fd, "date of birth", "dob", "birthdate") || "—";
+  const age            = field(fd, "age") || "—";
+  const nationalId     = field(fd, "id/passport", "id passport", "idpassport", "national id", "nationalid", "id number", "idnumber", "passport") || "—";
+  const address        = field(fd, "residential address", "address") || "—";
+  const maritalStatus  = field(fd, "marital status", "maritalstatus", "marital") || "—";
+  const customerPhone  = data.customerPhone || field(fd, "mobile no", "mobile", "phone", "cellphone") || "—";
+
+  const nextOfKin      = field(fd, "next of kin", "nextofkin", "kin") || "—";
+  const kinRelation    = field(fd, "relationship to borrower", "relationship", "relation") || "—";
+  const kinId          = field(fd, "kin id", "kin passport", "kin id/passport") || "—";
+  const kinPhone       = field(fd, "kin mobile", "kin phone", "alternative contact") || "—";
+
+  const loanTermDays   = field(fd, "loan term", "loanterm", "term days", "term") || "—";
+  const appraisalRate  = field(fd, "appraisal fee rate", "appraisalrate", "appraisal rate") || "—";
+  const dailyInterest  = field(fd, "daily interest", "dailyinterest") || "—";
+  const termInterest   = field(fd, "term interest", "terminterest") || "—";
+
+  const numChicks      = field(fd, "number of chicks", "numberofchicks", "chicks purchased", "chick quantity", "chicks") || "—";
+  const loanAmtFig     = field(fd, "loan amount in figures", "loanamount", "loan amount") || fmtAmt(data.loanAmount);
+
+  const appliedAmt     = field(fd, "applied loan amount", "appliedloanamount") || fmtAmt(data.loanAmount);
+  const appliedTenor   = field(fd, "loan tenor", "tenor", "loantenor") || (loanTermDays !== "—" ? `${loanTermDays} Days` : "—");
+  const monthlyInt     = field(fd, "monthly interest", "monthlyinterest", "monthly interest (%)") || "—";
+  const disbDate       = field(fd, "disbursement date", "disbursementdate", "disbursement") || fmtDate(data.createdAt as string);
+  const settleDate     = field(fd, "settlement date", "settlementdate", "settlement") || "—";
+  const modeSettle     = field(fd, "mode of settlement", "modeofsettle", "mode") || "At Store Branch";
+  const totalInterest  = field(fd, "total interest to term", "totalinterest", "total interest") || "—";
+  const appraisalFee   = field(fd, "appraisal fee amount", "appraisalfee", "appraisal fee") || "—";
+  const totalExpected  = field(fd, "total expected settlement", "totalexpected", "total settlement amount", "total amount") || fmtAmt(data.loanAmount);
+
+  const settlementMethod = field(fd, "settlement method", "settlemethod") || "On Agreed Settlement Date";
+  const supervisorName   = field(fd, "loan supervisor", "supervisor name", "supervisor") || "Tefco Finance";
+  const agentName        = field(fd, "sales agent name", "salesagent", "agent name", "agent") || field(fd, "supervisor") || "—";
+  const agentPhone       = field(fd, "sales agent cellphone", "agentphone", "agent phone", "agent cellphone") || storePhone;
+
+  const jobRef    = data.formitizeJobId || String(data.id);
+  const sigDate   = fmtDate(data.signedAt as string);
   const issueDate = fmtDate(data.createdAt as string);
 
   const sigs = {
@@ -200,152 +242,163 @@ export async function generateNovafeedAgreementPdf(data: AgreementData): Promise
     mgr: data.managerSignature,
   };
   const isSigned = !!sigs.c1;
+  const TOTAL_PAGES = 3;
 
-  // ══════════════════════════════════════════════════════
-  // PAGE 1
-  // ══════════════════════════════════════════════════════
-  const ctx1 = await newPage(doc, bold, reg, sm, 1, 2, data.customerName, jobRef);
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 1 — Application details + Borrower + Next of kin + Preferred term
+  // ══════════════════════════════════════════════════════════════════════════
+  const ctx1 = await newPage(doc, bold, reg, sm, 1, TOTAL_PAGES, data.customerName, jobRef);
 
-  // Issue date (right-aligned)
-  ctx1.page.drawText(`Issue Date: ${issueDate}`, { x: PW - MR - 120, y: ctx1.y + 2, size: 8, font: reg, color: MID });
+  ctx1.page.drawText(`Date: ${issueDate}`, { x: PW - MR - 100, y: ctx1.y + 2, size: 8, font: reg, color: MID });
 
-  // ── Borrower Details ────────────────────────────────
-  heading(ctx1, "Borrower Details");
-  fieldRow(ctx1, "Borrower Name", data.customerName,   "National ID / Passport", nationalId);
-  fieldRow(ctx1, "Mobile Number", data.customerPhone || "—", "Store Branch", data.branchName || "—");
-  fieldRow(ctx1, "Retailer / Partner", data.retailerName || "—", "Loan Type", loanType);
+  heading(ctx1, "Novafeed Agreement");
+  fieldRow(ctx1, "What type best describes your loan application?", loanType);
+  fieldRow(ctx1, "Customer Sales Method", salesMethod, "Store Chain", storeChain);
+  fieldRow(ctx1, "Store Branch", storeBranch, "Store Email", storeEmail);
+  fieldRow(ctx1, "Store Telephone Number", storePhone, "Store Manager Name", storeManager);
+  fieldRow(ctx1, "Retailer Reference No", retailerRef, "Marishoma Loan No", loanNo);
   ctx1.y -= 4;
 
-  // ── Loan Summary ────────────────────────────────────
-  heading(ctx1, "Loan Summary");
-  fieldRow(ctx1, "Applied Loan Amount", fmtAmt(data.loanAmount), "Loan Term", loanTerm ? `${loanTerm} months` : "—");
-  fieldRow(ctx1, "Interest Rate", interestRate ? `${interestRate}%` : "—", "Total Repayment", totalRepay ? String(totalRepay) : "—");
-  fieldRow(ctx1, "Disbursement Date", disbDate, "Settlement Due Date", settleDate);
-  if (numChicks !== "—") fieldRow(ctx1, "Number of Chicks", numChicks, "Price per Chick", chickPrice !== "—" ? chickPrice : "—");
-  if (feedQty !== "—") fieldFull(ctx1, "Feed Quantity (bags)", feedQty);
+  heading(ctx1, "Borrowers Personal Details");
+  fieldRow(ctx1, "Select Client", data.customerName, "Date of Birth", dob);
+  fieldRow(ctx1, "Age", age, "I.D / Passport No.", nationalId);
+  fieldFull(ctx1, "Residential Address", address);
+  fieldRow(ctx1, "Mobile No.", customerPhone, "Marital Status", maritalStatus);
   ctx1.y -= 4;
 
-  // ── Section 1: Acknowledgement ──────────────────────
-  heading(ctx1, "Section 1 — Acknowledgement of Loan Terms");
-
-  const terms1 = [
-    "I, the undersigned Borrower, hereby acknowledge that I have read, understood and agree to be bound by the",
-    "terms and conditions of this Novafeed Agreement with Tefco Finance (Pvt) Ltd. I confirm that the loan",
-    "amount, repayment schedule and all associated conditions stated herein are correct and accepted by me.",
-    "",
-    "I understand that this loan is to be used exclusively for the purchase of Novafeed products (chicks and/or",
-    "feed) as agreed with the Novafeeds retailer. Any diversion of funds to other purposes constitutes a breach",
-    "of this agreement. I agree to repay the full amount by the Settlement Due Date indicated above.",
-    "",
-    "Failure to repay on time may result in legal proceedings and/or reporting to credit reference bureaus.",
-  ];
-  for (const line of terms1) {
-    if (line === "") { ctx1.y -= 6; continue; }
-    wrap(ctx1, line, ML, CW, 8.5, MID, 12);
-  }
-  ctx1.y -= 10;
-
-  // ── Signature 1 ─────────────────────────────────────
-  text(ctx1, "BORROWER SIGNATURE 1 OF 3", ML, 7, TEAL, false, bold);
-  ctx1.y -= 4;
-  text(ctx1, "By signing below the borrower acknowledges the loan terms stated above.", ML, 8, MID);
-  ctx1.y -= 12;
-  await sigBlock(ctx1, "Customer Signature 1 of 3", "Acknowledgement of loan terms", sigs.c1);
+  heading(ctx1, "Next of Kin / Alternative Contact Details");
+  fieldRow(ctx1, "Next of Kin", nextOfKin, "Relationship to Borrower", kinRelation);
+  fieldRow(ctx1, "I.D / Passport No.", kinId, "Mobile No.", kinPhone);
   ctx1.y -= 4;
 
-  // ── Footer line ─────────────────────────────────────
+  heading(ctx1, "Preferred Loan Term");
+  fieldRow(ctx1, "Loan Term", loanTermDays !== "—" ? `${loanTermDays} Days` : "—", "Appraisal Fee Rate", appraisalRate !== "—" ? `${appraisalRate}%` : "—");
+  fieldRow(ctx1, "Daily Interest", dailyInterest !== "—" ? `${dailyInterest}%` : "—", "Term Interest", termInterest !== "—" ? `${termInterest}%` : "—");
+  ctx1.y -= 4;
+
+  heading(ctx1, "Loan Amount");
+  fieldRow(ctx1, "Number of Chicks Purchased", numChicks, "Loan Amount in Figures (USD)", loanAmtFig);
+
   ctx1.y = 30;
   drawLine(ctx1, LGREY);
   ctx1.y -= 10;
-  text(ctx1, "Tefco Finance (Pvt) Ltd  ·  HukuPlus Central  ·  Ref: " + jobRef + (isSigned ? "  ·  Executed: " + sigDate : "  ·  PENDING SIGNATURE"), ML, 6.5, GREY);
+  text(ctx1, `Tefco Finance (Pvt) Ltd  ·  HukuPlus Central  ·  Ref: ${jobRef}  ·  Submission ID: ${jobRef}`, ML, 6, GREY);
 
-  // ══════════════════════════════════════════════════════
-  // PAGE 2
-  // ══════════════════════════════════════════════════════
-  const ctx2 = await newPage(doc, bold, reg, sm, 2, 2, data.customerName, jobRef);
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 2 — Applied Loan Details + Signatures 1 & 2 + Approved + Sig 3
+  // ══════════════════════════════════════════════════════════════════════════
+  const ctx2 = await newPage(doc, bold, reg, sm, 2, TOTAL_PAGES, data.customerName, jobRef);
 
-  // ── Section 2: Repayment schedule ──────────────────
-  heading(ctx2, "Section 2 — Repayment Schedule Confirmation");
+  heading(ctx2, "Applied Loan Details");
+  fieldRow(ctx2, "Loan Amount", appliedAmt, "Loan Tenor", appliedTenor);
+  fieldRow(ctx2, "Monthly Interest (%)", monthlyInt !== "—" ? `${monthlyInt}%` : "—", "Daily Interest (%)", dailyInterest !== "—" ? `${dailyInterest}%` : "—");
+  fieldRow(ctx2, "Disbursement Date", disbDate, "Settlement Date", settleDate);
+  fieldFull(ctx2, "Mode of Settlement", modeSettle);
 
-  const terms2 = [
-    "I, the undersigned Borrower, confirm receipt of the loan proceeds and acknowledge the repayment schedule",
-    "as detailed in Section 1 above. I understand that repayments are due on the Settlement Date and that no",
-    "extensions will be granted unless approved in writing by Tefco Finance (Pvt) Ltd.",
-    "",
-    "I further confirm that all chicks and/or feed received from the Novafeeds retailer are as per the quantities",
-    "specified in this agreement, and I accept full responsibility for the care and management of such assets.",
+  // Summary table (right-aligned values)
+  const tbl = [
+    ["Total Interest to Term (" + appliedTenor + ")", totalInterest !== "—" ? `$ ${totalInterest}` : "—"],
+    ["Appraisal Fee Amount (USD)", appraisalFee !== "—" ? `$ ${appraisalFee}` : "—"],
+    ["Total Expected Settlement Amount (USD)", totalExpected !== "—" ? `$ ${totalExpected}` : totalExpected],
   ];
-  for (const line of terms2) {
-    if (line === "") { ctx2.y -= 6; continue; }
-    wrap(ctx2, line, ML, CW, 8.5, MID, 12);
+  for (const [lbl, val] of tbl) {
+    text(ctx2, lbl, ML, 8.5, DARK);
+    text(ctx2, val, PW - MR - ctx2.bold.widthOfTextAtSize(val, 9), 9, DARK, true, ctx2.bold);
+    ctx2.y -= 14;
+    drawLine(ctx2);
+    ctx2.y -= 6;
   }
-  ctx2.y -= 10;
-
-  // ── Signature 2 ─────────────────────────────────────
-  text(ctx2, "BORROWER SIGNATURE 2 OF 3", ML, 7, TEAL, false, bold);
   ctx2.y -= 4;
-  text(ctx2, "Confirming repayment schedule and receipt of goods.", ML, 8, MID);
-  ctx2.y -= 12;
-  await sigBlock(ctx2, "Customer Signature 2 of 3", "Repayment schedule & receipt confirmation", sigs.c2);
-  ctx2.y -= 10;
 
-  // ── Section 3: Final authorisation ─────────────────
-  heading(ctx2, "Section 3 — Final Authorisation & Approved Loan Details");
+  heading(ctx2, "Loan Origination Cost");
+  fieldFull(ctx2, "Appraisal Fee Amount (USD)", appraisalFee !== "—" ? `$ ${appraisalFee}` : "—");
+  wrap(ctx2,
+    "It is hereby understood and agreed that the appraisal fee shall be recovered in full from the borrower. " +
+    "Repayments to be made at Novafeeds branch into the account of HukuPlus.",
+    ML, CW, 8, MID, 12
+  );
+  ctx2.y -= 8;
 
-  const terms3 = [
-    "I confirm that all information provided in this agreement is true and correct. I authorise Tefco Finance",
-    "(Pvt) Ltd to process the approved loan amount and understand that this signature constitutes final, legal",
-    "and binding acceptance of all terms and conditions of the Novafeed Agreement.",
-    "",
-    "Approved Loan Amount: " + fmtAmt(data.loanAmount) +
-    "   |   Settlement Due: " + settleDate +
-    "   |   Ref: " + jobRef,
-  ];
-  for (const line of terms3) {
-    if (line === "") { ctx2.y -= 6; continue; }
-    wrap(ctx2, line, ML, CW, 8.5, MID, 12);
-  }
-  ctx2.y -= 10;
-
-  // ── Signature 3 ─────────────────────────────────────
-  text(ctx2, "BORROWER SIGNATURE 3 OF 3", ML, 7, TEAL, false, bold);
+  text(ctx2, "Borrower Print Signature:", ML, 8, MID);
+  ctx2.y -= 6;
+  printSigLine(ctx2, "");
+  await sigBlock(ctx2, "Customer Signature 1 of 3", "Acknowledgement of loan agreement terms", sigs.c1);
   ctx2.y -= 4;
-  text(ctx2, "Final authorisation of the Novafeed Agreement.", ML, 8, MID);
-  ctx2.y -= 12;
-  await sigBlock(ctx2, "Customer Signature 3 of 3", "Final authorisation", sigs.c3);
-  ctx2.y -= 10;
-
-  // ── Section 4: Supervisor ───────────────────────────
-  heading(ctx2, "Section 4 — Store Manager / Supervisor Authorisation");
 
   wrap(ctx2,
-    `I, ${agentName}, as the authorised Novafeeds store manager / Tefco Finance supervisor, confirm that the borrower's ` +
-    "identity has been verified, that the loan terms have been explained to the borrower and that all signatures above are " +
-    "genuine. This agreement is hereby approved and authorised.",
-    ML, CW, 8.5, MID, 12
+    "That the Borrower hereby acknowledges the loan details as applied. The Borrower further understands and agrees that if upon " +
+    "appraisal the Borrower fails to qualify for the applied loan amount, the Lender shall be at liberty to determine the applicable loan " +
+    "amount that the Borrower is eligible for.",
+    ML, CW, 7.5, MID, 11
   );
-  ctx2.y -= 10;
+  ctx2.y -= 6;
+  wrap(ctx2,
+    "The Borrower hereby understands and acknowledges that Marishoma Finance (A Division of Tefco Finance), and its loan product " +
+    "'HukuPlus' do not accept any responsibility for the risk attached to chick mortalities, nor any defects in any of the products purchased from the supplier store.",
+    ML, CW, 7.5, MID, 11
+  );
+  ctx2.y -= 6;
+  text(ctx2, "Borrower Print Signature:", ML, 8, MID);
+  ctx2.y -= 6;
+  printSigLine(ctx2, "");
+  await sigBlock(ctx2, "Customer Signature 2 of 3", "Repayment schedule confirmation", sigs.c2);
 
-  text(ctx2, "SUPERVISOR / STORE MANAGER SIGNATURE", ML, 7, TEAL, false, bold);
-  ctx2.y -= 4;
-  text(ctx2, "Authorised representative of Novafeeds / Tefco Finance (Pvt) Ltd.", ML, 8, MID);
-  ctx2.y -= 12;
-  await sigBlock(ctx2, "Store Manager / Supervisor", "Authorised representative", sigs.mgr);
-
-  // ── Execution stamp ─────────────────────────────────
-  if (isSigned) {
-    ctx2.y -= 6;
-    ctx2.page.drawRectangle({ x: ML, y: ctx2.y - 28, width: CW, height: 28, color: rgb(0.93,1,0.95), borderColor: rgb(0.3,0.7,0.4), borderWidth: 0.8 });
-    text({ ...ctx2, y: ctx2.y - 10 }, "AGREEMENT FULLY EXECUTED", ML + 8, 9, rgb(0.1,0.5,0.2), false, bold);
-    text({ ...ctx2, y: ctx2.y - 21 }, `All four signatures captured on ${sigDate} via HukuPlus Central · Tefco Finance (Pvt) Ltd`, ML + 8, 7, rgb(0.2,0.5,0.3));
-    ctx2.y -= 34;
-  }
-
-  // ── Footer ──────────────────────────────────────────
   ctx2.y = 30;
   drawLine(ctx2, LGREY);
   ctx2.y -= 10;
-  text(ctx2, "Tefco Finance (Pvt) Ltd  ·  HukuPlus Central  ·  Ref: " + jobRef + (isSigned ? "  ·  Executed: " + sigDate : "  ·  PENDING SIGNATURE"), ML, 6.5, GREY);
+  text(ctx2, `Tefco Finance (Pvt) Ltd  ·  HukuPlus Central  ·  Ref: ${jobRef}`, ML, 6, GREY);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PAGE 3 — Approved Loan Details + Supervisor + Sales Agent + Execution
+  // ══════════════════════════════════════════════════════════════════════════
+  const ctx3 = await newPage(doc, bold, reg, sm, 3, TOTAL_PAGES, data.customerName, jobRef);
+
+  heading(ctx3, "Approved Loan Details");
+  fieldFull(ctx3, "Settlement Method", settlementMethod);
+  wrap(ctx3,
+    "The Borrower hereby has understood and agreed to the approved loan details indicated on part 6 on this agreement.",
+    ML, CW, 8.5, MID, 12
+  );
+  ctx3.y -= 8;
+  text(ctx3, "Borrower Print Signature:", ML, 8, MID);
+  ctx3.y -= 6;
+  printSigLine(ctx3, "");
+  await sigBlock(ctx3, "Customer Signature 3 of 3", "Final authorisation of the Novafeed Agreement", sigs.c3);
+  fieldRow(ctx3, "Date", isSigned ? sigDate : issueDate);
+  ctx3.y -= 4;
+
+  heading(ctx3, "Loan Approval Personnel");
+  fieldFull(ctx3, "Loan Supervisor Name", supervisorName);
+  text(ctx3, "Supervisor Signature:", ML, 8, MID);
+  ctx3.y -= 6;
+  await sigBlock(ctx3, "Supervisor / Store Manager", "Authorised representative of Tefco Finance (Pvt) Ltd", sigs.mgr);
+  fieldRow(ctx3, "Date", isSigned ? sigDate : issueDate);
+  ctx3.y -= 4;
+
+  heading(ctx3, "Sales Agent");
+  fieldRow(ctx3, "Sales Agent Name", agentName, "Sales Agent Cellphone No", agentPhone);
+  text(ctx3, "Sales Agent Signature:", ML, 8, MID);
+  ctx3.y -= 6;
+  printSigLine(ctx3, "");
+  fieldRow(ctx3, "Date", isSigned ? sigDate : issueDate);
+  ctx3.y -= 8;
+
+  if (isSigned) {
+    ctx3.page.drawRectangle({ x: ML, y: ctx3.y - 30, width: CW, height: 30, color: rgb(0.93,1,0.95), borderColor: rgb(0.3,0.7,0.4), borderWidth: 0.8 });
+    text({ ...ctx3, y: ctx3.y - 11 }, "AGREEMENT FULLY EXECUTED", ML + 8, 9.5, rgb(0.1,0.5,0.2), false, bold);
+    text({ ...ctx3, y: ctx3.y - 22 }, `All signatures captured on ${sigDate} via HukuPlus Central · Tefco Finance (Pvt) Ltd`, ML + 8, 7, rgb(0.2,0.5,0.3));
+    ctx3.y -= 36;
+  }
+
+  ctx3.y = 50;
+  wrap(ctx3, "All Customer queries and complaints can be directed by Voice, SMS or Whatsapp to Helpline no +263 780 563 477.", ML, CW, 7.5, MID, 11);
+  ctx3.y -= 4;
+  drawLine(ctx3, LGREY);
+  ctx3.y -= 10;
+  text(ctx3,
+    `Tefco Finance (Pvt) Ltd  ·  MFA2429/120  ·  30001 Dagenham Road, Willowvale, Harare  ·  Ref: ${jobRef}${isSigned ? "  ·  Executed: " + sigDate : "  ·  PENDING SIGNATURE"}`,
+    ML, 6, GREY
+  );
 
   return doc.save();
 }

@@ -348,9 +348,56 @@ async function attachPdfToFormitize(
   return { ok: false, error: "All Formitize attachment endpoints failed" };
 }
 
+// ─── Helper: fetch the original PDF from Formitize by job ID ──────────────────
+async function fetchFormitizePdf(jobId: string): Promise<Buffer | null> {
+  if (!jobId || !FORMITIZE_API_KEY) return null;
+
+  // Formitize API endpoints to try — ordered by most likely to succeed.
+  // The /forms/{id} path is confirmed working from the explore endpoint.
+  // We try PDF/print suffixes as well as a ?format=pdf query param.
+  const BASES = [
+    "https://service.formitize.com/api/v1",
+    "https://app.formitize.com/api/v2",
+  ];
+  const paths = [
+    `/forms/${jobId}/pdf`,
+    `/forms/${jobId}/print`,
+    `/forms/${jobId}?format=pdf`,
+    `/jobs/${jobId}/pdf`,
+    `/jobs/${jobId}/print`,
+    `/submissions/${jobId}/pdf`,
+  ];
+
+  for (const base of BASES) {
+    for (const path of paths) {
+      const url = `${base}${path}`;
+      try {
+        const r = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${FORMITIZE_API_KEY}`,
+            Accept: "application/pdf,application/octet-stream,*/*",
+          },
+        });
+        if (r.ok) {
+          const ct = r.headers.get("content-type") ?? "";
+          if (ct.includes("pdf") || ct.includes("octet-stream")) {
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length > 1000) {
+              console.log(`[agreements] Formitize PDF fetched via ${url} (${buf.length} bytes)`);
+              return buf;
+            }
+          }
+        }
+      } catch { /* try next */ }
+    }
+  }
+  console.log(`[agreements] Formitize PDF not found for job ${jobId} — will use generated PDF`);
+  return null;
+}
+
 // ─── PUBLIC: Download agreement as PDF (uses signing token for auth) ──────────
-// Accessible without staff auth — token acts as the credential.
-// Returns the PDF in its current state (unsigned if pending, signed if executed).
+// Tries to return the original Formitize submission PDF first.
+// Falls back to our programmatically generated PDF if unavailable.
 router.get("/sign/:token/agreement.pdf", async (req, res): Promise<void> => {
   const token = req.params.token;
   if (!token || token.length < 20) { res.status(400).send("Invalid token"); return; }
@@ -359,6 +406,50 @@ router.get("/sign/:token/agreement.pdf", async (req, res): Promise<void> => {
     .where(eq(agreementsTable.signingToken, token));
   if (!agreement) { res.status(404).send("Agreement not found"); return; }
 
+  const filename = `${agreement.customerName.replace(/[^a-z0-9 ]/gi, "")} - Novafeed Agreement.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+  res.setHeader("Cache-Control", "no-store");
+
+  // ── Try original Formitize PDF first ──────────────────────────────────────
+  // 1. Try via Formitize API by job ID
+  if (agreement.formitizeJobId) {
+    const formitizePdf = await fetchFormitizePdf(agreement.formitizeJobId);
+    if (formitizePdf) {
+      res.send(formitizePdf);
+      return;
+    }
+  }
+  // 2. Try formitizeFormUrl directly if it looks like a PDF or Formitize URL
+  const formUrl = (agreement as any).formitizeFormUrl as string | null;
+  if (formUrl) {
+    try {
+      const pdfUrl = formUrl.endsWith(".pdf") ? formUrl
+        : formUrl.includes("formitize.com") ? formUrl.replace(/\/?$/, "/pdf")
+        : null;
+      if (pdfUrl) {
+        const r = await fetch(pdfUrl, {
+          headers: { Authorization: `Bearer ${FORMITIZE_API_KEY}`, Accept: "application/pdf,*/*" },
+        });
+        if (r.ok) {
+          const ct = r.headers.get("content-type") ?? "";
+          if (ct.includes("pdf") || ct.includes("octet-stream")) {
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length > 1000) {
+              console.log(`[agreements] Formitize PDF fetched via formUrl: ${pdfUrl} (${buf.length} bytes)`);
+              res.send(buf);
+              return;
+            }
+          }
+        }
+      }
+    } catch { /* fall through to generated PDF */ }
+  }
+  if (agreement.formitizeJobId || formUrl) {
+    console.log(`[agreements] Formitize PDF unavailable (jobId=${agreement.formitizeJobId}) — using generated PDF`);
+  }
+
+  // ── Fallback: generate our own PDF ────────────────────────────────────────
   const [retailer] = await db.select().from(retailersTable)
     .where(eq(retailersTable.id, agreement.retailerId));
   const [branch] = await db.select().from(branchesTable)
@@ -383,11 +474,48 @@ router.get("/sign/:token/agreement.pdf", async (req, res): Promise<void> => {
     branchName: branch?.name ?? "",
   });
 
-  const filename = `${agreement.customerName.replace(/[^a-z0-9 ]/gi, "")} - Novafeed Agreement.pdf`;
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-  res.setHeader("Cache-Control", "no-store");
   res.send(Buffer.from(pdfBytes));
+});
+
+// STAFF: Debug Formitize PDF endpoint discovery — GET /api/agreements/debug-formitize-pdf?jobId=NNN
+router.get("/agreements/debug-formitize-pdf", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const jobId = (req.query.jobId as string || "").trim();
+  if (!jobId) { res.status(400).json({ error: "?jobId=NNN required" }); return; }
+  if (!FORMITIZE_API_KEY) { res.status(500).json({ error: "FORMITIZE_API_KEY not configured" }); return; }
+
+  const BASES = [
+    "https://service.formitize.com/api/v1",
+    "https://app.formitize.com/api/v2",
+  ];
+  const paths = [
+    `/forms/${jobId}/pdf`,
+    `/forms/${jobId}/print`,
+    `/forms/${jobId}?format=pdf`,
+    `/jobs/${jobId}/pdf`,
+    `/jobs/${jobId}/print`,
+    `/submissions/${jobId}/pdf`,
+  ];
+
+  const results: Array<{ url: string; status: number; contentType: string; size: number; isPdf: boolean }> = [];
+  for (const base of BASES) {
+    for (const path of paths) {
+      const url = `${base}${path}`;
+      try {
+        const r = await fetch(url, {
+          headers: { Authorization: `Bearer ${FORMITIZE_API_KEY}`, Accept: "application/pdf,application/octet-stream,*/*" },
+        });
+        const ct = r.headers.get("content-type") ?? "";
+        const buf = Buffer.from(await r.arrayBuffer());
+        const isPdf = ct.includes("pdf") || ct.includes("octet-stream");
+        results.push({ url, status: r.status, contentType: ct, size: buf.length, isPdf: isPdf && buf.length > 1000 });
+      } catch (e: any) {
+        results.push({ url, status: 0, contentType: "error", size: 0, isPdf: false });
+      }
+    }
+  }
+
+  res.json({ jobId, results, workingEndpoint: results.find(r => r.isPdf) ?? null });
 });
 
 // PUBLIC: Get signing session info (no auth required)
