@@ -465,35 +465,48 @@ router.get("/dashboard/lr-cohort-stats", async (req, res): Promise<void> => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const monthMap = new Map<string, { disbursed: number; overdue: number; bad: number }>();
+  // Mirror the LR's three statuses exactly:
+  //   completed = paid off (good outcome)
+  //   bad       = written off (bad outcome)
+  //   active    = still open — subdivided into on-time vs overdue by due date
+  const monthMap = new Map<string, {
+    disbursed: number;
+    completed: number;  // status="completed"
+    active: number;     // status="active", due date not yet passed
+    overdue: number;    // status="active", due date in the past
+    bad: number;        // status="bad"
+  }>();
 
   for (const loan of loans) {
     if (String(loan.loanType ?? "").toLowerCase() !== "hukuplus") continue;
     const disbStr = loan.disbursementDate;
     if (!disbStr) continue;
 
-    // Group by YYYY-MM (ISO date prefix)
     const month = String(disbStr).slice(0, 7);
-    if (!monthMap.has(month)) monthMap.set(month, { disbursed: 0, overdue: 0, bad: 0 });
+    if (!monthMap.has(month)) {
+      monthMap.set(month, { disbursed: 0, completed: 0, active: 0, overdue: 0, bad: 0 });
+    }
     const entry = monthMap.get(month)!;
     entry.disbursed++;
 
     const loanStatus = String(loan.status ?? "").toLowerCase();
-    if (loanStatus === "completed") continue;
 
-    // Bad loan: LR marks status="bad" explicitly, OR referred to lawyers
-    // (status=bad is the LR's primary bad-loan flag; referredToLawyers is a secondary indicator)
-    if (loanStatus === "bad" || loan.referredToLawyers) {
+    if (loanStatus === "completed") {
+      entry.completed++;
+    } else if (loanStatus === "bad") {
       entry.bad++;
-      continue;
-    }
-
-    // Overdue: active loan past its due date (not yet bad or completed)
-    if (loan.dueDate) {
-      const due = new Date(loan.dueDate);
-      due.setHours(0, 0, 0, 0);
-      if (today > due) {
-        entry.overdue++;
+    } else {
+      // status="active" — check whether it's past its due date
+      if (loan.dueDate) {
+        const due = new Date(loan.dueDate);
+        due.setHours(0, 0, 0, 0);
+        if (today > due) {
+          entry.overdue++;
+        } else {
+          entry.active++;
+        }
+      } else {
+        entry.active++;
       }
     }
   }

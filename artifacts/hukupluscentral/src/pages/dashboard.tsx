@@ -33,8 +33,10 @@ interface LRCohortMonth {
   month: string;
   monthLabel: string;
   disbursed: number;
-  overdue: number;
-  bad: number;
+  completed: number;  // paid off
+  active: number;     // open, on time (not yet due)
+  overdue: number;    // open, past due date
+  bad: number;        // written off
 }
 
 interface ApplicationRow {
@@ -951,83 +953,112 @@ function PipelineSummaryCard({ data, delay }: { data: PipelineSummary | undefine
 function LRCohortSection({ data, delay }: { data: LRCohortMonth[] | undefined; delay: number }) {
   if (!data || data.length === 0) return null;
 
-  // Skip the current month's active loans — they're not overdue yet
-  // (all overdue/bad counts should be 0 for the current bucket, but
-  // we only show overdue/bad once a month has loans that have passed due)
-
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} className="mb-10">
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
           HukuPlus Cohort Health
         </h2>
-        <span className="text-xs text-muted-foreground/50 font-medium">· Overdue &amp; bad loans by disbursement month · Active register only</span>
+        <span className="text-xs text-muted-foreground/50 font-medium">· by disbursement month · mirroring LR statuses</span>
       </div>
 
       {/* Scrollable month cards */}
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-white/10">
         {data.map((m) => {
-          const overdueRate = m.disbursed > 0 ? Math.round((m.overdue / m.disbursed) * 100) : 0;
-          const badRate     = m.disbursed > 0 ? Math.round((m.bad    / m.disbursed) * 100) : 0;
-          const hasIssues   = m.overdue > 0 || m.bad > 0;
+          const d = m.disbursed || 1; // avoid /0
+          const pctCompleted = Math.round((m.completed / d) * 100);
+          const pctActive    = Math.round((m.active    / d) * 100);
+          const pctOverdue   = Math.round((m.overdue   / d) * 100);
+          const pctBad       = Math.round((m.bad       / d) * 100);
+          const border = m.bad > 0
+            ? "border-red-500/30"
+            : m.overdue > 0
+            ? "border-amber-500/25"
+            : "border-white/5";
 
           return (
             <GlassCard
               key={m.month}
-              className={`flex-shrink-0 w-44 p-4 flex flex-col gap-2 relative overflow-hidden
-                ${m.bad > 0 ? "border-red-500/25" : m.overdue > 0 ? "border-amber-500/20" : "border-white/5"}`}
+              className={`flex-shrink-0 w-48 p-4 flex flex-col gap-0 relative overflow-hidden ${border}`}
             >
-              {/* Glow spot */}
-              {hasIssues && (
-                <div className={`absolute -right-4 -top-4 w-16 h-16 rounded-full blur-2xl opacity-20
-                  ${m.bad > 0 ? "bg-red-500" : "bg-amber-500"}`} />
+              {/* Subtle glow */}
+              {(m.bad > 0 || m.overdue > 0) && (
+                <div className={`absolute -right-6 -top-6 w-20 h-20 rounded-full blur-3xl opacity-15
+                  ${m.bad > 0 ? "bg-red-500" : "bg-amber-400"}`} />
               )}
 
-              {/* Month label */}
-              <div>
-                <p className="text-xs font-semibold text-white/90 leading-tight">{m.monthLabel}</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-0.5">{m.disbursed} loans disbursed</p>
+              {/* Header */}
+              <div className="mb-3">
+                <p className="text-xs font-bold text-white/90 leading-tight">{m.monthLabel}</p>
+                <p className="text-[10px] text-muted-foreground/50 mt-0.5">{m.disbursed} loans disbursed</p>
               </div>
 
-              {/* Overdue */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <AlertTriangle className={`w-3 h-3 flex-shrink-0 ${m.overdue > 0 ? "text-amber-400" : "text-white/20"}`} />
-                  <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Overdue</span>
-                </div>
-                <div className="text-right">
-                  <span className={`text-sm font-bold tabular-nums ${m.overdue > 0 ? "text-amber-400" : "text-white/30"}`}>
-                    {m.overdue}
+              {/* Progress bar: completed | active | overdue | bad */}
+              <div className="flex h-1.5 rounded-full overflow-hidden gap-px mb-3">
+                {m.completed > 0 && (
+                  <div className="bg-emerald-500" style={{ width: `${pctCompleted}%` }} />
+                )}
+                {m.active > 0 && (
+                  <div className="bg-sky-400" style={{ width: `${pctActive}%` }} />
+                )}
+                {m.overdue > 0 && (
+                  <div className="bg-amber-400" style={{ width: `${pctOverdue}%` }} />
+                )}
+                {m.bad > 0 && (
+                  <div className="bg-red-500" style={{ width: `${pctBad}%` }} />
+                )}
+                {/* remainder — grey fill */}
+                {(pctCompleted + pctActive + pctOverdue + pctBad) < 100 && (
+                  <div className="bg-white/10 flex-1" />
+                )}
+              </div>
+
+              {/* Four rows matching LR buckets */}
+              <div className="flex flex-col gap-1.5">
+                {/* Completed */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle className={`w-3 h-3 flex-shrink-0 ${m.completed > 0 ? "text-emerald-400" : "text-white/15"}`} />
+                    <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">Completed</span>
+                  </div>
+                  <span className={`text-xs font-bold tabular-nums ${m.completed > 0 ? "text-emerald-400" : "text-white/25"}`}>
+                    {m.completed}{m.completed > 0 && <span className="text-[9px] font-normal text-emerald-500/60 ml-0.5">{pctCompleted}%</span>}
                   </span>
-                  {m.overdue > 0 && (
-                    <span className="text-[10px] text-amber-500/70 ml-1">{overdueRate}%</span>
-                  )}
                 </div>
-              </div>
 
-              {/* Bad loans */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <Ban className={`w-3 h-3 flex-shrink-0 ${m.bad > 0 ? "text-red-400" : "text-white/20"}`} />
-                  <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">Bad Loans</span>
-                </div>
-                <div className="text-right">
-                  <span className={`text-sm font-bold tabular-nums ${m.bad > 0 ? "text-red-400" : "text-white/30"}`}>
-                    {m.bad}
+                {/* Active (on time) */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className={`w-3 h-3 flex-shrink-0 ${m.active > 0 ? "text-sky-400" : "text-white/15"}`} />
+                    <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">Active</span>
+                  </div>
+                  <span className={`text-xs font-bold tabular-nums ${m.active > 0 ? "text-sky-400" : "text-white/25"}`}>
+                    {m.active}{m.active > 0 && <span className="text-[9px] font-normal text-sky-500/60 ml-0.5">{pctActive}%</span>}
                   </span>
-                  {m.bad > 0 && (
-                    <span className="text-[10px] text-red-500/70 ml-1">{badRate}%</span>
-                  )}
+                </div>
+
+                {/* Overdue (active, past due date) */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <AlertTriangle className={`w-3 h-3 flex-shrink-0 ${m.overdue > 0 ? "text-amber-400" : "text-white/15"}`} />
+                    <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">In Arrears</span>
+                  </div>
+                  <span className={`text-xs font-bold tabular-nums ${m.overdue > 0 ? "text-amber-400" : "text-white/25"}`}>
+                    {m.overdue}{m.overdue > 0 && <span className="text-[9px] font-normal text-amber-500/60 ml-0.5">{pctOverdue}%</span>}
+                  </span>
+                </div>
+
+                {/* Bad */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Ban className={`w-3 h-3 flex-shrink-0 ${m.bad > 0 ? "text-red-400" : "text-white/15"}`} />
+                    <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">Bad Debt</span>
+                  </div>
+                  <span className={`text-xs font-bold tabular-nums ${m.bad > 0 ? "text-red-400" : "text-white/25"}`}>
+                    {m.bad}{m.bad > 0 && <span className="text-[9px] font-normal text-red-500/60 ml-0.5">{pctBad}%</span>}
+                  </span>
                 </div>
               </div>
-
-              {/* Clean month indicator */}
-              {!hasIssues && (
-                <div className="flex items-center gap-1 mt-0.5">
-                  <CheckCircle className="w-3 h-3 text-emerald-400/60" />
-                  <span className="text-[10px] text-emerald-400/60">All clear</span>
-                </div>
-              )}
             </GlassCard>
           );
         })}
