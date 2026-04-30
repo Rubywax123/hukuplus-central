@@ -452,6 +452,7 @@ router.delete("/dashboard/applications/:jobId", async (req, res): Promise<void> 
 // For each month a cohort of loans was disbursed, shows how many are now sitting
 // in overdue (past due date, still active) and how many are bad loans.
 // This is always live — data comes directly from the Loan Register API.
+
 router.get("/dashboard/lr-cohort-stats", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
 
@@ -477,16 +478,17 @@ router.get("/dashboard/lr-cohort-stats", async (req, res): Promise<void> => {
     const entry = monthMap.get(month)!;
     entry.disbursed++;
 
-    const isCompleted = String(loan.status ?? "").toLowerCase() === "completed";
-    if (isCompleted) continue;
+    const loanStatus = String(loan.status ?? "").toLowerCase();
+    if (loanStatus === "completed") continue;
 
-    // Bad loan: referred to lawyers
-    if (loan.referredToLawyers) {
+    // Bad loan: LR marks status="bad" explicitly, OR referred to lawyers
+    // (status=bad is the LR's primary bad-loan flag; referredToLawyers is a secondary indicator)
+    if (loanStatus === "bad" || loan.referredToLawyers) {
       entry.bad++;
       continue;
     }
 
-    // Overdue: past due date and not yet completed or referred
+    // Overdue: active loan past its due date (not yet bad or completed)
     if (loan.dueDate) {
       const due = new Date(loan.dueDate);
       due.setHours(0, 0, 0, 0);
