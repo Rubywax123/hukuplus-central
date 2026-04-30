@@ -4974,7 +4974,7 @@ function StoreVisitsTab() {
 
   // ── Date navigation ─────────────────────────────────────────────────────────
   const [viewDate, setViewDate] = useState(todayStr());
-  const [filterMode, setFilterMode] = useState<"date" | "upcoming" | "past">("date");
+  const [filterMode, setFilterMode] = useState<"7d" | "today" | "date" | "upcoming" | "past">("7d");
 
   // ── Plan / Log form state ────────────────────────────────────────────────────
   const [showPlanForm, setShowPlanForm] = useState(false);
@@ -4995,9 +4995,6 @@ function StoreVisitsTab() {
   const [editRetailerId,  setEditRetailerId]  = useState<number | "">("");
   const [editBranchId,    setEditBranchId]    = useState<number | "">("");
   const [editPlanNotes,   setEditPlanNotes]   = useState("");
-
-  // ── View mode: schedule vs insights ─────────────────────────────────────────
-  const [viewMode, setViewMode] = useState<"schedule" | "insights">("schedule");
 
   // ── Insights period filter ───────────────────────────────────────────────────
   const [insightsPeriod, setInsightsPeriod] = useState<"30d" | "90d" | "6m" | "1y" | "all">("all");
@@ -5030,7 +5027,6 @@ function StoreVisitsTab() {
     queryFn: () =>
       fetch(`${BASE}/api/store-visits/analytics${analyticsQs ? `?${analyticsQs}` : ""}`, { credentials: "include" })
         .then(r => r.ok ? r.json() : null),
-    enabled: viewMode === "insights",
     staleTime: 5 * 60 * 1000,
   });
 
@@ -5068,7 +5064,9 @@ function StoreVisitsTab() {
     queryKey: visitsQueryKey,
     queryFn: () => {
       let qs = "";
-      if (filterMode === "date")     qs = `?date=${viewDate}`;
+      if (filterMode === "7d")           qs = `?dateFrom=${addDays(todayStr(), -6)}`;
+      else if (filterMode === "today")   qs = `?date=${todayStr()}`;
+      else if (filterMode === "date")    qs = `?date=${viewDate}`;
       else if (filterMode === "upcoming") qs = `?dateFrom=${todayStr()}`;
       else if (filterMode === "past")     qs = `?dateTo=${addDays(todayStr(), -1)}`;
       return fetch(`${BASE}/api/store-visits${qs}`, { credentials: "include" }).then(r => r.ok ? r.json() : []);
@@ -5198,73 +5196,210 @@ function StoreVisitsTab() {
   return (
     <div className="space-y-6">
 
-      {/* ── Top toolbar ── */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        {/* Left: view mode tabs */}
-        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
-          <button onClick={() => setViewMode("schedule")}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 ${viewMode === "schedule" ? "bg-amber-500 text-black" : "text-muted-foreground hover:text-foreground"}`}>
-            <ClipboardList className="w-3.5 h-3.5" /> Schedule
+      {/* ═══════════════════════════════════════════════════════════════════════
+          ANALYTICS — always visible at top
+          ═══════════════════════════════════════════════════════════════════ */}
+
+      {/* Period filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-muted-foreground font-medium">Period:</span>
+        {(["30d", "90d", "6m", "1y", "all"] as const).map(p => (
+          <button key={p} onClick={() => setInsightsPeriod(p)}
+            className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${insightsPeriod === p ? "bg-amber-500 text-black" : "bg-white/5 hover:bg-white/10 text-muted-foreground border border-white/10"}`}>
+            {p === "30d" ? "30 Days" : p === "90d" ? "90 Days" : p === "6m" ? "6 Months" : p === "1y" ? "12 Months" : "All Time"}
           </button>
-          <button onClick={() => setViewMode("insights")}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 ${viewMode === "insights" ? "bg-amber-500 text-black" : "text-muted-foreground hover:text-foreground"}`}>
-            <BarChart3 className="w-3.5 h-3.5" /> Insights
-          </button>
-        </div>
-        {/* Right: actions (only shown in schedule view) */}
-        {viewMode === "schedule" && (
-        <div className="flex gap-2">
-          <button onClick={() => { setFormMode("plan"); setShowPlanForm(v => !v); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${showPlanForm && formMode === "plan" ? "bg-amber-500 text-black" : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30"}`}>
-            <CalendarDays className="w-4 h-4" />
-            Plan a Visit
-          </button>
-          <button onClick={() => { setFormMode("log"); setShowPlanForm(v => formMode === "log" ? !v : true); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${showPlanForm && formMode === "log" ? "bg-green-600 text-white" : "bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30"}`}>
-            <CheckSquare className="w-4 h-4" />
-            Log a Visit
-          </button>
-        </div>
-        )}
+        ))}
       </div>
 
-      {/* ── Schedule sub-filters (only in schedule view) ── */}
-      {viewMode === "schedule" && (
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
-          {(["date", "upcoming", "past"] as const).map(m => (
-            <button key={m} onClick={() => setFilterMode(m)}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${filterMode === m ? "bg-amber-500/80 text-black" : "text-muted-foreground hover:text-foreground"}`}>
-              {m === "date" ? "By Date" : m === "upcoming" ? "Upcoming" : "Past Visits"}
+      {analyticsLoading ? (
+        <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
+          <Loader2 className="w-5 h-5 animate-spin" /> Loading analytics…
+        </div>
+      ) : !analytics ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
+          <BarChart3 className="w-10 h-10 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">No visit data yet. Log some visits to see insights.</p>
+        </div>
+      ) : (
+        <>
+          {/* Summary stat cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Total Visits",       value: analytics.summary.total_visits,     icon: <CheckSquare className="w-4 h-4 text-green-400" />,  color: "text-green-400" },
+              { label: "Retailers Visited",  value: analytics.summary.unique_retailers,  icon: <Store className="w-4 h-4 text-amber-400" />,        color: "text-amber-400" },
+              { label: "Most Visited",       value: analytics.summary.most_visited_name ?? "—", icon: <Award className="w-4 h-4 text-purple-400" />, color: "text-purple-300", small: true },
+              { label: "Top Visits",         value: analytics.summary.most_visited_count || "—", icon: <TrendingUp className="w-4 h-4 text-blue-400" />, color: "text-blue-400" },
+            ].map(s => (
+              <div key={s.label} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  {s.icon}
+                  <span className="text-xs">{s.label}</span>
+                </div>
+                <p className={`font-bold leading-tight ${s.small ? "text-sm" : "text-2xl"} ${s.color}`}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Monthly trend chart */}
+          {analytics.monthly_trend.length > 0 && (
+            <div className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Activity className="w-4 h-4 text-amber-400" /> Monthly Visit Trend
+              </h3>
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={analytics.monthly_trend} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="month" tick={{ fill: "#6b7280", fontSize: 11 }} />
+                  <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "#e5e7eb" }} itemStyle={{ color: "#f59e0b" }} />
+                  <Area type="monotone" dataKey="count" name="Visits" stroke="#f59e0b" strokeWidth={2} fill="url(#visitGrad)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Visits by retailer bar chart */}
+          {analytics.by_retailer.length > 0 && (
+            <div className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-amber-400" /> Visits by Retailer
+              </h3>
+              <ResponsiveContainer width="100%" height={Math.max(200, analytics.by_retailer.length * 36)}>
+                <BarChart
+                  layout="vertical"
+                  data={[...analytics.by_retailer].sort((a, b) => a.total_visits - b.total_visits)}
+                  margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: "#6b7280", fontSize: 11 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="retailer_name" tick={{ fill: "#d1d5db", fontSize: 11 }} width={130} />
+                  <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "#e5e7eb" }} itemStyle={{ color: "#f59e0b" }} />
+                  <Bar dataKey="total_visits" name="Total Visits" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Per-retailer stats table */}
+          {analytics.by_retailer.length > 0 && (
+            <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-white/10">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-amber-400" /> Retailer Visit Summary
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 text-xs text-muted-foreground">
+                      <th className="text-left px-5 py-2.5 font-medium">Retailer</th>
+                      <th className="text-center px-4 py-2.5 font-medium">Total Visits</th>
+                      <th className="text-center px-4 py-2.5 font-medium">First Visit</th>
+                      <th className="text-center px-4 py-2.5 font-medium">Last Visit</th>
+                      <th className="text-center px-4 py-2.5 font-medium">Avg. Frequency</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analytics.by_retailer.map((r, i) => (
+                      <tr key={r.retailer_id} className={`border-b border-white/5 ${i % 2 === 0 ? "" : "bg-white/[0.02]"} hover:bg-white/5 transition-colors`}>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                              <MapPin className="w-3 h-3 text-amber-400" />
+                            </div>
+                            <span className="font-medium text-foreground">{r.retailer_name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-500/10 text-green-400 font-bold text-sm">
+                            {r.total_visits}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center text-xs text-muted-foreground">
+                          {r.first_visit_date ? fmtDate(r.first_visit_date) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-center text-xs text-muted-foreground">
+                          {r.last_visit_date ? fmtDate(r.last_visit_date) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-center text-xs">
+                          {r.avg_days_between !== null
+                            ? <span className="text-amber-400 font-medium">Every {r.avg_days_between} days</span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          VISIT LOG — separate section with date-range filtering
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="border-t border-white/10 pt-6 space-y-4">
+
+        {/* Visit Log header + Plan/Log buttons */}
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-amber-400" /> Visit Log
+          </h3>
+          <div className="flex gap-2">
+            <button onClick={() => { setFormMode("plan"); setShowPlanForm(v => !v); }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${showPlanForm && formMode === "plan" ? "bg-amber-500 text-black" : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30"}`}>
+              <CalendarDays className="w-4 h-4" />
+              Plan a Visit
             </button>
-          ))}
+            <button onClick={() => { setFormMode("log"); setShowPlanForm(v => formMode === "log" ? !v : true); }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${showPlanForm && formMode === "log" ? "bg-green-600 text-white" : "bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30"}`}>
+              <CheckSquare className="w-4 h-4" />
+              Log a Visit
+            </button>
+          </div>
         </div>
 
-        {filterMode === "date" && (
-          <div className="flex items-center gap-2">
-            <button onClick={() => setViewDate(d => addDays(d, -1))}
-              className="w-8 h-8 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <input type="date" value={viewDate} onChange={e => setViewDate(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-amber-500" />
-            <button onClick={() => setViewDate(d => addDays(d, 1))}
-              className="w-8 h-8 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
-              <ChevronRightIcon className="w-4 h-4" />
-            </button>
-            {viewDate !== todayStr() && (
-              <button onClick={() => setViewDate(todayStr())}
-                className="px-3 py-1.5 text-xs font-semibold bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 transition-colors">
-                Today
+        {/* Filter bar */}
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+          <div className="flex gap-1 bg-white/5 rounded-lg p-1 flex-wrap">
+            {(["7d", "today", "date", "upcoming", "past"] as const).map(m => (
+              <button key={m} onClick={() => setFilterMode(m)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${filterMode === m ? "bg-amber-500/80 text-black" : "text-muted-foreground hover:text-foreground"}`}>
+                {m === "7d" ? "Last 7 Days" : m === "today" ? "Today" : m === "date" ? "By Date" : m === "upcoming" ? "Upcoming" : "All Past"}
               </button>
+            ))}
+          </div>
+
+          {filterMode === "date" && (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setViewDate(d => addDays(d, -1))}
+                className="w-8 h-8 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <input type="date" value={viewDate} onChange={e => setViewDate(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-amber-500" />
+              <button onClick={() => setViewDate(d => addDays(d, 1))}
+                className="w-8 h-8 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+                <ChevronRightIcon className="w-4 h-4" />
+              </button>
+              {viewDate !== todayStr() && (
+                <button onClick={() => setViewDate(todayStr())}
+                  className="px-3 py-1.5 text-xs font-semibold bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 transition-colors">
+                  Today
+                </button>
             )}
           </div>
         )}
 
       </div>
-      )}
 
-      {/* ── Plan form (schedule only) ── */}
+      {/* ── Plan form ── */}
       <AnimatePresence>
         {showPlanForm && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
@@ -5352,10 +5487,11 @@ function StoreVisitsTab() {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
             <ClipboardList className="w-4 h-4" />
-            {filterMode === "date"
-              ? (viewDate === todayStr() ? "Today's Schedule" : `Schedule — ${fmtDate(viewDate)}`)
+            {filterMode === "7d" ? "Last 7 Days"
+              : filterMode === "today" ? "Today's Schedule"
+              : filterMode === "date" ? (viewDate === todayStr() ? "Today's Schedule" : `Schedule — ${fmtDate(viewDate)}`)
               : filterMode === "upcoming" ? "Upcoming Visits"
-              : "Past Visits"}
+              : "All Past Visits"}
             {!visitsLoading && (
               <span className="text-xs font-normal">({visits.length})</span>
             )}
@@ -5409,12 +5545,12 @@ function StoreVisitsTab() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground mt-0.5 flex items-center flex-wrap gap-x-1.5">
-                        {filterMode !== "date" && (
+                        {filterMode !== "date" && filterMode !== "today" && (
                           <span className={`font-medium ${isToday(visit.visit_date) ? "text-amber-400" : ""}`}>
                             {isToday(visit.visit_date) ? "Today" : fmtDate(visit.visit_date)}
                           </span>
                         )}
-                        {filterMode !== "date" && <span>·</span>}
+                        {filterMode !== "date" && filterMode !== "today" && <span>·</span>}
                         <span>By {visit.staff_name}</span>
                       </p>
                     </div>
@@ -5554,155 +5690,7 @@ function StoreVisitsTab() {
         )}
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          INSIGHTS VIEW
-          ═══════════════════════════════════════════════════════════════════ */}
-      {viewMode === "insights" && (
-        <div className="space-y-6">
-
-          {/* Period filter */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Period:</span>
-            {(["30d", "90d", "6m", "1y", "all"] as const).map(p => (
-              <button key={p} onClick={() => setInsightsPeriod(p)}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${insightsPeriod === p ? "bg-amber-500 text-black" : "bg-white/5 hover:bg-white/10 text-muted-foreground border border-white/10"}`}>
-                {p === "30d" ? "30 Days" : p === "90d" ? "90 Days" : p === "6m" ? "6 Months" : p === "1y" ? "12 Months" : "All Time"}
-              </button>
-            ))}
-          </div>
-
-          {analyticsLoading ? (
-            <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
-              <Loader2 className="w-5 h-5 animate-spin" /> Loading analytics…
-            </div>
-          ) : !analytics ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-              <BarChart3 className="w-10 h-10 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No visit data yet. Log some visits to see insights.</p>
-            </div>
-          ) : (
-            <>
-              {/* Summary stat cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { label: "Total Visits",       value: analytics.summary.total_visits,     icon: <CheckSquare className="w-4 h-4 text-green-400" />,  color: "text-green-400" },
-                  { label: "Retailers Visited",  value: analytics.summary.unique_retailers,  icon: <Store className="w-4 h-4 text-amber-400" />,        color: "text-amber-400" },
-                  { label: "Most Visited",       value: analytics.summary.most_visited_name ?? "—", icon: <Award className="w-4 h-4 text-purple-400" />, color: "text-purple-300", small: true },
-                  { label: "Top Visits",         value: analytics.summary.most_visited_count || "—", icon: <TrendingUp className="w-4 h-4 text-blue-400" />, color: "text-blue-400" },
-                ].map(s => (
-                  <div key={s.label} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      {s.icon}
-                      <span className="text-xs">{s.label}</span>
-                    </div>
-                    <p className={`font-bold leading-tight ${s.small ? "text-sm" : "text-2xl"} ${s.color}`}>{s.value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Monthly trend chart */}
-              {analytics.monthly_trend.length > 0 && (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-amber-400" /> Monthly Visit Trend
-                  </h3>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <AreaChart data={analytics.monthly_trend} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                      <XAxis dataKey="month" tick={{ fill: "#6b7280", fontSize: 11 }} />
-                      <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "#e5e7eb" }} itemStyle={{ color: "#f59e0b" }} />
-                      <Area type="monotone" dataKey="count" name="Visits" stroke="#f59e0b" strokeWidth={2} fill="url(#visitGrad)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* Visits by retailer bar chart */}
-              {analytics.by_retailer.length > 0 && (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-amber-400" /> Visits by Retailer
-                  </h3>
-                  <ResponsiveContainer width="100%" height={Math.max(200, analytics.by_retailer.length * 36)}>
-                    <BarChart
-                      layout="vertical"
-                      data={[...analytics.by_retailer].sort((a, b) => a.total_visits - b.total_visits)}
-                      margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
-                      <XAxis type="number" tick={{ fill: "#6b7280", fontSize: 11 }} allowDecimals={false} />
-                      <YAxis type="category" dataKey="retailer_name" tick={{ fill: "#d1d5db", fontSize: 11 }} width={130} />
-                      <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "#e5e7eb" }} itemStyle={{ color: "#f59e0b" }} />
-                      <Bar dataKey="total_visits" name="Total Visits" fill="#f59e0b" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* Per-retailer stats table */}
-              {analytics.by_retailer.length > 0 && (
-                <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-                  <div className="px-5 py-3 border-b border-white/10">
-                    <h3 className="text-sm font-semibold flex items-center gap-2">
-                      <ClipboardList className="w-4 h-4 text-amber-400" /> Retailer Visit Summary
-                    </h3>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-white/10 text-xs text-muted-foreground">
-                          <th className="text-left px-5 py-2.5 font-medium">Retailer</th>
-                          <th className="text-center px-4 py-2.5 font-medium">Total Visits</th>
-                          <th className="text-center px-4 py-2.5 font-medium">First Visit</th>
-                          <th className="text-center px-4 py-2.5 font-medium">Last Visit</th>
-                          <th className="text-center px-4 py-2.5 font-medium">Avg. Frequency</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {analytics.by_retailer.map((r, i) => (
-                          <tr key={r.retailer_id} className={`border-b border-white/5 ${i % 2 === 0 ? "" : "bg-white/[0.02]"} hover:bg-white/5 transition-colors`}>
-                            <td className="px-5 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                                  <MapPin className="w-3 h-3 text-amber-400" />
-                                </div>
-                                <span className="font-medium text-foreground">{r.retailer_name}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-500/10 text-green-400 font-bold text-sm">
-                                {r.total_visits}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center text-xs text-muted-foreground">
-                              {r.first_visit_date ? fmtDate(r.first_visit_date) : "—"}
-                            </td>
-                            <td className="px-4 py-3 text-center text-xs text-muted-foreground">
-                              {r.last_visit_date ? fmtDate(r.last_visit_date) : "—"}
-                            </td>
-                            <td className="px-4 py-3 text-center text-xs">
-                              {r.avg_days_between !== null
-                                ? <span className="text-amber-400 font-medium">Every {r.avg_days_between} days</span>
-                                : <span className="text-muted-foreground">—</span>}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-            </>
-          )}
-        </div>
-      )}
+      </div>
 
     </div>
   );
