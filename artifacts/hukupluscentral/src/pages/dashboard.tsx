@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useGetDashboardStats, useGetRecentActivity, customFetch } from "@workspace/api-client-react";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2, Receipt, Ban } from "lucide-react";
+import { Store, MapPin, CheckCircle, Clock, UserPlus, RefreshCw, FileCheck, Wifi, X, AlertTriangle, Building2, Phone, Trash2, TrendingUp, RotateCcw, CreditCard, Layers, ArrowDownCircle, Loader2, Receipt, Ban, CalendarDays, ChevronDown, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -97,6 +97,25 @@ interface ConversionData {
   customers: ConversionCustomer[];
 }
 
+interface PipelineItem {
+  id: number;
+  customerName: string;
+  customerPhone: string | null;
+  loanAmount: number | null;
+  loanProduct: string | null;
+  status: "application" | "reapplication";
+  retailerName: string | null;
+  branchName: string | null;
+  disbursementDate: string | null; // "YYYY-MM-DD" or null
+  createdAt: string;
+}
+
+interface DisbursementPipeline {
+  thisMonth: { label: string; items: PipelineItem[] };
+  nextMonth: { label: string; items: PipelineItem[] };
+  noDate:    { label: string; items: PipelineItem[] };
+}
+
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 
 function useRevolverSummary() {
@@ -152,6 +171,15 @@ function useLRCohortStats() {
     queryKey: ["lr-cohort-stats"],
     queryFn: () => fetch(`${BASE}/api/dashboard/lr-cohort-stats`, { credentials: "include" }).then(r => r.json()),
     refetchInterval: 15 * 60 * 1000,
+  });
+}
+
+function useDisbursementPipeline() {
+  const BASE = (import.meta as any).env.BASE_URL.replace(/\/$/, "");
+  return useQuery<DisbursementPipeline>({
+    queryKey: ["disbursement-pipeline"],
+    queryFn: () => fetch(`${BASE}/api/dashboard/disbursement-pipeline`, { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 5 * 60 * 1000,
   });
 }
 
@@ -876,6 +904,168 @@ function RevolverSummarySection({ data, delay }: { data: RevolverSummary | undef
   );
 }
 
+// ─── Disbursement Pipeline ────────────────────────────────────────────────────
+
+function PipelineItemRow({ item }: { item: PipelineItem }) {
+  const fmtAmt = (n: number | null) =>
+    n != null ? `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
+
+  return (
+    <div className="flex items-center gap-3 py-2.5 border-b border-white/5 last:border-0">
+      {/* Date pill */}
+      <div className="flex-shrink-0 w-16 text-center">
+        {item.disbursementDate ? (
+          <div className="bg-teal-500/10 border border-teal-500/20 rounded-lg px-1.5 py-1">
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-teal-400 leading-none">
+              {new Date(item.disbursementDate + "T00:00:00").toLocaleDateString("en-GB", { month: "short" })}
+            </p>
+            <p className="text-lg font-bold text-teal-300 leading-tight">
+              {new Date(item.disbursementDate + "T00:00:00").getDate()}
+            </p>
+            <p className="text-[8px] text-teal-400/60 leading-none">
+              {new Date(item.disbursementDate + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short" })}
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white/5 rounded-lg px-1.5 py-1">
+            <p className="text-[9px] text-muted-foreground/40">TBD</p>
+          </div>
+        )}
+      </div>
+
+      {/* Customer info */}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white truncate">{item.customerName}</p>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {item.branchName && (
+            <span className="text-[10px] text-muted-foreground/70 flex items-center gap-0.5">
+              <Store className="w-2.5 h-2.5" />{item.branchName}
+            </span>
+          )}
+          {item.loanProduct && (
+            <span className="text-[10px] text-muted-foreground/50">{item.loanProduct}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Amount + status badge */}
+      <div className="flex-shrink-0 text-right">
+        {fmtAmt(item.loanAmount) && (
+          <p className="text-sm font-bold text-white">{fmtAmt(item.loanAmount)}</p>
+        )}
+        <span className={`inline-block mt-0.5 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
+          item.status === "reapplication"
+            ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+            : "bg-sky-500/10 border-sky-500/20 text-sky-400"
+        }`}>
+          {item.status === "reapplication" ? "Re-App" : "New"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function DisbursementPipelineSection({ data, delay }: { data: DisbursementPipeline | undefined; delay: number }) {
+  const [expanded, setExpanded] = useState<"thisMonth" | "nextMonth" | "noDate" | null>("thisMonth");
+
+  if (!data) return null;
+  const total = data.thisMonth.items.length + data.nextMonth.items.length + data.noDate.items.length;
+
+  const MonthPanel = ({
+    id, label, items, accent,
+  }: { id: "thisMonth" | "nextMonth" | "noDate"; label: string; items: PipelineItem[]; accent: string }) => {
+    const isOpen = expanded === id;
+    return (
+      <div className="border border-white/8 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setExpanded(isOpen ? null : id)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className={`p-1.5 rounded-md bg-white/5 ${accent}`}>
+              <CalendarDays className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-sm font-semibold text-white">{label}</span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+              items.length === 0 ? "bg-white/5 text-muted-foreground/40" : `bg-white/10 ${accent}`
+            }`}>
+              {items.length}
+            </span>
+          </div>
+          <div className={`transition-transform ${accent}`}>
+            {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </div>
+        </button>
+        <AnimatePresence>
+          {isOpen && items.length > 0 && (
+            <motion.div
+              key={id}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="px-4 pb-2 divide-y divide-white/5">
+                {items.map(item => <PipelineItemRow key={item.id} item={item} />)}
+              </div>
+            </motion.div>
+          )}
+          {isOpen && items.length === 0 && (
+            <motion.div
+              key={`${id}-empty`}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="px-4 pb-4 text-center text-xs text-muted-foreground/40"
+            >
+              No applications booked for this period
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+      className="mb-10"
+    >
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <CalendarDays className="w-4 h-4 text-teal-400" />
+          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Disbursement Pipeline</h2>
+        </div>
+        <span className="text-xs text-muted-foreground/50 font-medium">· applications pending stock collection</span>
+        {total > 0 && (
+          <span className="ml-auto text-xs font-bold text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 rounded-full">
+            {total} open
+          </span>
+        )}
+      </div>
+
+      <GlassCard className="p-0 overflow-hidden">
+        {total === 0 ? (
+          <div className="p-8 text-center">
+            <CalendarDays className="w-8 h-8 text-muted-foreground/20 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground/50">No applications booked for this month or next</p>
+            <p className="text-xs text-muted-foreground/30 mt-1">New applications will appear here once a disbursement date is set</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/5">
+            <MonthPanel id="thisMonth" label={data.thisMonth.label} items={data.thisMonth.items} accent="text-teal-400" />
+            <MonthPanel id="nextMonth" label={data.nextMonth.label} items={data.nextMonth.items} accent="text-sky-400" />
+            {data.noDate.items.length > 0 && (
+              <MonthPanel id="noDate" label="Date Not Yet Set" items={data.noDate.items} accent="text-muted-foreground/50" />
+            )}
+          </div>
+        )}
+      </GlassCard>
+    </motion.div>
+  );
+}
+
 // ─── LR Cohort Health ─────────────────────────────────────────────────────────
 
 function LRCohortSection({ data, delay }: { data: LRCohortMonth[] | undefined; delay: number }) {
@@ -977,6 +1167,7 @@ export default function DashboardPage() {
   const { data: conversionData } = useReapplicationConversion();
   const { data: revolverSummary } = useRevolverSummary();
   const { data: lrCohort } = useLRCohortStats();
+  const { data: disbursementPipeline } = useDisbursementPipeline();
   const [drillDown, setDrillDown] = useState<"application" | "reapplication" | null>(null);
   const [showConversion, setShowConversion] = useState(false);
 
@@ -1042,11 +1233,14 @@ export default function DashboardPage() {
         <ReapplyConversionCard data={conversionData} delay={0.32} onClick={() => setShowConversion(true)} />
       </div>
 
+      {/* ── Disbursement Pipeline ── */}
+      <DisbursementPipelineSection data={disbursementPipeline} delay={0.34} />
+
       {/* ── Revolver section ── */}
-      <RevolverSummarySection data={revolverSummary} delay={0.35} />
+      <RevolverSummarySection data={revolverSummary} delay={0.38} />
 
       {/* ── HukuPlus cohort health ── */}
-      <LRCohortSection data={lrCohort} delay={0.38} />
+      <LRCohortSection data={lrCohort} delay={0.42} />
 
       {/* ── Historical comparison ── */}
       {!historyLoading && history && history.length > 0 && (

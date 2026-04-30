@@ -562,4 +562,165 @@ router.post("/dashboard/snapshot-month", async (req, res): Promise<void> => {
   }
 });
 
+// ── Disbursement Pipeline ──────────────────────────────────────────────────────
+// Returns pending applications (not yet converted to agreements) whose stock
+// collection / disbursement date falls in the current or the next calendar month.
+// Status filter: 'application' | 'reapplication' — once status becomes
+// 'pending'/'signed'/'expired' the loan is no longer a pipeline item.
+router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  // Pull all open applications — we'll parse + bucket dates in JS to handle
+  // the various text formats Formitize uses.
+  const rows = await pool.query<{
+    id: number;
+    customer_name: string;
+    customer_phone: string | null;
+    loan_amount: string | null;
+    loan_product: string | null;
+    status: string;
+    retailer_name: string | null;
+    branch_name: string | null;
+    disbursement_date: string | null;
+    form_data: Record<string, string> | null;
+    created_at: string;
+  }>(`
+    SELECT
+      a.id,
+      a.customer_name,
+      a.customer_phone,
+      a.loan_amount,
+      a.loan_product,
+      a.status,
+      r.name  AS retailer_name,
+      b.name  AS branch_name,
+      a.disbursement_date,
+      a.form_data,
+      a.created_at
+    FROM agreements a
+    LEFT JOIN retailers r ON r.id = a.retailer_id
+    LEFT JOIN branches  b ON b.id = a.branch_id
+    WHERE a.status IN ('application', 'reapplication')
+    ORDER BY a.created_at DESC
+    LIMIT 500
+  `);
+
+  // ── Date parsing helper ───────────────────────────────────────────────────
+  const MONTH_NAMES = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+
+  function parseDisbDate(raw: string | null | undefined): Date | null {
+    if (!raw) return null;
+    const s = raw.trim().replace(/\s+/g, " ");
+
+    // ISO: 2026-05-20
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // UK numeric: 20/05/2026 or 20-05-2026
+    let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (m) {
+      const d = new Date(+m[3], +m[2] - 1, +m[1]);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // "20 May 2026" or "20th May 2026" or "20th Apr 2026"
+    m = s.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})$/i);
+    if (m) {
+      const monthIdx = MONTH_NAMES.indexOf(m[2].toLowerCase().slice(0, 3));
+      if (monthIdx >= 0) {
+        const d = new Date(+m[3], monthIdx, +m[1]);
+        return isNaN(d.getTime()) ? null : d;
+      }
+    }
+    return null;
+  }
+
+  function getDisbDate(row: typeof rows.rows[0]): Date | null {
+    // 1. disbursement_date column
+    let d = parseDisbDate(row.disbursement_date);
+    if (d) return d;
+
+    // 2. Scan common form_data keys
+    const fd = row.form_data ?? {};
+    const DISB_KEYS = [
+      "disbursementdate", "disbursement date", "applieddisbursement",
+      "applied disbursement date", "stockcollectiondate", "stock collection date",
+      "disbursement", "collectiondate",
+    ];
+    const norm = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
+    for (const [k, v] of Object.entries(fd)) {
+      const nk = norm(k);
+      if (DISB_KEYS.some(dk => norm(dk) === nk)) {
+        d = parseDisbDate(v);
+        if (d) return d;
+      }
+    }
+    return null;
+  }
+
+  const now = new Date();
+  const thisYear  = now.getFullYear();
+  const thisMon   = now.getMonth(); // 0-indexed
+  const nextMon   = (thisMon + 1) % 12;
+  const nextYear  = thisMon === 11 ? thisYear + 1 : thisYear;
+
+  interface PipelineItem {
+    id: number;
+    customerName: string;
+    customerPhone: string | null;
+    loanAmount: number | null;
+    loanProduct: string | null;
+    status: string;
+    retailerName: string | null;
+    branchName: string | null;
+    disbursementDate: string | null;   // ISO string or null
+    createdAt: string;
+  }
+
+  const thisMonthItems: PipelineItem[] = [];
+  const nextMonthItems: PipelineItem[] = [];
+  const noDatItems: PipelineItem[] = [];
+
+  for (const row of rows.rows) {
+    const disbDate = getDisbDate(row);
+    const item: PipelineItem = {
+      id: row.id,
+      customerName: row.customer_name,
+      customerPhone: row.customer_phone,
+      loanAmount: row.loan_amount ? parseFloat(row.loan_amount) : null,
+      loanProduct: row.loan_product,
+      status: row.status,
+      retailerName: row.retailer_name,
+      branchName: row.branch_name,
+      disbursementDate: disbDate ? disbDate.toISOString().slice(0, 10) : null,
+      createdAt: row.created_at,
+    };
+
+    if (!disbDate) {
+      noDatItems.push(item);
+    } else if (disbDate.getFullYear() === thisYear && disbDate.getMonth() === thisMon) {
+      thisMonthItems.push(item);
+    } else if (disbDate.getFullYear() === nextYear && disbDate.getMonth() === nextMon) {
+      nextMonthItems.push(item);
+    }
+    // items beyond next month are silently excluded
+  }
+
+  // Sort each bucket by disbursement date ascending
+  const byDate = (a: PipelineItem, b: PipelineItem) =>
+    (a.disbursementDate ?? "").localeCompare(b.disbursementDate ?? "");
+  thisMonthItems.sort(byDate);
+  nextMonthItems.sort(byDate);
+
+  const fmt = (y: number, m: number) =>
+    new Date(y, m, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+
+  res.json({
+    thisMonth: { label: fmt(thisYear, thisMon), items: thisMonthItems },
+    nextMonth: { label: fmt(nextYear, nextMon), items: nextMonthItems },
+    noDate:    { label: "Date Not Set",          items: noDatItems },
+  });
+});
+
 export default router;
+

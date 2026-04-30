@@ -95,6 +95,7 @@ All routes mounted at `/api`:
 ### Dashboard
 - `GET /api/dashboard/stats`
 - `GET /api/dashboard/recent-activity`
+- `GET /api/dashboard/disbursement-pipeline` — returns open applications (status='application'|'reapplication') grouped into thisMonth / nextMonth / noDate buckets by disbursement date; items fall away automatically when status changes to pending/signed/expired
 
 #### LR Loan Count Logic (Resolved)
 - Loan counts (agreements_issued) come from the LR API: `GET /api/central/loans` with `Authorization: Bearer HUKUPLUS_API_KEY`
