@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
-import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, ArrowRightLeft, UserPlus, Settings } from "lucide-react";
+import { LayoutDashboard, Monitor, LogOut, Loader2, Zap, AppWindow, Eye, EyeOff, ShieldCheck, KeyRound, ContactRound, CheckCircle2, AlertCircle, Activity, Copy, Check, ArrowRightLeft, UserPlus, Settings, CalendarDays } from "lucide-react";
 import hukuplusLogo from "@assets/Chicken_on_a_pile_of_gold_coins_1773914874504.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLoanApp, LOAN_APPS } from "@/contexts/LoanAppContext";
@@ -13,6 +13,7 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/customers", label: "Customers", icon: ContactRound },
+  { path: "/pipeline", label: "Pipeline", icon: CalendarDays },
   { path: "/agreements", label: "Kiosk", icon: Monitor },
   { path: "/activity", label: "Activity", icon: Activity, badge: "activity" as const },
   { path: "/loan-apps", label: "Loan Apps", icon: AppWindow },
@@ -330,11 +331,11 @@ export function InternalLayout({ children }: { children: React.ReactNode }) {
         { path: "/my-customers", label: "My Customers", Icon: ContactRound,  badge: 0 },
       ]
     : [
-        { path: "/",           label: "Home",      Icon: LayoutDashboard },
-        { path: "/customers",  label: "Customers", Icon: ContactRound },
-        { path: "/activity",   label: "Activity",  Icon: Activity,   badge: activityBadge },
-        { path: "/agreements", label: "Kiosk",     Icon: Monitor },
-        { path: "/loan-apps",  label: "Loan Apps", Icon: AppWindow },
+        { path: "/",           label: "Home",     Icon: LayoutDashboard },
+        { path: "/customers",  label: "Customers",Icon: ContactRound },
+        { path: "/pipeline",   label: "Pipeline", Icon: CalendarDays },
+        { path: "/activity",   label: "Activity", Icon: Activity,   badge: activityBadge },
+        { path: "/agreements", label: "Kiosk",    Icon: Monitor },
       ];
 
   return (

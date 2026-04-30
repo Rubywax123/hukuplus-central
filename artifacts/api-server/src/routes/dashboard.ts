@@ -563,15 +563,14 @@ router.post("/dashboard/snapshot-month", async (req, res): Promise<void> => {
 });
 
 // ── Disbursement Pipeline ──────────────────────────────────────────────────────
-// Returns pending applications (not yet converted to agreements) whose stock
-// collection / disbursement date falls in the current or the next calendar month.
-// Status filter: 'application' | 'reapplication' — once status becomes
-// 'pending'/'signed'/'expired' the loan is no longer a pipeline item.
+// Returns open applications (status = 'application' | 'reapplication') grouped
+// by their disbursement / stock-collection date.
+// • Items with a past disbursement date are EXCLUDED (forward-only view).
+// • Items with no date are shown only if created in the last 30 days.
+// • Items fall away automatically once their status moves to pending/signed/expired.
 router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Unauthorized" }); return; }
 
-  // Pull all open applications — we'll parse + bucket dates in JS to handle
-  // the various text formats Formitize uses.
   const rows = await pool.query<{
     id: number;
     customer_name: string;
@@ -602,19 +601,20 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     LEFT JOIN branches  b ON b.id = a.branch_id
     WHERE a.status IN ('application', 'reapplication')
     ORDER BY a.created_at DESC
-    LIMIT 500
+    LIMIT 1000
   `);
 
-  // ── Date parsing helper ───────────────────────────────────────────────────
+  // ── Date parsing ──────────────────────────────────────────────────────────
   const MONTH_NAMES = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
 
-  function parseDisbDate(raw: string | null | undefined): Date | null {
-    if (!raw) return null;
+  function parseAnyDate(raw: string | null | undefined): Date | null {
+    if (!raw || typeof raw !== "string") return null;
     const s = raw.trim().replace(/\s+/g, " ");
+    if (s.length < 6) return null;
 
-    // ISO: 2026-05-20
+    // ISO: 2026-05-20[T...]
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-      const d = new Date(s);
+      const d = new Date(s.slice(0, 10));
       return isNaN(d.getTime()) ? null : d;
     }
     // UK numeric: 20/05/2026 or 20-05-2026
@@ -623,46 +623,90 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       const d = new Date(+m[3], +m[2] - 1, +m[1]);
       return isNaN(d.getTime()) ? null : d;
     }
-    // "20 May 2026" or "20th May 2026" or "20th Apr 2026"
+    // "20 May 2026" / "20th May 2026" / "6th Apr 2026"
     m = s.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})$/i);
     if (m) {
-      const monthIdx = MONTH_NAMES.indexOf(m[2].toLowerCase().slice(0, 3));
-      if (monthIdx >= 0) {
-        const d = new Date(+m[3], monthIdx, +m[1]);
+      const mi = MONTH_NAMES.indexOf(m[2].toLowerCase().slice(0, 3));
+      if (mi >= 0) {
+        const d = new Date(+m[3], mi, +m[1]);
+        return isNaN(d.getTime()) ? null : d;
+      }
+    }
+    // "May 20 2026" / "May 20, 2026"
+    m = s.match(/^([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/i);
+    if (m) {
+      const mi = MONTH_NAMES.indexOf(m[1].toLowerCase().slice(0, 3));
+      if (mi >= 0) {
+        const d = new Date(+m[3], mi, +m[2]);
         return isNaN(d.getTime()) ? null : d;
       }
     }
     return null;
   }
 
-  function getDisbDate(row: typeof rows.rows[0]): Date | null {
-    // 1. disbursement_date column
-    let d = parseDisbDate(row.disbursement_date);
-    if (d) return d;
+  // Disbursement-specific field name prefixes (substring match, like the webhook's findField)
+  const DISB_PREFIXES = [
+    "applieddisbursement",
+    "disbursementdate",
+    "disbursement",
+    "stockcollection",
+    "stockdate",
+    "collectiondate",
+    "doladate",
+    "dola",
+  ];
+  // Keys that look like disbursement but are NOT (exclude to avoid wrong matches)
+  const EXCLUDE_PREFIXES = ["settlement", "repayment", "dob", "dateofbirth", "birthdate"];
 
-    // 2. Scan common form_data keys
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_\-\.]/g, "");
+
+  function getDisbDate(row: typeof rows.rows[0]): Date | null {
+    // 1. Dedicated DB column (populated at webhook time)
+    const fromCol = parseAnyDate(row.disbursement_date);
+    if (fromCol) return fromCol;
+
+    // 2. Scan form_data — use substring matching, same as the webhook's findField
     const fd = row.form_data ?? {};
-    const DISB_KEYS = [
-      "disbursementdate", "disbursement date", "applieddisbursement",
-      "applied disbursement date", "stockcollectiondate", "stock collection date",
-      "disbursement", "collectiondate",
-    ];
-    const norm = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, "");
+    const candidates: Date[] = [];
+
     for (const [k, v] of Object.entries(fd)) {
+      if (!v || typeof v !== "string") continue;
       const nk = norm(k);
-      if (DISB_KEYS.some(dk => norm(dk) === nk)) {
-        d = parseDisbDate(v);
-        if (d) return d;
-      }
+      // Skip keys that are definitely not disbursement dates
+      if (EXCLUDE_PREFIXES.some(ex => nk.includes(norm(ex)))) continue;
+      // Check if this key contains a disbursement-related word
+      const isDisb = DISB_PREFIXES.some(prefix => nk.includes(norm(prefix)));
+      if (!isDisb) continue;
+      const d = parseAnyDate(v);
+      if (d) candidates.push(d);
     }
+    if (candidates.length > 0) {
+      // Take the earliest future date, or the most recent past one if all are past
+      const now = new Date();
+      const future = candidates.filter(d => d >= now);
+      if (future.length > 0) return future.sort((a, b) => a.getTime() - b.getTime())[0];
+      return candidates.sort((a, b) => b.getTime() - a.getTime())[0];
+    }
+
+    // 3. Last resort: scan ALL form_data values for a date that looks like a
+    //    near-future disbursement (within 6 months). This catches unusual field names.
+    const now2 = new Date();
+    const sixMonthsOut = new Date(now2.getFullYear(), now2.getMonth() + 6, 1);
+    const twoMonthsBack = new Date(now2.getFullYear(), now2.getMonth() - 2, 1);
+    const futureScan: Date[] = [];
+    for (const [k, v] of Object.entries(fd)) {
+      if (!v || typeof v !== "string") continue;
+      const nk = norm(k);
+      // Skip obviously wrong fields
+      if (EXCLUDE_PREFIXES.some(ex => nk.includes(norm(ex)))) continue;
+      if (nk.includes("dob") || nk.includes("birth") || nk.includes("phone") || nk.includes("id") || nk.includes("amount") || nk.includes("name")) continue;
+      const d = parseAnyDate(v);
+      if (d && d >= twoMonthsBack && d <= sixMonthsOut) futureScan.push(d);
+    }
+    if (futureScan.length > 0) return futureScan.sort((a, b) => a.getTime() - b.getTime())[0];
+
     return null;
   }
-
-  const now = new Date();
-  const thisYear  = now.getFullYear();
-  const thisMon   = now.getMonth(); // 0-indexed
-  const nextMon   = (thisMon + 1) % 12;
-  const nextYear  = thisMon === 11 ? thisYear + 1 : thisYear;
 
   interface PipelineItem {
     id: number;
@@ -673,13 +717,19 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     status: string;
     retailerName: string | null;
     branchName: string | null;
-    disbursementDate: string | null;   // ISO string or null
+    disbursementDate: string | null;
     createdAt: string;
   }
 
-  const thisMonthItems: PipelineItem[] = [];
-  const nextMonthItems: PipelineItem[] = [];
-  const noDatItems: PipelineItem[] = [];
+  const now = new Date();
+  // Start of today — exclude items whose disbursement date has already passed
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // "No date" cutoff: only show applications created in the last 30 days
+  const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+
+  // Buckets: map of "YYYY-MM" → items[], plus a noDate bucket
+  const monthBuckets = new Map<string, PipelineItem[]>();
+  const noDateItems: PipelineItem[] = [];
 
   for (const row of rows.rows) {
     const disbDate = getDisbDate(row);
@@ -697,30 +747,39 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     };
 
     if (!disbDate) {
-      noDatItems.push(item);
-    } else if (disbDate.getFullYear() === thisYear && disbDate.getMonth() === thisMon) {
-      thisMonthItems.push(item);
-    } else if (disbDate.getFullYear() === nextYear && disbDate.getMonth() === nextMon) {
-      nextMonthItems.push(item);
+      // Only include recent no-date applications
+      const createdAt = new Date(row.created_at);
+      if (createdAt >= thirtyDaysAgo) noDateItems.push(item);
+    } else if (disbDate >= todayStart) {
+      // Forward-only: exclude past dates
+      const key = `${disbDate.getFullYear()}-${String(disbDate.getMonth() + 1).padStart(2, "0")}`;
+      if (!monthBuckets.has(key)) monthBuckets.set(key, []);
+      monthBuckets.get(key)!.push(item);
     }
-    // items beyond next month are silently excluded
+    // else: disbursement date is in the past → silently excluded
   }
 
-  // Sort each bucket by disbursement date ascending
+  // Sort buckets chronologically and sort items within each bucket by date
+  const sortedKeys = [...monthBuckets.keys()].sort();
   const byDate = (a: PipelineItem, b: PipelineItem) =>
     (a.disbursementDate ?? "").localeCompare(b.disbursementDate ?? "");
-  thisMonthItems.sort(byDate);
-  nextMonthItems.sort(byDate);
 
-  const fmt = (y: number, m: number) =>
-    new Date(y, m, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+  const fmtMonthLabel = (key: string) => {
+    const [y, m] = key.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+  };
 
-  res.json({
-    thisMonth: { label: fmt(thisYear, thisMon), items: thisMonthItems },
-    nextMonth: { label: fmt(nextYear, nextMon), items: nextMonthItems },
-    noDate:    { label: "Date Not Set",          items: noDatItems },
-  });
+  const months = sortedKeys.map(key => ({
+    key,
+    label: fmtMonthLabel(key),
+    items: (monthBuckets.get(key) ?? []).sort(byDate),
+  }));
+
+  const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + noDateItems.length;
+
+  res.json({ months, noDate: { label: "Date Not Yet Set", items: noDateItems }, totalOpen });
 });
 
 export default router;
+
 
