@@ -600,18 +600,47 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   }>(`
     SELECT
       a.id,
-      -- Customer name: DB column first, then formText_6 (New Customer Application field)
-      COALESCE(NULLIF(a.customer_name, ''), a.form_data->>'formtext_6')           AS customer_name,
+      -- Customer name: DB column first; fallback is form-specific
+      --   New App   : formText_6 = Full Name and Surname
+      --   Re-App    : formText_1 = Customer Name
+      COALESCE(
+        NULLIF(a.customer_name, ''),
+        CASE a.status
+          WHEN 'application'   THEN a.form_data->>'formtext_6'
+          WHEN 'reapplication' THEN a.form_data->>'formtext_1'
+        END
+      )                                                                            AS customer_name,
       a.customer_phone,
       a.loan_amount,
       a.loan_product,
       a.status,
-      -- Retailer: joined table first, then formRadio_3 (Retail Company radio field)
-      COALESCE(r.name, a.form_data->>'formradio_3')                               AS retailer_name,
-      -- Branch: joined table first, then formText_1 (Store Branch field)
-      COALESCE(b.name, a.form_data->>'formtext_1')                                AS branch_name,
-      -- Collection date: stored disbursement_date first, then formDate_2 (Expected Stock Collection Date)
-      COALESCE(a.disbursement_date, a.form_data->>'formdate_2')                   AS collection_date,
+      -- Retailer: joined table first; fallback is form-specific
+      --   New App : formRadio_3   Re-App : formRadio_4
+      COALESCE(
+        r.name,
+        CASE a.status
+          WHEN 'application'   THEN a.form_data->>'formradio_3'
+          WHEN 'reapplication' THEN a.form_data->>'formradio_4'
+        END
+      )                                                                            AS retailer_name,
+      -- Branch: joined table first; fallback is form-specific
+      --   New App : formText_1   Re-App : formText_3
+      COALESCE(
+        b.name,
+        CASE a.status
+          WHEN 'application'   THEN a.form_data->>'formtext_1'
+          WHEN 'reapplication' THEN a.form_data->>'formtext_3'
+        END
+      )                                                                            AS branch_name,
+      -- Collection date: stored disbursement_date first; fallback is form-specific
+      --   New App : formDate_2   Re-App : formDate_3
+      COALESCE(
+        a.disbursement_date,
+        CASE a.status
+          WHEN 'application'   THEN a.form_data->>'formdate_2'
+          WHEN 'reapplication' THEN a.form_data->>'formdate_3'
+        END
+      )                                                                            AS collection_date,
       a.created_at
     FROM agreements a
     LEFT JOIN retailers r ON r.id = a.retailer_id

@@ -995,23 +995,41 @@ router.post("/formitize/webhook", async (req, res) => {
   //   formtext_6 = actual borrower/customer name
   // All other forms use the standard layout where named semantic fields come first.
   const isNewCustomerForm = formName.includes("new customer");
+  const isReApplication   = formType === "reapplication";
 
   // Extract customer identity fields (broad search across all product field names)
   //
+  // HukuPlus New Customer Application layout:
+  //   formRadio_3 = Retail Company (retailer)
+  //   formText_1  = Store Branch
+  //   formText_6  = Full Name and Surname (customer)
+  //   formDate_2  = Expected Date of Stock Collection
+  //
+  // HukuPlus Re-Application layout:
+  //   formRadio_4 = Retailer
+  //   formText_3  = Branch
+  //   formText_1  = Customer Name
+  //   formDate_3  = Collection Date
+  //
   // HukuPlus Loan Agreement layout:
-  //   formcrm_1  = the BORROWER selected from the Formitize CRM lookup (Stanley Zhange = borrower)
-  //   formtext_3 = branch staff member who processed the loan (NOT the borrower)
+  //   formcrm_1  = the BORROWER selected from the Formitize CRM lookup
+  //   formtext_3 = branch staff member (NOT the customer)
   //   formtext_4 = same staff name repeated
-  //   borrowerid = borrower's national ID card number (stored on the borrower record in CRM)
-  // All other standard forms: formcrm_1 is the primary borrower/applicant identifier.
+  //   borrowerid = borrower's national ID card number
   const isHukuPlusAgreement = product === "HukuPlus" && formType === "agreement" && !isNewCustomerForm;
 
   const customerName = isNewCustomerForm
     ? (findField(
-        "formtext_6",              // borrower/customer name slot in new-customer forms
+        "formtext_6",              // New Customer Application: Full Name and Surname
         "formcrm_1", "borrowername", "clientname", "customername",
         "fullname", "full name", "name"
-      ) || findField("formtext_2")) // last resort: might fall to store manager name on older forms
+      ) || findField("formtext_2"))
+    : isReApplication
+    ? findField(
+        "formtext_1",              // Re-Application: Customer Name
+        "formcrm_1", "borrowername", "clientname", "customername",
+        "fullname", "full name", "name"
+      )
     : findField(
         "formcrm_1", "borrowername", "clientname", "customername",
         "employeename", "employee name", "debtorname", "debtor name",
@@ -1080,16 +1098,24 @@ router.post("/formitize/webhook", async (req, res) => {
   ) || stripCurrency(fieldMap["formtext_1"] || "") || stripCurrency(fieldMap["formtext_2"] || "");
   const loanAmount = parseFloat(stripCurrency(loanAmountRaw || "") || "0");
 
-  // Disbursement / collection date.
-  // For HukuPlus New Customer Application forms the stock-collection date lives in formDate_2.
-  // For all other forms fall back to the standard Novafeeds field names.
-  const disbursementDate = (isNewCustomerForm
-    ? findField(
-        "formdate_2",              // New Customer Application: "Expected Date of Stock Collection"
-        "collectiondate", "collection date", "stockcollectiondate",
-        "applieddisbursement", "disbursementdate", "disbursement date"
-      )
-    : findField("applieddisbursement", "disbursementdate", "disbursement date", "disbursement")
+  // Disbursement / collection date — form-specific field IDs take priority.
+  // New Customer Application : formDate_2 = "Expected Date of Stock Collection"
+  // Re-Application           : formDate_3 = "Collection Date"
+  // All other forms          : standard Novafeeds field names
+  const disbursementDate = (
+    isNewCustomerForm
+      ? findField(
+          "formdate_2",
+          "collectiondate", "collection date", "stockcollectiondate",
+          "applieddisbursement", "disbursementdate", "disbursement date"
+        )
+      : isReApplication
+      ? findField(
+          "formdate_3",            // Re-Application: Collection Date
+          "collectiondate", "collection date", "stockcollectiondate",
+          "applieddisbursement", "disbursementdate", "disbursement date"
+        )
+      : findField("applieddisbursement", "disbursementdate", "disbursement date", "disbursement")
   ) || null;
   const repaymentDate    = findField("appliedsettlement", "settlementdate", "settlement date", "repaymentdate", "repayment date") || null;
   const repaymentAmountRaw = findField("weeklyrepayment", "monthly repayment", "repaymentamount", "repayment amount", "installment") || null;
@@ -1209,6 +1235,60 @@ router.post("/formitize/webhook", async (req, res) => {
           resolvedRetailerName = retailer.name;
           const [firstBranch] = await db.select().from(branchesTable).where(eq(branchesTable.retailerId, retailer.id));
           if (firstBranch) { branchId = firstBranch.id; resolvedBranchName = firstBranch.name; }
+        }
+      }
+    }
+  } else if (isReApplication) {
+    // Re-Application form
+    // formRadio_4 = Retailer (direct name — most reliable)
+    // formText_3  = Branch name
+    const reAppRetailerRaw = (fieldMap["formradio_4"] || "").trim();
+    const reAppBranchRaw   = (fieldMap["formtext_3"]  || "").trim();
+
+    if (reAppRetailerRaw || reAppBranchRaw) {
+      const allRetailers = await db.select().from(retailersTable);
+      const allBranches  = await db.select().from(branchesTable);
+
+      // Step 1: match retailer directly from formRadio_4
+      if (reAppRetailerRaw) {
+        const normR = reAppRetailerRaw.toLowerCase();
+        const matched = allRetailers.find(r =>
+          r.name.toLowerCase().includes(normR) || normR.includes(r.name.toLowerCase())
+        );
+        if (matched) {
+          retailerId = matched.id;
+          resolvedRetailerName = matched.name;
+          console.log(`[formitize] Re-App: retailer matched via formRadio_4 "${reAppRetailerRaw}" → "${matched.name}"`);
+        }
+      }
+
+      // Step 2: match branch from formText_3, narrowed to resolved retailer's branches if known
+      if (reAppBranchRaw) {
+        const candidates = retailerId
+          ? allBranches.filter(b => b.retailerId === retailerId)
+          : allBranches;
+        const normB = reAppBranchRaw.toLowerCase();
+        const RA_NOISE = new Set(["branch", "store", "shop", "main", "outlet", "centre", "center"]);
+        const searchWords = normB.split(/\s+/).filter(w => w.length > 2 && !RA_NOISE.has(w));
+
+        let matchedBranch = candidates.find(b => b.name.toLowerCase() === normB);
+        if (!matchedBranch && searchWords.length > 0) {
+          const scored = candidates.map(b => {
+            const bn = b.name.toLowerCase();
+            const score = searchWords.filter(w => bn.includes(w)).reduce((s, w) => s + w.length, 0);
+            return { branch: b, score };
+          }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+          if (scored.length > 0) matchedBranch = scored[0].branch;
+        }
+
+        if (matchedBranch) {
+          branchId = matchedBranch.id;
+          resolvedBranchName = matchedBranch.name;
+          if (!retailerId) {
+            const [r] = await db.select().from(retailersTable).where(eq(retailersTable.id, matchedBranch.retailerId));
+            if (r) { retailerId = r.id; resolvedRetailerName = r.name; }
+          }
+          console.log(`[formitize] Re-App: branch matched "${reAppBranchRaw}" → "${matchedBranch.name}"`);
         }
       }
     }
