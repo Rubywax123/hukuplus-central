@@ -598,6 +598,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     branch_name: string | null;
     collection_date: string | null;
     created_at: string;
+    converted_quickly: boolean;
   }>(`
     SELECT
       a.id,
@@ -667,19 +668,41 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
           )
         END
       )                                                                            AS collection_date,
-      a.created_at
+      a.created_at,
+      -- Walk-in signal: a real loan agreement was created within 24 hours of this
+      -- application/re-application. This is the authoritative walk-in definition.
+      EXISTS (
+        SELECT 1 FROM agreements conv
+        WHERE LOWER(TRIM(conv.customer_name)) = LOWER(TRIM(a.customer_name))
+          AND conv.form_type = 'agreement'
+          AND conv.created_at > a.created_at
+          AND conv.created_at <= a.created_at + INTERVAL '24 hours'
+      )                                                                            AS converted_quickly
     FROM agreements a
     LEFT JOIN retailers r ON r.id = a.retailer_id
     LEFT JOIN branches  b ON b.id = a.branch_id
     WHERE a.status IN ('application', 'reapplication')
       AND (
-        -- Always include explicit re-application status (regardless of form_type)
         a.status = 'reapplication'
-        -- For 'application' status, require a known form type so expense claims /
-        -- misc forms that arrive as status='application' + form_type='unknown' are excluded
         OR a.form_type IN ('application', 'reapplication')
       )
-      AND (a.dismissed IS NULL OR a.dismissed = false)
+      AND (
+        -- Main pipeline: all open (not dismissed) applications
+        (a.dismissed IS NULL OR a.dismissed = false)
+        OR
+        -- Historical walk-ins: dismissed applications that converted to an agreement
+        -- within 24 hours — shown in past-month buckets for management analysis.
+        (a.dismissed = true
+         AND a.created_at >= NOW() - INTERVAL '3 months'
+         AND EXISTS (
+           SELECT 1 FROM agreements conv
+           WHERE LOWER(TRIM(conv.customer_name)) = LOWER(TRIM(a.customer_name))
+             AND conv.form_type = 'agreement'
+             AND conv.created_at > a.created_at
+             AND conv.created_at <= a.created_at + INTERVAL '24 hours'
+         )
+        )
+      )
     ORDER BY a.created_at DESC
     LIMIT 1000
   `);
@@ -745,13 +768,11 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     walkIn: boolean;
   }
 
-  // Walk-in: collection date is same day or next day as form submission
-  function isWalkIn(disbDate: Date, createdAt: Date): boolean {
-    const submittedDay = new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate());
-    const collDay     = new Date(disbDate.getFullYear(), disbDate.getMonth(), disbDate.getDate());
-    const diffMs = collDay.getTime() - submittedDay.getTime();
-    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-    return diffDays >= 0 && diffDays <= 1;
+  // Walk-in: a real loan agreement was created within 24 hours of the application.
+  // This is read directly from the SQL-computed converted_quickly column.
+  // The old collection-date proximity check is no longer used.
+  function isWalkIn(row: typeof rows.rows[0]): boolean {
+    return row.converted_quickly === true;
   }
 
   const now = new Date();
@@ -784,7 +805,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   for (const row of rows.rows) {
     const disbDate  = getDisbDate(row);
     const createdAt = new Date(row.created_at);
-    const walkIn    = disbDate ? isWalkIn(disbDate, createdAt) : false;
+    const walkIn    = isWalkIn(row);
 
     // Use form_type as the canonical type signal — older records stored
     // form_type='reapplication' but status='application', so form_type wins.
@@ -807,13 +828,17 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       walkIn,
     };
 
-    if (walkIn && disbDate) {
-      if (disbDate >= thisMonthStart) {
+    if (walkIn) {
+      // Walk-ins use createdAt as the month anchor — the application was submitted
+      // and converted to an agreement the same day (within 24 hours), so the month
+      // of the application IS the month of conversion.
+      const anchorDate = createdAt;
+      if (anchorDate >= thisMonthStart) {
         // Current-month walk-in → top Walk-ins section
         walkInItems.push(item);
-      } else if (disbDate >= threeMonthsAgo) {
+      } else if (anchorDate >= threeMonthsAgo) {
         // Past-month walk-in → historical month bucket (analysis only, not counted in OPEN)
-        addToMonthBucket(item, disbDate);
+        addToMonthBucket(item, anchorDate);
       }
       // else: older than 3 months → drop
       continue;
