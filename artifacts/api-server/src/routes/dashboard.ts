@@ -640,14 +640,23 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
           WHEN 'reapplication' THEN a.form_data->>'formtext_3'
         END
       )                                                                            AS branch_name,
-      -- Collection date: stored disbursement_date first; fallback is form-specific
-      --   New App : formDate_2   Re-App : formDate_3
+      -- Collection date: stored disbursement_date takes priority (set during webhook).
+      -- Falls back to form_data JSON with exhaustive key search — we try every
+      -- field ID and human-readable label that any version of the webhook may have
+      -- stored, for both New Customer Application (formDate_2) and Re-Application
+      -- (formDate_3) forms.  This makes old and new records equally visible.
       COALESCE(
-        a.disbursement_date,
-        CASE COALESCE(NULLIF(a.form_type, 'unknown'), a.status)
-          WHEN 'application'   THEN a.form_data->>'formdate_2'
-          WHEN 'reapplication' THEN a.form_data->>'formdate_3'
-        END
+        NULLIF(TRIM(a.disbursement_date), ''),
+        a.form_data->>'formdate_3',
+        a.form_data->>'formdate_2',
+        a.form_data->>'collection date',
+        a.form_data->>'collectiondate',
+        a.form_data->>'expected date of stock collection',
+        a.form_data->>'stockcollectiondate',
+        a.form_data->>'expectedcollectiondate',
+        a.form_data->>'disbursement date',
+        a.form_data->>'disbursementdate',
+        a.form_data->>'applieddisbursement'
       )                                                                            AS collection_date,
       a.created_at
     FROM agreements a
@@ -843,15 +852,26 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   const historicalRows = await pool.query<{
     id: number;
     created_at: string;
-    disbursement_date: string | null;
-    fd2: string | null;
-    fd3: string | null;
+    collection_date: string | null;
     status: string;
     form_type: string | null;
   }>(`
-    SELECT id, created_at, disbursement_date,
-           form_data->>'formdate_2' AS fd2,
-           form_data->>'formdate_3' AS fd3,
+    SELECT id, created_at,
+           -- Same exhaustive COALESCE as the main pipeline query so walk-in counts
+           -- pick up dates from any field name the webhook might have stored.
+           COALESCE(
+             NULLIF(TRIM(disbursement_date), ''),
+             form_data->>'formdate_3',
+             form_data->>'formdate_2',
+             form_data->>'collection date',
+             form_data->>'collectiondate',
+             form_data->>'expected date of stock collection',
+             form_data->>'stockcollectiondate',
+             form_data->>'expectedcollectiondate',
+             form_data->>'disbursement date',
+             form_data->>'disbursementdate',
+             form_data->>'applieddisbursement'
+           ) AS collection_date,
            status, form_type
     FROM agreements
     WHERE status IN ('application','reapplication')
@@ -886,13 +906,8 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     const mk = toMonthKey(ca);
     if (!wiByMonth.has(mk)) continue; // outside window
 
-    // Determine collection date — use form_type as canonical signal (same fix as main query)
-    const effectiveType = (r.form_type && r.form_type !== "unknown") ? r.form_type : r.status;
-    const rawDate =
-      r.disbursement_date ||
-      (effectiveType === "application"   ? r.fd2 : null) ||
-      (effectiveType === "reapplication" ? r.fd3 : null);
-    const dd = parseAnyDate(rawDate);
+    // collection_date already resolved by the SQL COALESCE above
+    const dd = parseAnyDate(r.collection_date);
     if (!dd) continue;
 
     if (isWalkIn(dd, ca)) {
