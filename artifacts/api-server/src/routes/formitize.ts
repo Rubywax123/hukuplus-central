@@ -2369,7 +2369,8 @@ router.post("/formitize/notifications/:id/push-to-bookings", requireStaffAuth, r
     if (jobId) {
       // Try to update an existing agreement first
       const upd = await client.query(
-        `UPDATE agreements SET disbursement_date = $1 WHERE formitize_job_id = $2 AND status IN ('application','reapplication')`,
+        `UPDATE agreements SET disbursement_date = $1, dismissed = false
+         WHERE formitize_job_id = $2 AND status IN ('application','reapplication')`,
         [collectionDate, jobId]
       );
 

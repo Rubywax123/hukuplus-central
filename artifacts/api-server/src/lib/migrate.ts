@@ -1188,6 +1188,22 @@ export async function runMigrations() {
         AND (form_type = 'application' OR form_type = 'unknown');
     `);
 
+    // ── 2026-05-01: Restore re-application agreements to Bookings pipeline ─────
+    // Re-applications that were previously dismissed from the Bookings page via
+    // the X button had dismissed=true, but staff later used "Push to Bookings"
+    // to set a disbursement_date without clearing the dismissed flag. This caused
+    // them to remain invisible in the Bookings pipeline despite having a date set.
+    // Un-dismiss any re-application with a future (>= today) disbursement_date.
+    await client.query(`
+      UPDATE agreements
+      SET dismissed = false
+      WHERE form_type = 'reapplication'
+        AND dismissed = true
+        AND disbursement_date IS NOT NULL
+        AND TRIM(disbursement_date) != ''
+        AND disbursement_date::date >= CURRENT_DATE;
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
