@@ -618,7 +618,10 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       a.customer_phone,
       a.loan_amount,
       a.loan_product,
-      a.status,
+      -- Return the canonical type so the frontend correctly labels new vs re-app.
+      -- Older records carry form_type='reapplication' but status='application';
+      -- form_type must win so badges, counts and field reads are all consistent.
+      COALESCE(NULLIF(a.form_type, 'unknown'), a.status) AS status,
       -- Retailer: joined table first; fallback is form-specific
       --   New App : formRadio_3   Re-App : formRadio_4
       COALESCE(
