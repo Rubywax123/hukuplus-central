@@ -547,9 +547,43 @@ export default function BookingsPage() {
   const { data, isLoading, refetch, isFetching } = usePipeline();
   const [setDateTarget, setSetDateTarget] = useState<PipelineItem | null>(null);
   const pipelineListRef = useRef<HTMLDivElement>(null);
+  const [pulling, setPulling] = useState(false);
+  const [pullMsg, setPullMsg] = useState<string | null>(null);
 
   const scrollToPipeline = () => {
     pipelineListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handlePullSync = async () => {
+    setPulling(true);
+    setPullMsg(null);
+    try {
+      const r = await fetch(`${BASE}/api/formitize/api-sync`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await r.json();
+      if (json.ok) {
+        const imported = json.replayed ?? 0;
+        const skipped  = json.skipped  ?? 0;
+        const errors   = json.errors?.length ?? 0;
+        if (imported > 0) {
+          setPullMsg(`Pulled ${imported} new submission${imported === 1 ? "" : "s"} from Formitize.`);
+          refetch();
+        } else if (errors > 0) {
+          setPullMsg(`Pull completed with errors — check the server logs.`);
+        } else {
+          setPullMsg(`Up to date — ${skipped > 0 ? `${skipped} already imported` : "nothing new found"}.`);
+        }
+      } else {
+        setPullMsg(json.error ?? "Pull failed.");
+      }
+    } catch {
+      setPullMsg("Pull request failed — server unreachable.");
+    } finally {
+      setPulling(false);
+      setTimeout(() => setPullMsg(null), 6000);
+    }
   };
 
   const now = new Date();
@@ -626,10 +660,28 @@ export default function BookingsPage() {
         />
       )}
 
-      <PageHeader
-        title="Bookings"
-        description="Upcoming stock collection dates — applications not yet converted to agreements."
-      />
+      <div className="flex items-start justify-between gap-4 mb-2">
+        <PageHeader
+          title="Bookings"
+          description="Upcoming stock collection dates — applications not yet converted to agreements."
+        />
+        <div className="flex flex-col items-end gap-1.5 shrink-0 pt-1">
+          <button
+            onClick={handlePullSync}
+            disabled={pulling}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-xs text-muted-foreground hover:bg-white/[0.08] hover:text-white transition-colors disabled:opacity-50"
+          >
+            {pulling
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <RefreshCw className="w-3 h-3" />
+            }
+            {pulling ? "Pulling…" : "Pull from Formitize"}
+          </button>
+          {pullMsg && (
+            <span className="text-[11px] text-muted-foreground/70 text-right max-w-[200px]">{pullMsg}</span>
+          )}
+        </div>
+      </div>
 
       {/* ── Stat boxes ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">

@@ -2280,6 +2280,28 @@ router.patch("/formitize/notifications/:id/reassign", requireStaffAuth, requireS
   }
 });
 
+// ─── GET /api/formitize/api-sync/status ──────────────────────────────────────
+// Returns when the last pull-sync ran and its result summary.
+router.get("/formitize/api-sync/status", requireStaffAuth, requireSuperAdmin, async (_req, res): Promise<void> => {
+  const { getLastApiSync } = await import("../lib/syncFormitize");
+  const { lastSyncAt, lastResult } = getLastApiSync();
+  res.json({ lastSyncAt, lastResult });
+});
+
+// ─── POST /api/formitize/api-sync ─────────────────────────────────────────────
+// Manually triggers a Formitize API pull-sync immediately.
+router.post("/formitize/api-sync", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
+  const port = Number(process.env.PORT ?? 3000);
+  try {
+    const { syncFormitizeSubmissions } = await import("../lib/syncFormitize");
+    const result = await syncFormitizeSubmissions({ port });
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error("[formitize:api-sync] Manual trigger failed:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── POST /api/formitize/notifications/mark-all ───────────────────────────────
 router.post("/formitize/notifications/mark-all", requireStaffAuth, requireSuperAdmin, async (req, res) => {
   const { product, task_type } = req.body as { product?: string; task_type?: string };

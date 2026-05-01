@@ -5,6 +5,7 @@ import { syncXeroInvoices } from "./lib/syncXeroInvoices";
 import { autoSnapshotPreviousMonth } from "./lib/snapshotMonths";
 import { proactiveXeroRefresh } from "./lib/xeroAuth";
 import { backfillMissingInterest } from "./lib/backfillInterest";
+import { syncFormitizeSubmissions } from "./lib/syncFormitize";
 
 const rawPort = process.env["PORT"];
 
@@ -20,10 +21,11 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const STORE_SYNC_INTERVAL_MS      = 60 * 60 * 1000;       // 1 hour  — HukuPlus + Revolver store data
-const XERO_SYNC_INTERVAL_MS       =  5 * 60 * 1000;       // 5 minutes — Xero invoice → Loan Register
-const SNAPSHOT_CHECK_INTERVAL_MS  =  6 * 60 * 60 * 1000;  // 6 hours — monthly snapshot rollover
-const INTEREST_BACKFILL_INTERVAL_MS = 30 * 60 * 1000;     // 30 minutes — add missing interest to Xero invoices
+const STORE_SYNC_INTERVAL_MS           = 60 * 60 * 1000;   // 1 hour  — HukuPlus + Revolver store data
+const XERO_SYNC_INTERVAL_MS            =  5 * 60 * 1000;   // 5 minutes — Xero invoice → Loan Register
+const SNAPSHOT_CHECK_INTERVAL_MS       =  6 * 60 * 60 * 1000; // 6 hours — monthly snapshot rollover
+const INTEREST_BACKFILL_INTERVAL_MS    = 30 * 60 * 1000;   // 30 minutes — add missing interest to Xero invoices
+const FORMITIZE_API_SYNC_INTERVAL_MS   = 15 * 60 * 1000;   // 15 minutes — pull new applications from Formitize API
 
 async function runStoreSync() {
   // Step 1: pull from HukuPlus into Central
@@ -112,6 +114,23 @@ async function runInterestBackfill() {
   }
 }
 
+async function runFormitizeApiSync() {
+  try {
+    const result = await syncFormitizeSubmissions({ port });
+    if (result.replayed > 0 || result.errors.length > 0) {
+      console.log(
+        `[formitize:api-sync] Scheduled run — fetched=${result.fetched} relevant=${result.relevant} ` +
+        `replayed=${result.replayed} skipped=${result.skipped} errors=${result.errors.length}`
+      );
+      if (result.errors.length > 0) {
+        console.warn("[formitize:api-sync] Errors:", result.errors.join("; "));
+      }
+    }
+  } catch (err: any) {
+    console.error("[formitize:api-sync] Scheduled run failed:", err.message);
+  }
+}
+
 function startSyncScheduler() {
   // Proactively refresh Xero token on startup so it is fresh before any webhook fires.
   // If already valid it still refreshes to push the expiry window forward.
@@ -139,7 +158,15 @@ function startSyncScheduler() {
     setInterval(runInterestBackfill, INTEREST_BACKFILL_INTERVAL_MS);
   }, 2 * 60 * 1000);
 
-  console.log("[sync] Scheduler started — stores every 60 min, Xero every 5 min, snapshot check every 6 h, interest backfill every 30 min.");
+  // Formitize API pull-sync: run 3 minutes after startup (give server time to bind),
+  // then every 15 minutes.  Fetches new application / re-application submissions
+  // directly from the Formitize REST API so we don't rely on outbound webhooks.
+  setTimeout(() => {
+    runFormitizeApiSync();
+    setInterval(runFormitizeApiSync, FORMITIZE_API_SYNC_INTERVAL_MS);
+  }, 3 * 60 * 1000);
+
+  console.log("[sync] Scheduler started — stores every 60 min, Xero every 5 min, snapshot check every 6 h, interest backfill every 30 min, Formitize API pull every 15 min.");
 }
 
 runMigrations()
