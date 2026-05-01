@@ -2117,11 +2117,44 @@ router.get("/formitize/notifications", requireStaffAuth, requireSuperAdmin, asyn
     const result = await pool.query(
       `SELECT
          fn.*,
-         a.id               AS agreement_id,
+         a.id                   AS agreement_id,
          a.loan_amount,
          a.facility_fee_amount,
          a.interest_amount,
-         a.xero_invoice_id
+         a.xero_invoice_id,
+         -- Resolved collection date (same exhaustive COALESCE as Bookings pipeline)
+         COALESCE(
+           NULLIF(TRIM(a.disbursement_date), ''),
+           a.form_data->>'formdate_3',
+           a.form_data->>'formdate_2',
+           a.form_data->>'collection date',
+           a.form_data->>'collectiondate',
+           a.form_data->>'expected date of stock collection',
+           a.form_data->>'stockcollectiondate',
+           a.form_data->>'expectedcollectiondate',
+           a.form_data->>'disbursement date',
+           a.form_data->>'disbursementdate',
+           a.form_data->>'applieddisbursement'
+         )                      AS resolved_collection_date,
+         -- Bookings pipeline status (only meaningful for application/reapplication)
+         CASE
+           WHEN fn.task_type NOT IN ('application', 'reapplication') THEN NULL
+           WHEN a.id IS NULL THEN 'no_agreement'
+           WHEN COALESCE(
+             NULLIF(TRIM(a.disbursement_date), ''),
+             a.form_data->>'formdate_3',
+             a.form_data->>'formdate_2',
+             a.form_data->>'collection date',
+             a.form_data->>'collectiondate',
+             a.form_data->>'expected date of stock collection',
+             a.form_data->>'stockcollectiondate',
+             a.form_data->>'expectedcollectiondate',
+             a.form_data->>'disbursement date',
+             a.form_data->>'disbursementdate',
+             a.form_data->>'applieddisbursement'
+           ) IS NOT NULL THEN 'booked'
+           ELSE 'no_date'
+         END                    AS booking_status
        FROM formitize_notifications fn
        LEFT JOIN agreements a
          ON a.formitize_job_id = fn.formitize_job_id

@@ -111,6 +111,9 @@ interface FNotification {
   facility_fee_amount: number | null;
   interest_amount: number | null;
   xero_invoice_id: string | null;
+  // Bookings pipeline status — only set for application / reapplication
+  booking_status: "booked" | "no_date" | "no_agreement" | null;
+  resolved_collection_date: string | null; // the date already on the agreement (if any)
 }
 
 interface CountsResponse {
@@ -145,7 +148,21 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
 
   // ── Push to Bookings state ────────────────────────────────────────
   const [showBookingPicker, setShowBookingPicker] = useState(false);
-  const [bookingDate, setBookingDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Pre-fill with the existing collection date if already booked, else today
+  const [bookingDate, setBookingDate] = useState(() => {
+    if (n.resolved_collection_date) {
+      // Try to normalise whatever date string came from the DB into YYYY-MM-DD
+      try {
+        const parts = n.resolved_collection_date.split(/[\/\-]/);
+        if (parts.length === 3) {
+          // Could be DD/MM/YYYY or YYYY-MM-DD
+          if (parts[0].length === 4) return n.resolved_collection_date.slice(0, 10);
+          return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+        }
+      } catch { /* fall through */ }
+    }
+    return new Date().toISOString().slice(0, 10);
+  });
   const [bookingSaving, setBookingSaving] = useState(false);
   const [bookingMsg, setBookingMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -161,7 +178,8 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
       });
       const json = await res.json();
       if (res.ok && json.ok) {
-        setBookingMsg({ ok: true, text: "Added to Bookings pipeline." });
+        const verb = json.action === "updated" ? "Date updated in Bookings." : "Added to Bookings pipeline.";
+        setBookingMsg({ ok: true, text: verb });
         setTimeout(() => { setShowBookingPicker(false); setBookingMsg(null); }, 2000);
       } else {
         setBookingMsg({ ok: false, text: json.error ?? "Failed to save." });
@@ -276,6 +294,25 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
           {n.is_delinquent_warning && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600/40 text-red-200 border border-red-500/60 animate-pulse">🚨 DELINQUENT ALERT</span>}
           {n.is_duplicate_warning && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">⚠ POSSIBLE DUPLICATE</span>}
           {n.processing_error && isNew && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300 border border-orange-500/25">RETRY NEEDED</span>}
+          {/* Bookings pipeline status badge */}
+          {n.booking_status === "booked" && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/25">
+              <CalendarDays className="w-2.5 h-2.5" />
+              IN BOOKINGS{n.resolved_collection_date ? ` · ${n.resolved_collection_date}` : ""}
+            </span>
+          )}
+          {n.booking_status === "no_date" && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25">
+              <CalendarDays className="w-2.5 h-2.5" />
+              NO DATE SET
+            </span>
+          )}
+          {n.booking_status === "no_agreement" && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300 border border-orange-500/25">
+              <CalendarDays className="w-2.5 h-2.5" />
+              NOT IN BOOKINGS
+            </span>
+          )}
         </div>
         <p className="text-sm font-medium text-white truncate">{n.form_name}</p>
         <div className="flex items-center gap-3 mt-1.5 text-xs text-white/50 flex-wrap">
@@ -382,12 +419,20 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
               showBookingPicker
                 ? "bg-teal-500/25 border-teal-500/50 text-teal-200"
+                : n.booking_status === "booked"
+                ? "bg-teal-500/10 border-teal-500/20 text-teal-400/70 hover:bg-teal-500/20 hover:text-teal-300"
                 : "bg-teal-500/15 border-teal-500/30 text-teal-300 hover:bg-teal-500/25"
             }`}
-            title="Set the expected stock collection date and add to Bookings pipeline"
+            title={n.booking_status === "booked"
+              ? "Change the expected stock collection date in Bookings"
+              : "Set the expected stock collection date and add to Bookings pipeline"}
           >
             <CalendarDays className="w-3.5 h-3.5" />
-            {showBookingPicker ? "Cancel" : "Push to Bookings"}
+            {showBookingPicker
+              ? "Cancel"
+              : n.booking_status === "booked"
+              ? "Update Date"
+              : "Push to Bookings"}
           </button>
         )}
         {/* ── Raise Xero Invoice button (agreement-type, not yet invoiced) ── */}
@@ -503,7 +548,7 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
         <div className="w-full mt-3 pt-3 border-t border-teal-500/20">
           <p className="text-xs font-semibold text-teal-300/80 uppercase tracking-wide mb-2 flex items-center gap-1.5">
             <CalendarDays className="w-3.5 h-3.5" />
-            Expected Stock Collection Date
+            {n.booking_status === "booked" ? "Update Collection Date in Bookings" : "Expected Stock Collection Date"}
           </p>
           {bookingMsg ? (
             <p className={`text-xs font-medium ${bookingMsg.ok ? "text-teal-300" : "text-red-400"}`}>
