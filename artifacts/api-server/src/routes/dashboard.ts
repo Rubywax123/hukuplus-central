@@ -730,17 +730,23 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   const now = new Date();
   // Start of today
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  // Tomorrow start — used to decide if a walk-in is "immediate" (today/tomorrow)
-  const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  // Start of current calendar month
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Current month key e.g. "2026-05"
+  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   // "No date" cutoff: only show applications created in the last 30 days
   const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-  // Past walk-in cutoff: include walk-ins up to 60 days old
-  const sixtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 60);
+  // Historical walk-in cutoff: include past months up to 3 months back for analysis
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
 
-  // Buckets: map of "YYYY-MM" → items[], plus noDate and walkIns (today/tomorrow only)
+  // Buckets:
+  //   walkInItems  — current-month walk-ins (shown in top Walk-ins section)
+  //   monthBuckets — future scheduled bookings (>= today, non-walk-in) +
+  //                  past-month walk-ins (for analysis, shown collapsed)
+  //   noDateItems  — recent applications with no collection date set
   const monthBuckets = new Map<string, PipelineItem[]>();
   const noDateItems: PipelineItem[] = [];
-  const walkInItems: PipelineItem[] = []; // only truly immediate (today/tomorrow)
+  const walkInItems: PipelineItem[] = [];
 
   function addToMonthBucket(item: PipelineItem, disbDate: Date) {
     const key = `${disbDate.getFullYear()}-${String(disbDate.getMonth() + 1).padStart(2, "0")}`;
@@ -775,14 +781,14 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     };
 
     if (walkIn && disbDate) {
-      // Today's/tomorrow's walk-ins → immediate top section
-      if (disbDate >= todayStart) {
+      if (disbDate >= thisMonthStart) {
+        // Current-month walk-in → top Walk-ins section
         walkInItems.push(item);
-      } else if (disbDate >= sixtyDaysAgo) {
-        // Past walk-ins (e.g. April) → go into their month bucket so they count
-        // as open and staff can dismiss the ones already handled
+      } else if (disbDate >= threeMonthsAgo) {
+        // Past-month walk-in → historical month bucket (analysis only, not counted in OPEN)
         addToMonthBucket(item, disbDate);
       }
+      // else: older than 3 months → drop
       continue;
     }
 
@@ -790,10 +796,10 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       // Only include recent no-date applications
       if (createdAt >= thirtyDaysAgo) noDateItems.push(item);
     } else if (disbDate >= todayStart) {
-      // Future dated non-walk-in
+      // Future-dated non-walk-in → active month bucket
       addToMonthBucket(item, disbDate);
     }
-    // Past-dated non-walk-in → silently excluded (their date passed without a walk-in same day)
+    // Past-dated non-walk-in (missed appointment, no walk-in) → silently excluded
   }
 
   // Sort buckets chronologically and sort items within each bucket by date
@@ -815,10 +821,12 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   // Walk-ins sorted most-recent first (newest submission at top)
   walkInItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  // totalOpen = all dated entries (month buckets) + today's immediate walk-ins.
-  // Past walk-ins (e.g. April) are now in their month buckets.
+  // totalOpen = future-dated month buckets (>= current month) + current-month walk-ins.
+  // Past-month walk-ins appear in the UI for analysis but are not counted in OPEN.
   // "No date" entries are unscheduled and tracked separately, not in this count.
-  const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + walkInItems.length;
+  const totalOpen =
+    months.filter(m => m.key >= thisMonthKey).reduce((s, m) => s + m.items.length, 0) +
+    walkInItems.length;
 
   // ── Historical walk-in monthly counts (last 3 calendar months + current) ────
   // Pull all application/re-application forms from the last 4 months and

@@ -263,6 +263,7 @@ function WalkInsSection({ items, onDismiss }: { items: PipelineItem[]; onDismiss
 
   const newCount = items.filter(i => i.status === "application").length;
   const reCount  = items.filter(i => i.status === "reapplication").length;
+  const currentMonthName = new Date().toLocaleString("en-US", { month: "long" });
 
   return (
     <GlassCard className="p-0 overflow-hidden border-orange-500/20">
@@ -274,8 +275,9 @@ function WalkInsSection({ items, onDismiss }: { items: PipelineItem[]; onDismiss
           <Zap className="w-4 h-4 text-orange-400" />
           <span className="text-base font-bold text-white">Walk-ins</span>
           <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400">
-            {items.length} immediate
+            {items.length} this month
           </span>
+          <span className="text-[10px] text-orange-400/50 hidden sm:inline">{currentMonthName}</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-3">
@@ -555,12 +557,13 @@ export default function BookingsPage() {
     queryClient.setQueryData<PipelineData>(["disbursement-pipeline"], old => {
       if (!old) return old;
       const removeId = (items: PipelineItem[]) => items.filter(i => i.id !== id);
-      // totalOpen now covers month buckets (incl. past walk-ins) + today's walkIns section
-      const inMonth  = old.months.some(m => m.items.some(i => i.id === id));
-      const inWalkIn = old.walkIns.items.some(i => i.id === id);
+      // Only decrement OPEN if item is in a current/future month bucket OR today's walk-ins.
+      // Past-month buckets (analysis only) are not counted in totalOpen.
+      const inActiveMonth = old.months.some(m => m.key >= thisMonthKey && m.items.some(i => i.id === id));
+      const inWalkIn      = old.walkIns.items.some(i => i.id === id);
       return {
         ...old,
-        totalOpen: (inMonth || inWalkIn) ? old.totalOpen - 1 : old.totalOpen,
+        totalOpen: (inActiveMonth || inWalkIn) ? old.totalOpen - 1 : old.totalOpen,
         months: old.months.map(m => ({ ...m, items: removeId(m.items) })),
         noDate:  { ...old.noDate,  items: removeId(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeId(old.walkIns.items) },
@@ -579,13 +582,14 @@ export default function BookingsPage() {
       if (!old) return old;
       const idSet = new Set(ids);
       const removeIds = (items: PipelineItem[]) => items.filter(i => !idSet.has(i.id));
-      // Only count removals from month buckets toward totalOpen
-      const monthRemovals = old.months.reduce(
-        (n, m) => n + m.items.filter(i => idSet.has(i.id)).length, 0
-      );
+      // Only count removals from current/future month buckets + walkIns toward totalOpen
+      const monthRemovals = old.months
+        .filter(m => m.key >= thisMonthKey)
+        .reduce((n, m) => n + m.items.filter(i => idSet.has(i.id)).length, 0);
+      const walkInRemovals = old.walkIns.items.filter(i => idSet.has(i.id)).length;
       return {
         ...old,
-        totalOpen: old.totalOpen - monthRemovals,
+        totalOpen: old.totalOpen - monthRemovals - walkInRemovals,
         months: old.months.map(m => ({ ...m, items: removeIds(m.items) })),
         noDate:  { ...old.noDate,  items: removeIds(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeIds(old.walkIns.items) },
@@ -668,8 +672,8 @@ export default function BookingsPage() {
           })()}
         </div>
 
-        {/* One box per upcoming month */}
-        {data && data.months.map(m => {
+        {/* One box per current / future month only — past months are analysis-only */}
+        {data && data.months.filter(m => m.key >= thisMonthKey).map(m => {
           const isCurrent = m.key === thisMonthKey;
           const newCount  = m.items.filter(i => i.status === "application").length;
           const reCount   = m.items.filter(i => i.status === "reapplication").length;
