@@ -629,6 +629,7 @@ function FormitizeTab() {
   const [activeProduct, setActiveProduct] = useState<string>("All");
   const [activeType, setActiveType] = useState<string>("all");
   const [showActioned, setShowActioned] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
   const [paymentNotification, setPaymentNotification] = useState<FNotification | null>(null);
   const [disbursementNotification, setDisbursementNotification] = useState<FNotification | null>(null);
 
@@ -745,7 +746,10 @@ function FormitizeTab() {
     }
   };
 
-  const statusFilter = showActioned ? "all" : "new";
+  // When searching by name, always pull all records (new + actioned) so the user
+  // can find any entry regardless of whether it's been marked done.
+  const isSearching = customerSearch.trim().length > 0;
+  const statusFilter = (showActioned || isSearching) ? "all" : "new";
 
   const { data: notifications = [], isLoading, refetch } = useQuery<FNotification[]>({
     queryKey: ["notifications", activeProduct, activeType, statusFilter],
@@ -857,24 +861,57 @@ function FormitizeTab() {
             </div>
           </div>
         </div>
-        <label className="ml-auto flex items-center gap-2 text-xs text-white/50 cursor-pointer select-none">
-          <input type="checkbox" checked={showActioned} onChange={e => setShowActioned(e.target.checked)} className="w-3.5 h-3.5 accent-amber-500" />
-          Show actioned
-        </label>
+        {/* Customer name search — filters across ALL loaded entries client-side */}
+        <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30 pointer-events-none" />
+            <input
+              type="text"
+              value={customerSearch}
+              onChange={e => setCustomerSearch(e.target.value)}
+              placeholder="Search customer…"
+              className="pl-8 pr-8 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-white placeholder-white/30 focus:outline-none focus:border-amber-500/40 w-48"
+            />
+            {customerSearch && (
+              <button
+                onClick={() => setCustomerSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <label className="flex items-center gap-2 text-xs text-white/50 cursor-pointer select-none">
+            <input type="checkbox" checked={showActioned} onChange={e => setShowActioned(e.target.checked)} className="w-3.5 h-3.5 accent-amber-500" />
+            Show actioned
+          </label>
+        </div>
       </div>
 
-      {isLoading ? (
+      {(() => {
+        const trimmed = customerSearch.trim().toLowerCase();
+        const filtered = trimmed
+          ? notifications.filter(n =>
+              (n.customer_name ?? "").toLowerCase().includes(trimmed) ||
+              (n.form_name ?? "").toLowerCase().includes(trimmed)
+            )
+          : notifications;
+        const sorted = sortNotifications(filtered);
+        return isLoading ? (
         <div className="flex items-center justify-center py-16 text-white/40"><RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
-      ) : notifications.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-white/40">
           <Bell className="w-10 h-10 mb-3 opacity-30" />
-          <p className="text-base font-medium">No notifications</p>
-          <p className="text-sm mt-1">{showActioned ? "Nothing here yet" : "No unactioned items — you're all caught up"}</p>
+          <p className="text-base font-medium">{trimmed ? `No results for "${customerSearch}"` : "No notifications"}</p>
+          <p className="text-sm mt-1">{trimmed ? "Try a different name or clear the search" : showActioned ? "Nothing here yet" : "No unactioned items — you're all caught up"}</p>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {trimmed && (
+            <p className="text-xs text-white/40 px-1">{sorted.length} result{sorted.length !== 1 ? "s" : ""} for <span className="text-amber-300/70">"{customerSearch}"</span></p>
+          )}
           <AnimatePresence initial={false}>
-            {sortNotifications(notifications).map(n => (
+            {sorted.map(n => (
               <NotificationCard key={n.id} n={n}
                 onAction={() => markOneMutation.mutate({ id: n.id, status: n.status === "new" ? "actioned" : "new" })}
                 loading={markOneMutation.isPending}
@@ -890,7 +927,8 @@ function FormitizeTab() {
             ))}
           </AnimatePresence>
         </div>
-      )}
+      );
+      })()}
     </div>
 
     <AnimatePresence>
