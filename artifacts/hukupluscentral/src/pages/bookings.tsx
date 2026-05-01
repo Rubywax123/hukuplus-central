@@ -46,10 +46,6 @@ function usePipeline() {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtAmt(n: number | null) {
-  if (n == null) return null;
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function parseDateParts(iso: string) {
   const d = new Date(iso + "T00:00:00");
@@ -74,28 +70,30 @@ function groupByDay(items: PipelineItem[]): Map<string, PipelineItem[]> {
 // ─── Item Row ─────────────────────────────────────────────────────────────────
 
 function ItemRow({ item }: { item: PipelineItem }) {
-  const amt = fmtAmt(item.loanAmount);
   const isReApp = item.status === "reapplication";
   return (
     <div className="flex items-center gap-3 py-2.5 last:pb-0">
+      {/* Customer Name */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-white truncate leading-tight">{item.customerName}</p>
+        <p className="text-sm font-semibold text-white truncate leading-tight">{item.customerName || "—"}</p>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-          {item.branchName && (
-            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/70">
-              <Store className="w-2.5 h-2.5 flex-shrink-0" />{item.branchName}
+          {/* Retailer */}
+          {item.retailerName && (
+            <span className="text-[10px] text-sky-400/80 font-medium truncate">
+              {item.retailerName}
             </span>
           )}
-          {item.retailerName && item.retailerName !== item.branchName && (
-            <span className="text-[10px] text-muted-foreground/40 truncate">{item.retailerName}</span>
-          )}
-          {item.loanProduct && (
-            <span className="text-[10px] text-muted-foreground/40">{item.loanProduct}</span>
+          {/* Branch */}
+          {item.branchName && (
+            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60">
+              <Store className="w-2.5 h-2.5 flex-shrink-0" />
+              {item.branchName}
+            </span>
           )}
         </div>
       </div>
-      <div className="flex-shrink-0 flex items-center gap-2">
-        {amt && <span className="text-sm font-bold text-white tabular-nums">{amt}</span>}
+      {/* Type badge */}
+      <div className="flex-shrink-0">
         <span className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
           isReApp
             ? "bg-amber-500/10 border-amber-500/20 text-amber-400"

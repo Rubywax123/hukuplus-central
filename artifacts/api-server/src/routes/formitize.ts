@@ -1080,8 +1080,17 @@ router.post("/formitize/webhook", async (req, res) => {
   ) || stripCurrency(fieldMap["formtext_1"] || "") || stripCurrency(fieldMap["formtext_2"] || "");
   const loanAmount = parseFloat(stripCurrency(loanAmountRaw || "") || "0");
 
-  // Disbursement and repayment dates from Novafeeds HukuPlus form
-  const disbursementDate = findField("applieddisbursement", "disbursementdate", "disbursement date", "disbursement") || null;
+  // Disbursement / collection date.
+  // For HukuPlus New Customer Application forms the stock-collection date lives in formDate_2.
+  // For all other forms fall back to the standard Novafeeds field names.
+  const disbursementDate = (isNewCustomerForm
+    ? findField(
+        "formdate_2",              // New Customer Application: "Expected Date of Stock Collection"
+        "collectiondate", "collection date", "stockcollectiondate",
+        "applieddisbursement", "disbursementdate", "disbursement date"
+      )
+    : findField("applieddisbursement", "disbursementdate", "disbursement date", "disbursement")
+  ) || null;
   const repaymentDate    = findField("appliedsettlement", "settlementdate", "settlement date", "repaymentdate", "repayment date") || null;
   const repaymentAmountRaw = findField("weeklyrepayment", "monthly repayment", "repaymentamount", "repayment amount", "installment") || null;
   const repaymentAmount = repaymentAmountRaw ? parseFloat(stripCurrency(repaymentAmountRaw)) : null;
@@ -1093,14 +1102,31 @@ router.post("/formitize/webhook", async (req, res) => {
   let resolvedBranchName = "";
 
   if (product === "HukuPlus" && isNewCustomerForm) {
-    // "New Customer Application" — formtext_1 contains the store/branch name.
-    // formtext_3 contains the store email (e.g. "chivu@profeeds.co.zw") — use its domain to narrow the retailer.
+    // "New Customer Application"
+    // formRadio_3 = Retail Company (direct retailer name — most reliable signal)
+    // formText_1  = Store Branch name
+    // formText_3  = Store email (domain used to narrow retailer as fallback)
+    const explicitRetailerRaw = (fieldMap["formradio_3"] || "").trim();
     const storeName = (fieldMap["formtext_1"] || "").trim();
     const newCustStoreEmail = (fieldMap["formtext_3"] || "").trim();
 
-    if (storeName) {
+    if (explicitRetailerRaw || storeName) {
       const allRetailers = await db.select().from(retailersTable);
       const allBranches = await db.select().from(branchesTable);
+
+      // ── Step 0: match retailer directly from formRadio_3 ──────────────────
+      if (explicitRetailerRaw && !retailerId) {
+        const normExplicit = explicitRetailerRaw.toLowerCase();
+        const directRetailer = allRetailers.find(r =>
+          r.name.toLowerCase().includes(normExplicit) ||
+          normExplicit.includes(r.name.toLowerCase())
+        );
+        if (directRetailer) {
+          retailerId = directRetailer.id;
+          resolvedRetailerName = directRetailer.name;
+          console.log(`[formitize] New-cust: retailer matched via formRadio_3 "${explicitRetailerRaw}" → "${directRetailer.name}"`);
+        }
+      }
 
       // Strip generic noise words so "Chivhu branch" → ["chivhu"]
       const NC_NOISE = new Set(["branch", "store", "shop", "main", "outlet", "centre", "center", "unit", "site", "head"]);
@@ -1122,9 +1148,14 @@ router.post("/formitize/webhook", async (req, res) => {
         return false;
       };
 
-      // Narrow candidates by retailer hint from store email domain if available
+      // Narrow branch candidates:
+      // 1) If we already resolved a retailer from formRadio_3, restrict to that retailer's branches
+      // 2) Otherwise fall back to email-domain narrowing
       let candidates = allBranches;
-      if (newCustStoreEmail.includes("@")) {
+      if (retailerId) {
+        const narrowed = allBranches.filter(b => b.retailerId === retailerId);
+        if (narrowed.length > 0) candidates = narrowed;
+      } else if (newCustStoreEmail.includes("@")) {
         const emailDomain = newCustStoreEmail.split("@")[1] ?? "";
         const retailerHintNC = emailDomain.split(".")[0]?.toLowerCase() ?? "";
         if (retailerHintNC.length > 2) {

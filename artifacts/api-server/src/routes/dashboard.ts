@@ -595,21 +595,23 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     status: string;
     retailer_name: string | null;
     branch_name: string | null;
-    disbursement_date: string | null;
-    form_data: Record<string, string> | null;
+    collection_date: string | null;
     created_at: string;
   }>(`
     SELECT
       a.id,
-      a.customer_name,
+      -- Customer name: DB column first, then formText_6 (New Customer Application field)
+      COALESCE(NULLIF(a.customer_name, ''), a.form_data->>'formtext_6')           AS customer_name,
       a.customer_phone,
       a.loan_amount,
       a.loan_product,
       a.status,
-      r.name  AS retailer_name,
-      b.name  AS branch_name,
-      a.disbursement_date,
-      a.form_data,
+      -- Retailer: joined table first, then formRadio_3 (Retail Company radio field)
+      COALESCE(r.name, a.form_data->>'formradio_3')                               AS retailer_name,
+      -- Branch: joined table first, then formText_1 (Store Branch field)
+      COALESCE(b.name, a.form_data->>'formtext_1')                                AS branch_name,
+      -- Collection date: stored disbursement_date first, then formDate_2 (Expected Stock Collection Date)
+      COALESCE(a.disbursement_date, a.form_data->>'formdate_2')                   AS collection_date,
       a.created_at
     FROM agreements a
     LEFT JOIN retailers r ON r.id = a.retailer_id
@@ -659,68 +661,10 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     return null;
   }
 
-  // Disbursement-specific field name prefixes (substring match, like the webhook's findField)
-  const DISB_PREFIXES = [
-    "applieddisbursement",
-    "disbursementdate",
-    "disbursement",
-    "stockcollection",
-    "stockdate",
-    "collectiondate",
-    "doladate",
-    "dola",
-  ];
-  // Keys that look like disbursement but are NOT (exclude to avoid wrong matches)
-  const EXCLUDE_PREFIXES = ["settlement", "repayment", "dob", "dateofbirth", "birthdate"];
-
-  const norm = (s: string) => s.toLowerCase().replace(/[\s_\-\.]/g, "");
-
   function getDisbDate(row: typeof rows.rows[0]): Date | null {
-    // 1. Dedicated DB column (populated at webhook time)
-    const fromCol = parseAnyDate(row.disbursement_date);
-    if (fromCol) return fromCol;
-
-    // 2. Scan form_data — use substring matching, same as the webhook's findField
-    const fd = row.form_data ?? {};
-    const candidates: Date[] = [];
-
-    for (const [k, v] of Object.entries(fd)) {
-      if (!v || typeof v !== "string") continue;
-      const nk = norm(k);
-      // Skip keys that are definitely not disbursement dates
-      if (EXCLUDE_PREFIXES.some(ex => nk.includes(norm(ex)))) continue;
-      // Check if this key contains a disbursement-related word
-      const isDisb = DISB_PREFIXES.some(prefix => nk.includes(norm(prefix)));
-      if (!isDisb) continue;
-      const d = parseAnyDate(v);
-      if (d) candidates.push(d);
-    }
-    if (candidates.length > 0) {
-      // Take the earliest future date, or the most recent past one if all are past
-      const now = new Date();
-      const future = candidates.filter(d => d >= now);
-      if (future.length > 0) return future.sort((a, b) => a.getTime() - b.getTime())[0];
-      return candidates.sort((a, b) => b.getTime() - a.getTime())[0];
-    }
-
-    // 3. Last resort: scan ALL form_data values for a date that looks like a
-    //    near-future disbursement (within 6 months). This catches unusual field names.
-    const now2 = new Date();
-    const sixMonthsOut = new Date(now2.getFullYear(), now2.getMonth() + 6, 1);
-    const twoMonthsBack = new Date(now2.getFullYear(), now2.getMonth() - 2, 1);
-    const futureScan: Date[] = [];
-    for (const [k, v] of Object.entries(fd)) {
-      if (!v || typeof v !== "string") continue;
-      const nk = norm(k);
-      // Skip obviously wrong fields
-      if (EXCLUDE_PREFIXES.some(ex => nk.includes(norm(ex)))) continue;
-      if (nk.includes("dob") || nk.includes("birth") || nk.includes("phone") || nk.includes("id") || nk.includes("amount") || nk.includes("name")) continue;
-      const d = parseAnyDate(v);
-      if (d && d >= twoMonthsBack && d <= sixMonthsOut) futureScan.push(d);
-    }
-    if (futureScan.length > 0) return futureScan.sort((a, b) => a.getTime() - b.getTime())[0];
-
-    return null;
+    // The SQL query already COALESCEs disbursement_date with form_data->>'formdate_2'
+    // (and formdate_2 is the "Expected Date of Stock Collection" on New Customer Application forms)
+    return parseAnyDate(row.collection_date);
   }
 
   interface PipelineItem {
