@@ -845,7 +845,9 @@ router.post("/formitize/webhook", async (req, res) => {
   // ── Activity-only form types (no agreement record needed) ──────────────────
   // Drawdowns, payments, uploads, approvals, undertakings are events against
   // existing agreements — store as activity log and return.
-  const activityOnly = ["drawdown", "payment", "upload", "approval", "undertaking"];
+  // "unknown" also goes here: if we can't classify the form (e.g. expense claims,
+  // survey forms) we must not create a spurious booking record.
+  const activityOnly = ["drawdown", "payment", "upload", "approval", "undertaking", "unknown"];
 
   // ── Job ID dedup (agreement forms only) ────────────────────────────────────
   // Skip dedup for activity-only types — they legitimately share the same
@@ -1818,7 +1820,7 @@ router.post("/formitize/webhook", async (req, res) => {
     formitizeJobId: jobId,
     formitizeFormUrl: null,
     signingToken,
-    status: isAgreement ? "pending" : "application",
+    status: isAgreement ? "pending" : isReApplication ? "reapplication" : "application",
     expiresAt,
     createdBy: "formitize-webhook",
     ...(disbursementDate ? { disbursementDate } : {}),

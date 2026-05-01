@@ -593,6 +593,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     loan_amount: string | null;
     loan_product: string | null;
     status: string;
+    form_type: string | null;
     retailer_name: string | null;
     branch_name: string | null;
     collection_date: string | null;
@@ -600,6 +601,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   }>(`
     SELECT
       a.id,
+      a.form_type,
       -- Customer name: DB column first; fallback is form-specific
       --   New App   : formText_6 = Full Name and Surname
       --   Re-App    : formText_1 = Customer Name
@@ -646,6 +648,8 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     LEFT JOIN retailers r ON r.id = a.retailer_id
     LEFT JOIN branches  b ON b.id = a.branch_id
     WHERE a.status IN ('application', 'reapplication')
+      AND (a.form_type IS NULL OR a.form_type != 'unknown')
+      AND (a.dismissed IS NULL OR a.dismissed = false)
     ORDER BY a.created_at DESC
     LIMIT 1000
   `);
@@ -703,6 +707,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     loanAmount: number | null;
     loanProduct: string | null;
     status: string;
+    formType: string | null;
     retailerName: string | null;
     branchName: string | null;
     disbursementDate: string | null;
@@ -735,13 +740,20 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     const createdAt = new Date(row.created_at);
     const walkIn    = disbDate ? isWalkIn(disbDate, createdAt) : false;
 
+    // Use form_type as the canonical type signal — older records stored
+    // form_type='reapplication' but status='application', so form_type wins.
+    const effectiveStatus = row.form_type && ["application","reapplication"].includes(row.form_type)
+      ? row.form_type
+      : row.status;
+
     const item: PipelineItem = {
       id: row.id,
       customerName: row.customer_name,
       customerPhone: row.customer_phone,
       loanAmount: row.loan_amount ? parseFloat(row.loan_amount) : null,
       loanProduct: row.loan_product,
-      status: row.status,
+      status: effectiveStatus,
+      formType: row.form_type,
       retailerName: row.retailer_name,
       branchName: row.branch_name,
       disbursementDate: disbDate ? disbDate.toISOString().slice(0, 10) : null,

@@ -15,6 +15,7 @@ interface PipelineItem {
   loanAmount: number | null;
   loanProduct: string | null;
   status: "application" | "reapplication";
+  formType: string | null;
   retailerName: string | null;
   branchName: string | null;
   disbursementDate: string | null;
