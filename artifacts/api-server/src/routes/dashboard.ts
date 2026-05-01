@@ -798,7 +798,10 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   // Walk-ins sorted most-recent first (newest submission at top)
   walkInItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + noDateItems.length + walkInItems.length;
+  // totalOpen = only applications with a real scheduled date (month buckets).
+  // Walk-ins are immediate (same-day) and "no date" entries are unscheduled applications —
+  // neither is a genuine future booking, so they are tracked separately, not in this count.
+  const totalOpen = months.reduce((s, m) => s + m.items.length, 0);
 
   // ── Historical walk-in monthly counts (last 3 calendar months + current) ────
   // Pull all application/re-application forms from the last 4 months and
@@ -868,7 +871,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
 
   res.json({
     months,
-    noDate:  { label: "Date Not Yet Set", items: noDateItems },
+    noDate:  { label: "No Collection Date", items: noDateItems },
     walkIns: { label: "Walk-ins", items: walkInItems },
     walkInMonthly,
     totalOpen,

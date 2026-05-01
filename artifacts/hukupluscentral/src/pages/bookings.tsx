@@ -326,13 +326,13 @@ function NoDatSection({ items, onDismiss, onDismissAll }: {
       >
         <div className="flex items-center gap-3">
           <CalendarDays className="w-4 h-4 text-muted-foreground/40" />
-          <span className="text-sm font-semibold text-muted-foreground/70">Date Not Yet Set</span>
+          <span className="text-sm font-semibold text-muted-foreground/70">No Collection Date</span>
           <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-muted-foreground/50">
             {items.length}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-muted-foreground/40 hidden sm:block">Last 30 days, no date</span>
+          <span className="text-[10px] text-muted-foreground/40 hidden sm:block">Submitted, no date booked</span>
           <button
             onClick={handleClearAll}
             disabled={clearingAll}
@@ -379,14 +379,17 @@ export default function BookingsPage() {
   const now = new Date();
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  // Optimistically remove an item from the cache, then call the API
+  // Optimistically remove an item from the cache, then call the API.
+  // Only decrement totalOpen if the item is in a month bucket (dated).
+  // Walk-ins and no-date entries are NOT counted in totalOpen.
   const handleDismiss = useCallback((id: number) => {
     queryClient.setQueryData<PipelineData>(["disbursement-pipeline"], old => {
       if (!old) return old;
       const removeId = (items: PipelineItem[]) => items.filter(i => i.id !== id);
+      const inMonth = old.months.some(m => m.items.some(i => i.id === id));
       return {
         ...old,
-        totalOpen: old.totalOpen - 1,
+        totalOpen: inMonth ? old.totalOpen - 1 : old.totalOpen,
         months: old.months.map(m => ({ ...m, items: removeId(m.items) })),
         noDate:  { ...old.noDate,  items: removeId(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeId(old.walkIns.items) },
@@ -405,9 +408,13 @@ export default function BookingsPage() {
       if (!old) return old;
       const idSet = new Set(ids);
       const removeIds = (items: PipelineItem[]) => items.filter(i => !idSet.has(i.id));
+      // Only count removals from month buckets toward totalOpen
+      const monthRemovals = old.months.reduce(
+        (n, m) => n + m.items.filter(i => idSet.has(i.id)).length, 0
+      );
       return {
         ...old,
-        totalOpen: old.totalOpen - ids.length,
+        totalOpen: old.totalOpen - monthRemovals,
         months: old.months.map(m => ({ ...m, items: removeIds(m.items) })),
         noDate:  { ...old.noDate,  items: removeIds(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeIds(old.walkIns.items) },
@@ -439,7 +446,7 @@ export default function BookingsPage() {
           <span className="text-3xl font-black tabular-nums text-white leading-none">
             {data ? data.totalOpen : <span className="inline-block w-10 h-7 rounded bg-white/5 animate-pulse" />}
           </span>
-          <span className="text-[11px] text-muted-foreground/40 mt-0.5">bookings pending</span>
+          <span className="text-[11px] text-muted-foreground/40 mt-0.5">with a collection date</span>
           <div className="absolute right-3 top-3 w-1.5 h-1.5 rounded-full bg-emerald-400" />
         </div>
 
@@ -542,7 +549,7 @@ export default function BookingsPage() {
       )}
 
       {/* Empty */}
-      {!isLoading && data && data.totalOpen === 0 && (
+      {!isLoading && data && data.totalOpen === 0 && data.walkIns.items.length === 0 && data.noDate.items.length === 0 && (
         <GlassCard className="p-12 text-center">
           <CalendarDays className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
           <p className="text-sm font-semibold text-white/60">No upcoming bookings</p>
