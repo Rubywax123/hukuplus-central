@@ -1224,10 +1224,10 @@ export async function runMigrations() {
     `);
 
     // ── 2026-05-01: Auto-dismiss pending bookings converted to live agreements ──
-    // If a customer already has a real loan agreement (form_type='agreement',
-    // status IN pending/active/completed), any leftover application/re-application
-    // rows for the same customer should be dismissed from the Bookings pipeline.
-    // e.g. Justin Paratema submitted two re-apps then was immediately converted.
+    // When a real loan agreement arrives for a customer, dismiss any open
+    // application/re-application that was submitted SHORTLY BEFORE it (within 30 days).
+    // IMPORTANT: Only match agreements created AFTER the application — do NOT dismiss
+    // re-applications just because the customer had a completed loan months ago.
     await client.query(`
       UPDATE agreements a
       SET dismissed = true
@@ -1239,6 +1239,8 @@ export async function runMigrations() {
             AND newer.form_type = 'agreement'
             AND newer.status IN ('pending', 'active', 'completed')
             AND newer.id != a.id
+            AND newer.created_at > a.created_at
+            AND newer.created_at < a.created_at + INTERVAL '30 days'
         );
     `);
 
@@ -1247,7 +1249,8 @@ export async function runMigrations() {
     // the X button had dismissed=true, but staff later used "Push to Bookings"
     // to set a disbursement_date without clearing the dismissed flag. This caused
     // them to remain invisible in the Bookings pipeline despite having a date set.
-    // Un-dismiss any re-application with a future (>= today) disbursement_date.
+    // Un-dismiss any re-application with a future (>= today) disbursement_date,
+    // UNLESS the customer was recently converted (new agreement within 30 days after).
     await client.query(`
       UPDATE agreements a
       SET dismissed = false
@@ -1256,13 +1259,41 @@ export async function runMigrations() {
         AND a.disbursement_date IS NOT NULL
         AND TRIM(a.disbursement_date) != ''
         AND a.disbursement_date::date >= CURRENT_DATE
-        -- Do NOT restore if the customer has already been converted to a live agreement
         AND NOT EXISTS (
           SELECT 1 FROM agreements live
           WHERE LOWER(live.customer_name) = LOWER(a.customer_name)
             AND live.form_type = 'agreement'
             AND live.status IN ('pending', 'active', 'completed')
             AND live.id != a.id
+            AND live.created_at > a.created_at
+            AND live.created_at < a.created_at + INTERVAL '30 days'
+        );
+    `);
+
+    // ── 2026-05-01: Repair incorrectly dismissed applications (old-loan false positive) ─
+    // The earlier version of the auto-dismiss migration had no time constraint, so
+    // it dismissed applications/re-applications for customers who had OLD completed
+    // loans — even when no new agreement had been created since the application.
+    // Restore these so April walk-ins and May re-applications reappear correctly.
+    await client.query(`
+      UPDATE agreements a
+      SET dismissed = false
+      WHERE a.dismissed = true
+        AND a.form_type IN ('application', 'reapplication')
+        AND NOT EXISTS (
+          SELECT 1 FROM agreements live
+          WHERE LOWER(TRIM(live.customer_name)) = LOWER(TRIM(a.customer_name))
+            AND live.form_type = 'agreement'
+            AND live.status IN ('pending', 'active', 'completed')
+            AND live.id != a.id
+            AND live.created_at > a.created_at
+            AND live.created_at < a.created_at + INTERVAL '30 days'
+        )
+        AND EXISTS (
+          SELECT 1 FROM agreements any_live
+          WHERE LOWER(TRIM(any_live.customer_name)) = LOWER(TRIM(a.customer_name))
+            AND any_live.form_type = 'agreement'
+            AND any_live.id != a.id
         );
     `);
 

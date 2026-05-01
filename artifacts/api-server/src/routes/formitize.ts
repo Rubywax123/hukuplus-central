@@ -1971,7 +1971,8 @@ router.post("/formitize/webhook", async (req, res) => {
          WHERE LOWER(customer_name) = LOWER($1)
            AND status IN ('application', 'reapplication')
            AND (dismissed IS NULL OR dismissed = false)
-           AND id != $2`,
+           AND id != $2
+           AND created_at > NOW() - INTERVAL '30 days'`,
         [customerName, agreement.id]
       );
       if ((autoDismissRes.rowCount ?? 0) > 0) {
