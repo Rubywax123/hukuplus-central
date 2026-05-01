@@ -1824,6 +1824,60 @@ router.post("/formitize/webhook", async (req, res) => {
   );
   const loanTenorMonths = loanTenorRaw ? (parseInt(loanTenorRaw, 10) || null) : null;
 
+  // ── Customer-level resubmission dedup (5-day window) ─────────────────────
+  // Formitize workflows sometimes re-submit the same form with a fresh jobId
+  // (e.g. when a form progresses through an approval stage). An application or
+  // re-application by the same customer for the same product within 5 days is
+  // treated as a variation of the same submission, NOT a new entry.
+  // We update the existing agreement's date if it changed, then return early.
+  if (["application", "reapplication"].includes(formType) && customerName) {
+    const resubCheck = await pool.query<{
+      id: number;
+      disbursement_date: string | null;
+      formitize_job_id: string | null;
+    }>(
+      `SELECT id, disbursement_date, formitize_job_id
+       FROM agreements
+       WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($1))
+         AND form_type = $2
+         AND loan_product = $3
+         AND (dismissed IS NULL OR dismissed = false)
+         AND created_at > NOW() - INTERVAL '5 days'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [customerName, formType, product]
+    );
+    if (resubCheck.rows.length > 0) {
+      const existing = resubCheck.rows[0];
+      // Update date and promote to the latest jobId so future exact-ID dedup works
+      const newDate  = disbursementDate ?? null;
+      const dateChanged = newDate && newDate !== existing.disbursement_date;
+      await pool.query(
+        `UPDATE agreements
+         SET disbursement_date = COALESCE($1, disbursement_date),
+             formitize_job_id  = COALESCE($2, formitize_job_id)
+         WHERE id = $3`,
+        [dateChanged ? newDate : null, jobId ?? null, existing.id]
+      );
+      // Also update the notification row to carry the newest jobId
+      await pool.query(
+        `UPDATE formitize_notifications
+         SET formitize_job_id = COALESCE($1, formitize_job_id)
+         WHERE id = (
+           SELECT id FROM formitize_notifications
+           WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($2))
+             AND task_type = $3 AND product = $4
+             AND created_at > NOW() - INTERVAL '5 days'
+           ORDER BY created_at DESC LIMIT 1
+         )`,
+        [jobId ?? null, customerName, formType, product]
+      );
+      console.log(`[formitize:webhook] Resubmission dedup — ${formType} for ${customerName} within 5 days (existing #${existing.id}) — ${dateChanged ? `date updated to ${newDate}` : "no date change"}`);
+      res.status(200).json({ ok: true, deduplicated: true, existingId: existing.id });
+      return;
+    }
+  }
+
   // ── Create agreement record ────────────────────────────────────────────────
   const isAgreement = formType === "agreement";
   const signingToken = crypto.randomBytes(32).toString("hex");

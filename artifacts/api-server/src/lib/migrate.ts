@@ -1188,6 +1188,41 @@ export async function runMigrations() {
         AND (form_type = 'application' OR form_type = 'unknown');
     `);
 
+    // ── 2026-05-01: Dedup resubmission agreements (5-day window) ──────────────
+    // Formitize workflows sometimes re-submit the same form with a fresh jobId.
+    // If the same customer+product+form_type has multiple open rows within 5 days,
+    // keep the most recent one (highest id) and dismiss the older duplicates.
+    await client.query(`
+      UPDATE agreements a
+      SET dismissed = true
+      WHERE a.status IN ('application', 'reapplication')
+        AND (a.dismissed IS NULL OR a.dismissed = false)
+        AND EXISTS (
+          SELECT 1 FROM agreements newer
+          WHERE LOWER(TRIM(newer.customer_name)) = LOWER(TRIM(a.customer_name))
+            AND newer.form_type = a.form_type
+            AND newer.loan_product = a.loan_product
+            AND newer.id > a.id
+            AND newer.created_at BETWEEN a.created_at AND a.created_at + INTERVAL '5 days'
+        );
+    `);
+    // Mark older duplicate notifications (same customer+type+product within 5 days)
+    // as actioned so they don't clutter the Activity 'New' feed.
+    await client.query(`
+      UPDATE formitize_notifications fn
+      SET status = 'actioned'
+      WHERE fn.status = 'new'
+        AND fn.task_type IN ('application', 'reapplication')
+        AND EXISTS (
+          SELECT 1 FROM formitize_notifications newer
+          WHERE LOWER(TRIM(newer.customer_name)) = LOWER(TRIM(fn.customer_name))
+            AND newer.task_type = fn.task_type
+            AND newer.product = fn.product
+            AND newer.id > fn.id
+            AND newer.created_at BETWEEN fn.created_at AND fn.created_at + INTERVAL '5 days'
+        );
+    `);
+
     // ── 2026-05-01: Auto-dismiss pending bookings converted to live agreements ──
     // If a customer already has a real loan agreement (form_type='agreement',
     // status IN pending/active/completed), any leftover application/re-application
