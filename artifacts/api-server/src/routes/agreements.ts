@@ -834,6 +834,35 @@ router.put("/agreements/:id/dismiss", async (req, res): Promise<void> => {
   }
 });
 
+// ─── PUT /agreements/:id/collection-date — set or clear the disbursement date ──
+router.put("/agreements/:id/collection-date", async (req, res): Promise<void> => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const { date } = req.body as { date?: string | null };
+  // Expect ISO "YYYY-MM-DD" or null/empty to clear
+  const newDate = date && date.trim() ? date.trim() : null;
+
+  const client2 = await pool.connect();
+  try {
+    const result = await client2.query(
+      "UPDATE agreements SET disbursement_date = $1 WHERE id = $2 RETURNING id, disbursement_date",
+      [newDate, id]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: "Agreement not found" });
+      return;
+    }
+    res.json({ success: true, id, disbursementDate: result.rows[0].disbursement_date });
+  } finally {
+    client2.release();
+  }
+});
+
 // ─── PUT /loan-register/:lrId/status — manually flip Loan Register status ─────
 router.put("/loan-register/:lrId/status", async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2, Zap, X, Trash2 } from "lucide-react";
+import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2, Zap, X, Trash2, CalendarClock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -301,12 +301,169 @@ function WalkInsSection({ items, onDismiss }: { items: PipelineItem[]; onDismiss
   );
 }
 
+// ─── Set-date modal ───────────────────────────────────────────────────────────
+
+function SetDateModal({ item, onClose, onSaved }: {
+  item: PipelineItem;
+  onClose: () => void;
+  onSaved: (id: number, date: string) => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(today);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    if (!date) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/agreements/${item.id}/collection-date`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      onSaved(item.id, date);
+      onClose();
+    } catch (e: any) {
+      setError(e.message ?? "Save failed");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="w-full max-w-sm bg-[#111827] border border-white/10 rounded-2xl shadow-2xl p-6 space-y-5"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-white">Set Collection Date</h3>
+            <p className="text-xs text-muted-foreground/60 mt-0.5 truncate">{item.customerName || "—"}</p>
+            {item.retailerName && (
+              <p className="text-[11px] text-sky-400/70 mt-0.5">{item.retailerName}</p>
+            )}
+          </div>
+          <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10 text-muted-foreground/40 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-widest">
+            Collection Date
+          </label>
+          <input
+            type="date"
+            value={date}
+            min={today}
+            onChange={e => setDate(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-teal-500/60 focus:ring-1 focus:ring-teal-500/30"
+          />
+        </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 rounded-xl text-sm text-muted-foreground/60 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !date}
+            className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
+          >
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarClock className="w-3.5 h-3.5" />}
+            {saving ? "Saving…" : "Set Date"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── No-date item row (with "Set date" button) ────────────────────────────────
+
+function NoDateItemRow({ item, onDismiss, onSetDate }: {
+  item: PipelineItem;
+  onDismiss: (id: number) => void;
+  onSetDate: (item: PipelineItem) => void;
+}) {
+  const isReApp = item.status === "reapplication";
+  const [dismissing, setDismissing] = useState(false);
+
+  const submitted = item.createdAt
+    ? new Date(item.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+    : null;
+
+  function handleDismiss(e: React.MouseEvent) {
+    e.stopPropagation();
+    setDismissing(true);
+    onDismiss(item.id);
+  }
+
+  return (
+    <div className="group flex items-center gap-3 py-2.5 last:pb-0">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white truncate leading-tight">{item.customerName || "—"}</p>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {item.retailerName && (
+            <span className="text-[10px] text-sky-400/80 font-medium truncate">{item.retailerName}</span>
+          )}
+          {item.branchName && (
+            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60">
+              <Store className="w-2.5 h-2.5 flex-shrink-0" />{item.branchName}
+            </span>
+          )}
+          {submitted && (
+            <span className="text-[10px] text-muted-foreground/40">Submitted {submitted}</span>
+          )}
+        </div>
+      </div>
+      {/* Type badge */}
+      <span className={`flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
+        isReApp
+          ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+          : "bg-sky-500/10 border-sky-500/20 text-sky-400"
+      }`}>
+        {isReApp ? <RefreshCw className="inline w-2.5 h-2.5 mr-0.5" /> : <UserPlus className="inline w-2.5 h-2.5 mr-0.5" />}
+        {isReApp ? "Re-App" : "New"}
+      </span>
+      {/* Set date button */}
+      <button
+        onClick={() => onSetDate(item)}
+        title="Set collection date"
+        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 hover:text-teal-300 border border-teal-500/20 transition-colors"
+      >
+        <CalendarClock className="w-3 h-3" />
+        <span className="hidden sm:inline">Set date</span>
+      </button>
+      {/* Dismiss × */}
+      <button
+        onClick={handleDismiss}
+        disabled={dismissing}
+        title="Dismiss"
+        className="flex-shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-500/20 text-muted-foreground/40 hover:text-red-400 disabled:opacity-30"
+      >
+        {dismissing ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+      </button>
+    </div>
+  );
+}
+
 // ─── No-date section ──────────────────────────────────────────────────────────
 
-function NoDatSection({ items, onDismiss, onDismissAll }: {
+function NoDatSection({ items, onDismiss, onDismissAll, onSetDate }: {
   items: PipelineItem[];
   onDismiss: (id: number) => void;
   onDismissAll: (ids: number[]) => void;
+  onSetDate: (item: PipelineItem) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [clearingAll, setClearingAll] = useState(false);
@@ -355,12 +512,7 @@ function NoDatSection({ items, onDismiss, onDismissAll }: {
           >
             <div className="px-5 pb-4 divide-y divide-white/5">
               {items.map(item => (
-                <div key={item.id} className="py-2.5 last:pb-0">
-                  <ItemRow item={item} onDismiss={onDismiss} />
-                  <p className="text-[10px] text-muted-foreground/40 -mt-1 pl-0">
-                    Submitted {new Date(item.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                  </p>
-                </div>
+                <NoDateItemRow key={item.id} item={item} onDismiss={onDismiss} onSetDate={onSetDate} />
               ))}
             </div>
           </motion.div>
@@ -375,6 +527,7 @@ function NoDatSection({ items, onDismiss, onDismissAll }: {
 export default function BookingsPage() {
   const queryClient = useQueryClient();
   const { data, isLoading, refetch, isFetching } = usePipeline();
+  const [setDateTarget, setSetDateTarget] = useState<PipelineItem | null>(null);
 
   const now = new Date();
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -430,8 +583,22 @@ export default function BookingsPage() {
     )).catch(() => refetch());
   }, [queryClient, refetch]);
 
+  // After a date is saved we simply refetch — the item will move from noDate
+  // into the correct month bucket automatically.
+  const handleDateSaved = useCallback((_id: number, _date: string) => {
+    refetch();
+  }, [refetch]);
+
   return (
     <div className="pb-10">
+      {setDateTarget && (
+        <SetDateModal
+          item={setDateTarget}
+          onClose={() => setSetDateTarget(null)}
+          onSaved={handleDateSaved}
+        />
+      )}
+
       <PageHeader
         title="Bookings"
         description="Upcoming stock collection dates — applications not yet converted to agreements."
@@ -577,7 +744,7 @@ export default function BookingsPage() {
               onDismiss={handleDismiss}
             />
           ))}
-          <NoDatSection items={data.noDate.items} onDismiss={handleDismiss} onDismissAll={handleDismissAll} />
+          <NoDatSection items={data.noDate.items} onDismiss={handleDismiss} onDismissAll={handleDismissAll} onSetDate={setSetDateTarget} />
         </div>
       )}
     </div>

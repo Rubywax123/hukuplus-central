@@ -602,12 +602,15 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     SELECT
       a.id,
       a.form_type,
+      -- Use COALESCE(NULLIF(form_type,'unknown'), status) as the canonical type signal.
+      -- Older records have form_type='reapplication' but status='application', so
+      -- form_type must win or we read the wrong form fields.
       -- Customer name: DB column first; fallback is form-specific
       --   New App   : formText_6 = Full Name and Surname
       --   Re-App    : formText_1 = Customer Name
       COALESCE(
         NULLIF(a.customer_name, ''),
-        CASE a.status
+        CASE COALESCE(NULLIF(a.form_type, 'unknown'), a.status)
           WHEN 'application'   THEN a.form_data->>'formtext_6'
           WHEN 'reapplication' THEN a.form_data->>'formtext_1'
         END
@@ -620,7 +623,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       --   New App : formRadio_3   Re-App : formRadio_4
       COALESCE(
         r.name,
-        CASE a.status
+        CASE COALESCE(NULLIF(a.form_type, 'unknown'), a.status)
           WHEN 'application'   THEN a.form_data->>'formradio_3'
           WHEN 'reapplication' THEN a.form_data->>'formradio_4'
         END
@@ -629,7 +632,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       --   New App : formText_1   Re-App : formText_3
       COALESCE(
         b.name,
-        CASE a.status
+        CASE COALESCE(NULLIF(a.form_type, 'unknown'), a.status)
           WHEN 'application'   THEN a.form_data->>'formtext_1'
           WHEN 'reapplication' THEN a.form_data->>'formtext_3'
         END
@@ -638,7 +641,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       --   New App : formDate_2   Re-App : formDate_3
       COALESCE(
         a.disbursement_date,
-        CASE a.status
+        CASE COALESCE(NULLIF(a.form_type, 'unknown'), a.status)
           WHEN 'application'   THEN a.form_data->>'formdate_2'
           WHEN 'reapplication' THEN a.form_data->>'formdate_3'
         END
@@ -849,11 +852,12 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     const mk = toMonthKey(ca);
     if (!wiByMonth.has(mk)) continue; // outside window
 
-    // Determine collection date (same COALESCE logic as main query)
+    // Determine collection date — use form_type as canonical signal (same fix as main query)
+    const effectiveType = (r.form_type && r.form_type !== "unknown") ? r.form_type : r.status;
     const rawDate =
       r.disbursement_date ||
-      (r.status === "application"   ? r.fd2 : null) ||
-      (r.status === "reapplication" ? r.fd3 : null);
+      (effectiveType === "application"   ? r.fd2 : null) ||
+      (effectiveType === "reapplication" ? r.fd3 : null);
     const dd = parseAnyDate(rawDate);
     if (!dd) continue;
 
