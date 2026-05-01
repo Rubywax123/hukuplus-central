@@ -106,6 +106,12 @@ function ItemRow({ item, onDismiss }: { item: PipelineItem; onDismiss: (id: numb
           )}
         </div>
       </div>
+      {/* Walk-in badge (when shown inside a month section) */}
+      {item.walkIn && (
+        <span className="flex-shrink-0 flex items-center gap-0.5 text-[9px] font-semibold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded-full">
+          <Zap className="w-2.5 h-2.5" />Walk-in
+        </span>
+      )}
       {/* Type badge */}
       <span className={`flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
         isReApp
@@ -168,13 +174,14 @@ function DayGroup({ dateIso, items, onDismiss }: { dateIso: string; items: Pipel
 // ─── Month accordion ──────────────────────────────────────────────────────────
 
 function MonthSection({
-  monthKey, label, items, defaultOpen, accent, onDismiss,
+  monthKey, label, items, defaultOpen, accent, isPast, onDismiss,
 }: {
   monthKey: string;
   label: string;
   items: PipelineItem[];
   defaultOpen: boolean;
   accent: string;
+  isPast?: boolean;
   onDismiss: (id: number) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -182,26 +189,35 @@ function MonthSection({
   const sortedDays = [...dayGroups.keys()].sort();
   const newCount = items.filter(i => i.status === "application").length;
   const reCount  = items.filter(i => i.status === "reapplication").length;
+  const walkInCount = items.filter(i => i.walkIn).length;
 
   return (
-    <GlassCard className="p-0 overflow-hidden">
+    <GlassCard className={`p-0 overflow-hidden ${isPast ? "opacity-80 border-white/5" : ""}`}>
       {/* Header */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/5 transition-colors text-left"
       >
         <div className="flex items-center gap-3">
-          <CalendarDays className={`w-4 h-4 ${accent}`} />
-          <span className="text-base font-bold text-white">{label}</span>
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white/10 ${accent}`}>
+          <CalendarDays className={`w-4 h-4 ${isPast ? "text-muted-foreground/40" : accent}`} />
+          <span className={`text-base font-bold ${isPast ? "text-white/60" : "text-white"}`}>{label}</span>
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white/10 ${isPast ? "text-muted-foreground/50" : accent}`}>
             {items.length} booking{items.length !== 1 ? "s" : ""}
           </span>
+          {isPast && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-muted-foreground/40 font-medium">Past</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-3">
-            {newCount > 0 && (
+            {walkInCount > 0 && (
+              <span className="text-xs text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded-full">
+                <Zap className="inline w-2.5 h-2.5 mr-0.5" />{walkInCount} walk-in{walkInCount !== 1 ? "s" : ""}
+              </span>
+            )}
+            {newCount - walkInCount > 0 && (
               <span className="text-xs text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
-                {newCount} new
+                {newCount - walkInCount} new
               </span>
             )}
             {reCount > 0 && (
@@ -211,7 +227,7 @@ function MonthSection({
             )}
           </div>
           {open
-            ? <ChevronUp className={`w-4 h-4 ${accent}`} />
+            ? <ChevronUp className={`w-4 h-4 ${isPast ? "text-muted-foreground/30" : accent}`} />
             : <ChevronDown className={`w-4 h-4 text-muted-foreground/40`} />
           }
         </div>
@@ -533,16 +549,18 @@ export default function BookingsPage() {
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   // Optimistically remove an item from the cache, then call the API.
-  // Only decrement totalOpen if the item is in a month bucket (dated).
-  // Walk-ins and no-date entries are NOT counted in totalOpen.
+  // Decrement totalOpen when the item is in a month bucket or in today's walk-ins section.
+  // No-date entries are not counted in totalOpen.
   const handleDismiss = useCallback((id: number) => {
     queryClient.setQueryData<PipelineData>(["disbursement-pipeline"], old => {
       if (!old) return old;
       const removeId = (items: PipelineItem[]) => items.filter(i => i.id !== id);
-      const inMonth = old.months.some(m => m.items.some(i => i.id === id));
+      // totalOpen now covers month buckets (incl. past walk-ins) + today's walkIns section
+      const inMonth  = old.months.some(m => m.items.some(i => i.id === id));
+      const inWalkIn = old.walkIns.items.some(i => i.id === id);
       return {
         ...old,
-        totalOpen: inMonth ? old.totalOpen - 1 : old.totalOpen,
+        totalOpen: (inMonth || inWalkIn) ? old.totalOpen - 1 : old.totalOpen,
         months: old.months.map(m => ({ ...m, items: removeId(m.items) })),
         noDate:  { ...old.noDate,  items: removeId(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeId(old.walkIns.items) },
@@ -613,7 +631,7 @@ export default function BookingsPage() {
           <span className="text-3xl font-black tabular-nums text-white leading-none">
             {data ? data.totalOpen : <span className="inline-block w-10 h-7 rounded bg-white/5 animate-pulse" />}
           </span>
-          <span className="text-[11px] text-muted-foreground/40 mt-0.5">with a collection date</span>
+          <span className="text-[11px] text-muted-foreground/40 mt-0.5">dated, not yet converted</span>
           <div className="absolute right-3 top-3 w-1.5 h-1.5 rounded-full bg-emerald-400" />
         </div>
 
@@ -727,26 +745,43 @@ export default function BookingsPage() {
         </GlassCard>
       )}
 
-      {/* Walk-ins — shown first, always expanded */}
+      {/* Walk-ins — only truly immediate (today/tomorrow), shown first */}
       {!isLoading && data && <WalkInsSection items={data.walkIns.items} onDismiss={handleDismiss} />}
 
-      {/* Month sections */}
-      {!isLoading && data && (
-        <div className="space-y-4 mt-4">
-          {data.months.map((month, idx) => (
-            <MonthSection
-              key={month.key}
-              monthKey={month.key}
-              label={month.label}
-              items={month.items}
-              defaultOpen={idx === 0}
-              accent={month.key === thisMonthKey ? "text-teal-400" : "text-sky-400"}
-              onDismiss={handleDismiss}
-            />
-          ))}
-          <NoDatSection items={data.noDate.items} onDismiss={handleDismiss} onDismissAll={handleDismissAll} onSetDate={setSetDateTarget} />
-        </div>
-      )}
+      {/* Month sections — future first, then past */}
+      {!isLoading && data && (() => {
+        const futureMonths = data.months.filter(m => m.key >= thisMonthKey);
+        const pastMonths   = data.months.filter(m => m.key <  thisMonthKey).slice().reverse();
+        return (
+          <div className="space-y-4 mt-4">
+            {futureMonths.map((month, idx) => (
+              <MonthSection
+                key={month.key}
+                monthKey={month.key}
+                label={month.label}
+                items={month.items}
+                defaultOpen={idx === 0}
+                isPast={false}
+                accent={month.key === thisMonthKey ? "text-teal-400" : "text-sky-400"}
+                onDismiss={handleDismiss}
+              />
+            ))}
+            {pastMonths.map(month => (
+              <MonthSection
+                key={month.key}
+                monthKey={month.key}
+                label={month.label}
+                items={month.items}
+                defaultOpen={false}
+                isPast={true}
+                accent="text-muted-foreground/50"
+                onDismiss={handleDismiss}
+              />
+            ))}
+            <NoDatSection items={data.noDate.items} onDismiss={handleDismiss} onDismissAll={handleDismissAll} onSetDate={setSetDateTarget} />
+          </div>
+        );
+      })()}
     </div>
   );
 }

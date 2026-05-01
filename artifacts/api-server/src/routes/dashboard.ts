@@ -728,15 +728,25 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   }
 
   const now = new Date();
-  // Start of today — exclude items whose disbursement date has already passed
+  // Start of today
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // Tomorrow start — used to decide if a walk-in is "immediate" (today/tomorrow)
+  const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   // "No date" cutoff: only show applications created in the last 30 days
   const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+  // Past walk-in cutoff: include walk-ins up to 60 days old
+  const sixtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 60);
 
-  // Buckets: map of "YYYY-MM" → items[], plus noDate and walkIns
+  // Buckets: map of "YYYY-MM" → items[], plus noDate and walkIns (today/tomorrow only)
   const monthBuckets = new Map<string, PipelineItem[]>();
   const noDateItems: PipelineItem[] = [];
-  const walkInItems: PipelineItem[] = [];
+  const walkInItems: PipelineItem[] = []; // only truly immediate (today/tomorrow)
+
+  function addToMonthBucket(item: PipelineItem, disbDate: Date) {
+    const key = `${disbDate.getFullYear()}-${String(disbDate.getMonth() + 1).padStart(2, "0")}`;
+    if (!monthBuckets.has(key)) monthBuckets.set(key, []);
+    monthBuckets.get(key)!.push(item);
+  }
 
   for (const row of rows.rows) {
     const disbDate  = getDisbDate(row);
@@ -764,9 +774,15 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       walkIn,
     };
 
-    // Walk-ins get their own section regardless of date
-    if (walkIn) {
-      walkInItems.push(item);
+    if (walkIn && disbDate) {
+      // Today's/tomorrow's walk-ins → immediate top section
+      if (disbDate >= todayStart) {
+        walkInItems.push(item);
+      } else if (disbDate >= sixtyDaysAgo) {
+        // Past walk-ins (e.g. April) → go into their month bucket so they count
+        // as open and staff can dismiss the ones already handled
+        addToMonthBucket(item, disbDate);
+      }
       continue;
     }
 
@@ -774,12 +790,10 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       // Only include recent no-date applications
       if (createdAt >= thirtyDaysAgo) noDateItems.push(item);
     } else if (disbDate >= todayStart) {
-      // Forward-only: exclude past dates
-      const key = `${disbDate.getFullYear()}-${String(disbDate.getMonth() + 1).padStart(2, "0")}`;
-      if (!monthBuckets.has(key)) monthBuckets.set(key, []);
-      monthBuckets.get(key)!.push(item);
+      // Future dated non-walk-in
+      addToMonthBucket(item, disbDate);
     }
-    // else: disbursement date is in the past → silently excluded
+    // Past-dated non-walk-in → silently excluded (their date passed without a walk-in same day)
   }
 
   // Sort buckets chronologically and sort items within each bucket by date
@@ -801,10 +815,10 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   // Walk-ins sorted most-recent first (newest submission at top)
   walkInItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  // totalOpen = only applications with a real scheduled date (month buckets).
-  // Walk-ins are immediate (same-day) and "no date" entries are unscheduled applications —
-  // neither is a genuine future booking, so they are tracked separately, not in this count.
-  const totalOpen = months.reduce((s, m) => s + m.items.length, 0);
+  // totalOpen = all dated entries (month buckets) + today's immediate walk-ins.
+  // Past walk-ins (e.g. April) are now in their month buckets.
+  // "No date" entries are unscheduled and tracked separately, not in this count.
+  const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + walkInItems.length;
 
   // ── Historical walk-in monthly counts (last 3 calendar months + current) ────
   // Pull all application/re-application forms from the last 4 months and
