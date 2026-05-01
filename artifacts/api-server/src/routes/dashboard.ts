@@ -800,10 +800,77 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
 
   const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + noDateItems.length + walkInItems.length;
 
+  // ── Historical walk-in monthly counts (last 3 calendar months + current) ────
+  // Pull all application/re-application forms from the last 4 months and
+  // classify walk-ins in JS (same 0-1 day window as the live list above).
+  const historicalRows = await pool.query<{
+    id: number;
+    created_at: string;
+    disbursement_date: string | null;
+    fd2: string | null;
+    fd3: string | null;
+    status: string;
+    form_type: string | null;
+  }>(`
+    SELECT id, created_at, disbursement_date,
+           form_data->>'formdate_2' AS fd2,
+           form_data->>'formdate_3' AS fd3,
+           status, form_type
+    FROM agreements
+    WHERE status IN ('application','reapplication')
+      AND (form_type IS NULL OR form_type != 'unknown')
+      AND (dismissed IS NULL OR dismissed = false)
+      AND created_at >= NOW() - INTERVAL '4 months'
+  `);
+
+  // Month key helper
+  function toMonthKey(d: Date) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+  function fmtShortMonth(key: string) {
+    const [y, m] = key.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleString("en-US", { month: "short" });
+  }
+
+  // Build 3-month window: 2 months ago, last month, current month
+  const windowKeys: string[] = [];
+  for (let i = 2; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    windowKeys.push(toMonthKey(d));
+  }
+
+  const wiByMonth = new Map<string, number>(windowKeys.map(k => [k, 0]));
+
+  for (const r of historicalRows.rows) {
+    const ca = new Date(r.created_at);
+    const mk = toMonthKey(ca);
+    if (!wiByMonth.has(mk)) continue; // outside window
+
+    // Determine collection date (same COALESCE logic as main query)
+    const rawDate =
+      r.disbursement_date ||
+      (r.status === "application"   ? r.fd2 : null) ||
+      (r.status === "reapplication" ? r.fd3 : null);
+    const dd = parseAnyDate(rawDate);
+    if (!dd) continue;
+
+    if (isWalkIn(dd, ca)) {
+      wiByMonth.set(mk, (wiByMonth.get(mk) ?? 0) + 1);
+    }
+  }
+
+  const walkInMonthly = windowKeys.map(key => ({
+    key,
+    label: fmtShortMonth(key),
+    count: wiByMonth.get(key) ?? 0,
+    isCurrent: key === toMonthKey(now),
+  }));
+
   res.json({
     months,
     noDate:  { label: "Date Not Yet Set", items: noDateItems },
     walkIns: { label: "Walk-ins", items: walkInItems },
+    walkInMonthly,
     totalOpen,
   });
 });

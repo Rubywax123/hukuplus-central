@@ -29,10 +29,18 @@ interface PipelineMonth {
   items: PipelineItem[];
 }
 
+interface WalkInMonth {
+  key: string;
+  label: string;
+  count: number;
+  isCurrent: boolean;
+}
+
 interface PipelineData {
   months: PipelineMonth[];
   noDate: { label: string; items: PipelineItem[] };
   walkIns: { label: string; items: PipelineItem[] };
+  walkInMonthly: WalkInMonth[];
   totalOpen: number;
 }
 
@@ -370,41 +378,104 @@ export default function BookingsPage() {
         description="Upcoming stock collection dates — applications not yet converted to agreements."
       />
 
-      {/* Summary bar */}
-      <div className="flex items-center gap-4 mb-6 flex-wrap">
-        {data && (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-white tabular-nums">{data.totalOpen}</span>
-              <span className="text-sm text-muted-foreground/60">open</span>
-            </div>
-            {data.walkIns.items.length > 0 && (
-              <>
-                <div className="h-4 w-px bg-white/10" />
-                <div className="flex items-center gap-1.5">
-                  <Zap className="w-3 h-3 text-orange-400" />
-                  <span className="text-sm font-bold tabular-nums text-orange-300">{data.walkIns.items.length}</span>
-                  <span className="text-xs text-muted-foreground/50">walk-in{data.walkIns.items.length !== 1 ? "s" : ""}</span>
-                </div>
-              </>
-            )}
-            <div className="h-4 w-px bg-white/10" />
-            {data.months.map(m => (
-              <div key={m.key} className="flex items-center gap-1.5">
-                <span className={`text-xs font-semibold ${m.key === thisMonthKey ? "text-teal-400" : "text-sky-400"}`}>
-                  {m.label.split(" ")[0]}
-                </span>
-                <span className={`text-sm font-bold tabular-nums ${m.key === thisMonthKey ? "text-teal-300" : "text-sky-300"}`}>
-                  {m.items.length}
-                </span>
+      {/* ── Stat boxes ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">
+
+        {/* Total open */}
+        <div className="relative overflow-hidden rounded-xl border border-white/8 bg-white/[0.04] px-4 py-3.5 flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">Open</span>
+          <span className="text-3xl font-black tabular-nums text-white leading-none">
+            {data ? data.totalOpen : <span className="inline-block w-10 h-7 rounded bg-white/5 animate-pulse" />}
+          </span>
+          <span className="text-[11px] text-muted-foreground/40 mt-0.5">bookings pending</span>
+          <div className="absolute right-3 top-3 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        </div>
+
+        {/* Walk-ins with monthly comparison */}
+        <div className="relative overflow-hidden rounded-xl border border-orange-500/25 bg-orange-500/[0.06] px-4 py-3.5 flex flex-col gap-1 col-span-1">
+          <div className="flex items-center gap-1.5">
+            <Zap className="w-3 h-3 text-orange-400" />
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-orange-400/70">Walk-ins</span>
+          </div>
+          <span className="text-3xl font-black tabular-nums text-orange-300 leading-none">
+            {data ? data.walkIns.items.length : <span className="inline-block w-8 h-7 rounded bg-white/5 animate-pulse" />}
+          </span>
+          {/* 3-month bar */}
+          {data && data.walkInMonthly.length > 0 && (() => {
+            const max = Math.max(...data.walkInMonthly.map(m => m.count), 1);
+            return (
+              <div className="mt-1.5 flex items-end gap-1.5">
+                {data.walkInMonthly.map(m => (
+                  <div key={m.key} className="flex flex-col items-center gap-0.5 flex-1">
+                    <div
+                      className={`w-full rounded-sm transition-all ${m.isCurrent ? "bg-orange-400" : "bg-orange-400/30"}`}
+                      style={{ height: `${Math.max(4, Math.round((m.count / max) * 20))}px` }}
+                    />
+                    <span className={`text-[9px] tabular-nums font-bold ${m.isCurrent ? "text-orange-300" : "text-orange-400/40"}`}>
+                      {m.count}
+                    </span>
+                    <span className={`text-[8px] ${m.isCurrent ? "text-orange-400/70" : "text-muted-foreground/30"}`}>
+                      {m.label}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </>
-        )}
+            );
+          })()}
+        </div>
+
+        {/* One box per upcoming month */}
+        {data && data.months.map(m => {
+          const isCurrent = m.key === thisMonthKey;
+          const newCount  = m.items.filter(i => i.status === "application").length;
+          const reCount   = m.items.filter(i => i.status === "reapplication").length;
+          return (
+            <div
+              key={m.key}
+              className={`relative overflow-hidden rounded-xl border px-4 py-3.5 flex flex-col gap-1 ${
+                isCurrent
+                  ? "border-teal-500/30 bg-teal-500/[0.07]"
+                  : "border-sky-500/20 bg-sky-500/[0.05]"
+              }`}
+            >
+              <span className={`text-[10px] font-semibold uppercase tracking-widest ${isCurrent ? "text-teal-400/70" : "text-sky-400/60"}`}>
+                {m.label.split(" ")[0]}
+              </span>
+              <span className={`text-3xl font-black tabular-nums leading-none ${isCurrent ? "text-teal-200" : "text-sky-200"}`}>
+                {m.items.length}
+              </span>
+              <div className="flex items-center gap-2 mt-0.5">
+                {newCount > 0 && (
+                  <span className="text-[9px] text-sky-400/60 font-medium">{newCount} new</span>
+                )}
+                {reCount > 0 && (
+                  <span className="text-[9px] text-amber-400/60 font-medium">{reCount} re-app</span>
+                )}
+              </div>
+              {isCurrent && <div className="absolute right-3 top-3 w-1.5 h-1.5 rounded-full bg-teal-400" />}
+            </div>
+          );
+        })}
+
+        {/* Refresh — bottom-right of the grid row on wider screens */}
+        <div className="hidden lg:flex items-end justify-end pb-1">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground/40 hover:text-white transition-colors"
+          >
+            <RefreshCw className={`w-3 h-3 ${isFetching ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile refresh */}
+      <div className="flex lg:hidden justify-end mb-4">
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground/50 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground/40 hover:text-white transition-colors"
         >
           <RefreshCw className={`w-3 h-3 ${isFetching ? "animate-spin" : ""}`} />
           Refresh
