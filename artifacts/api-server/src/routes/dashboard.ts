@@ -654,7 +654,6 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     LEFT JOIN retailers r ON r.id = a.retailer_id
     LEFT JOIN branches  b ON b.id = a.branch_id
     WHERE a.status IN ('application', 'reapplication')
-      AND (a.form_type IS NULL OR a.form_type != 'unknown')
       AND (a.dismissed IS NULL OR a.dismissed = false)
     ORDER BY a.created_at DESC
     LIMIT 1000
@@ -849,7 +848,6 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
            status, form_type
     FROM agreements
     WHERE status IN ('application','reapplication')
-      AND (form_type IS NULL OR form_type != 'unknown')
       AND (dismissed IS NULL OR dismissed = false)
       AND created_at >= NOW() - INTERVAL '4 months'
   `);
