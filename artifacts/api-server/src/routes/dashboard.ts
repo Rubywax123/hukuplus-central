@@ -641,22 +641,31 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
         END
       )                                                                            AS branch_name,
       -- Collection date: stored disbursement_date takes priority (set during webhook).
-      -- Falls back to form_data JSON with exhaustive key search — we try every
-      -- field ID and human-readable label that any version of the webhook may have
-      -- stored, for both New Customer Application (formDate_2) and Re-Application
-      -- (formDate_3) forms.  This makes old and new records equally visible.
+      -- Falls back to form_data using TYPE-SPECIFIC field IDs so the two forms
+      -- don't bleed into each other:
+      --   New Customer Application → formdate_2  (formdate_3 is a different field)
+      --   Re-Application           → formdate_3  (formdate_2 is a different field)
+      -- Human-readable label fallbacks are tried last within each branch.
       COALESCE(
         NULLIF(TRIM(a.disbursement_date), ''),
-        a.form_data->>'formdate_3',
-        a.form_data->>'formdate_2',
-        a.form_data->>'collection date',
-        a.form_data->>'collectiondate',
-        a.form_data->>'expected date of stock collection',
-        a.form_data->>'stockcollectiondate',
-        a.form_data->>'expectedcollectiondate',
-        a.form_data->>'disbursement date',
-        a.form_data->>'disbursementdate',
-        a.form_data->>'applieddisbursement'
+        CASE COALESCE(NULLIF(a.form_type, 'unknown'), a.status)
+          WHEN 'application' THEN COALESCE(
+            a.form_data->>'formdate_2',
+            a.form_data->>'collection date',
+            a.form_data->>'collectiondate',
+            a.form_data->>'expected date of stock collection',
+            a.form_data->>'stockcollectiondate',
+            a.form_data->>'expectedcollectiondate'
+          )
+          WHEN 'reapplication' THEN COALESCE(
+            a.form_data->>'formdate_3',
+            a.form_data->>'collection date',
+            a.form_data->>'collectiondate',
+            a.form_data->>'expected date of stock collection',
+            a.form_data->>'stockcollectiondate',
+            a.form_data->>'expectedcollectiondate'
+          )
+        END
       )                                                                            AS collection_date,
       a.created_at
     FROM agreements a
@@ -857,20 +866,27 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     form_type: string | null;
   }>(`
     SELECT id, created_at,
-           -- Same exhaustive COALESCE as the main pipeline query so walk-in counts
-           -- pick up dates from any field name the webhook might have stored.
+           -- Type-specific COALESCE (mirrors the main pipeline query exactly).
            COALESCE(
              NULLIF(TRIM(disbursement_date), ''),
-             form_data->>'formdate_3',
-             form_data->>'formdate_2',
-             form_data->>'collection date',
-             form_data->>'collectiondate',
-             form_data->>'expected date of stock collection',
-             form_data->>'stockcollectiondate',
-             form_data->>'expectedcollectiondate',
-             form_data->>'disbursement date',
-             form_data->>'disbursementdate',
-             form_data->>'applieddisbursement'
+             CASE COALESCE(NULLIF(form_type, 'unknown'), status)
+               WHEN 'application' THEN COALESCE(
+                 form_data->>'formdate_2',
+                 form_data->>'collection date',
+                 form_data->>'collectiondate',
+                 form_data->>'expected date of stock collection',
+                 form_data->>'stockcollectiondate',
+                 form_data->>'expectedcollectiondate'
+               )
+               WHEN 'reapplication' THEN COALESCE(
+                 form_data->>'formdate_3',
+                 form_data->>'collection date',
+                 form_data->>'collectiondate',
+                 form_data->>'expected date of stock collection',
+                 form_data->>'stockcollectiondate',
+                 form_data->>'expectedcollectiondate'
+               )
+             END
            ) AS collection_date,
            status, form_type
     FROM agreements

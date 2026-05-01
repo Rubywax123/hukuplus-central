@@ -2122,19 +2122,28 @@ router.get("/formitize/notifications", requireStaffAuth, requireSuperAdmin, asyn
          a.facility_fee_amount,
          a.interest_amount,
          a.xero_invoice_id,
-         -- Resolved collection date (same exhaustive COALESCE as Bookings pipeline)
+         -- Resolved collection date — type-specific field IDs to avoid cross-form
+         -- contamination (new app uses formdate_2; re-app uses formdate_3).
          COALESCE(
            NULLIF(TRIM(a.disbursement_date), ''),
-           a.form_data->>'formdate_3',
-           a.form_data->>'formdate_2',
-           a.form_data->>'collection date',
-           a.form_data->>'collectiondate',
-           a.form_data->>'expected date of stock collection',
-           a.form_data->>'stockcollectiondate',
-           a.form_data->>'expectedcollectiondate',
-           a.form_data->>'disbursement date',
-           a.form_data->>'disbursementdate',
-           a.form_data->>'applieddisbursement'
+           CASE COALESCE(NULLIF(a.form_type, 'unknown'), fn.task_type)
+             WHEN 'application' THEN COALESCE(
+               a.form_data->>'formdate_2',
+               a.form_data->>'collection date',
+               a.form_data->>'collectiondate',
+               a.form_data->>'expected date of stock collection',
+               a.form_data->>'stockcollectiondate',
+               a.form_data->>'expectedcollectiondate'
+             )
+             WHEN 'reapplication' THEN COALESCE(
+               a.form_data->>'formdate_3',
+               a.form_data->>'collection date',
+               a.form_data->>'collectiondate',
+               a.form_data->>'expected date of stock collection',
+               a.form_data->>'stockcollectiondate',
+               a.form_data->>'expectedcollectiondate'
+             )
+           END
          )                      AS resolved_collection_date,
          -- Bookings pipeline status (only meaningful for application/reapplication)
          CASE
@@ -2142,16 +2151,24 @@ router.get("/formitize/notifications", requireStaffAuth, requireSuperAdmin, asyn
            WHEN a.id IS NULL THEN 'no_agreement'
            WHEN COALESCE(
              NULLIF(TRIM(a.disbursement_date), ''),
-             a.form_data->>'formdate_3',
-             a.form_data->>'formdate_2',
-             a.form_data->>'collection date',
-             a.form_data->>'collectiondate',
-             a.form_data->>'expected date of stock collection',
-             a.form_data->>'stockcollectiondate',
-             a.form_data->>'expectedcollectiondate',
-             a.form_data->>'disbursement date',
-             a.form_data->>'disbursementdate',
-             a.form_data->>'applieddisbursement'
+             CASE COALESCE(NULLIF(a.form_type, 'unknown'), fn.task_type)
+               WHEN 'application' THEN COALESCE(
+                 a.form_data->>'formdate_2',
+                 a.form_data->>'collection date',
+                 a.form_data->>'collectiondate',
+                 a.form_data->>'expected date of stock collection',
+                 a.form_data->>'stockcollectiondate',
+                 a.form_data->>'expectedcollectiondate'
+               )
+               WHEN 'reapplication' THEN COALESCE(
+                 a.form_data->>'formdate_3',
+                 a.form_data->>'collection date',
+                 a.form_data->>'collectiondate',
+                 a.form_data->>'expected date of stock collection',
+                 a.form_data->>'stockcollectiondate',
+                 a.form_data->>'expectedcollectiondate'
+               )
+             END
            ) IS NOT NULL THEN 'booked'
            ELSE 'no_date'
          END                    AS booking_status
