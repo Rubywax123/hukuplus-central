@@ -603,7 +603,8 @@ export default function BookingsPage() {
       return {
         ...old,
         totalOpen: (inActiveMonth || inWalkIn) ? old.totalOpen - 1 : old.totalOpen,
-        months: old.months.map(m => ({ ...m, items: removeId(m.items) })),
+        // Filter out month buckets that become empty after dismissal
+        months: old.months.map(m => ({ ...m, items: removeId(m.items) })).filter(m => m.items.length > 0),
         noDate:  { ...old.noDate,  items: removeId(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeId(old.walkIns.items) },
       };
@@ -629,7 +630,7 @@ export default function BookingsPage() {
       return {
         ...old,
         totalOpen: old.totalOpen - monthRemovals - walkInRemovals,
-        months: old.months.map(m => ({ ...m, items: removeIds(m.items) })),
+        months: old.months.map(m => ({ ...m, items: removeIds(m.items) })).filter(m => m.items.length > 0),
         noDate:  { ...old.noDate,  items: removeIds(old.noDate.items)  },
         walkIns: { ...old.walkIns, items: removeIds(old.walkIns.items) },
       };
@@ -734,8 +735,8 @@ export default function BookingsPage() {
           })()}
         </div>
 
-        {/* One box per current / future month only — past months are analysis-only */}
-        {data && data.months.filter(m => m.key >= thisMonthKey).map(m => {
+        {/* One box per current / future month only — past months are analysis-only; skip empty months */}
+        {data && data.months.filter(m => m.key >= thisMonthKey && m.items.length > 0).map(m => {
           const isCurrent = m.key === thisMonthKey;
           const newCount  = m.items.filter(i => i.status === "application").length;
           const reCount   = m.items.filter(i => i.status === "reapplication").length;
@@ -816,8 +817,9 @@ export default function BookingsPage() {
 
       {/* Month sections — future first, then past */}
       {!isLoading && data && (() => {
-        const futureMonths = data.months.filter(m => m.key >= thisMonthKey);
-        const pastMonths   = data.months.filter(m => m.key <  thisMonthKey).slice().reverse();
+        // Never render an empty month bucket — filter at the render boundary too
+        const futureMonths = data.months.filter(m => m.key >= thisMonthKey && m.items.length > 0);
+        const pastMonths   = data.months.filter(m => m.key <  thisMonthKey && m.items.length > 0).slice().reverse();
         return (
           <div ref={pipelineListRef} className="space-y-4 mt-4">
             {futureMonths.map((month, idx) => (
