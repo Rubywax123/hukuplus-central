@@ -1905,6 +1905,30 @@ router.post("/formitize/webhook", async (req, res) => {
 
   console.log(`[formitize:webhook] Created ${formType} #${agreement.id} — ${product} — ${customerName}`);
 
+  // ── Auto-dismiss pending bookings when a real agreement is signed ──────────
+  // When a loan agreement form arrives (formType='agreement'), the customer has
+  // been converted — any open application or re-application entries for them
+  // should vanish from the Bookings pipeline automatically.
+  if (isAgreement && customerName) {
+    try {
+      const autoDismissRes = await pool.query(
+        `UPDATE agreements
+         SET dismissed = true
+         WHERE LOWER(customer_name) = LOWER($1)
+           AND status IN ('application', 'reapplication')
+           AND (dismissed IS NULL OR dismissed = false)
+           AND id != $2`,
+        [customerName, agreement.id]
+      );
+      if ((autoDismissRes.rowCount ?? 0) > 0) {
+        console.log(`[formitize:webhook] Auto-dismissed ${autoDismissRes.rowCount} pending booking(s) for ${customerName} — converted to agreement #${agreement.id}`);
+      }
+    } catch (dismissErr: any) {
+      // Non-fatal — log and continue
+      console.error(`[formitize:webhook] Auto-dismiss error for ${customerName}:`, dismissErr.message);
+    }
+  }
+
   // ── Auto-raise Xero invoice (HukuPlus agreements only, non-blocking) ──────
   if (isAgreement && loanAmount > 0) {
     // Capture the Marishoma loan number before entering the async closure —

@@ -1188,6 +1188,25 @@ export async function runMigrations() {
         AND (form_type = 'application' OR form_type = 'unknown');
     `);
 
+    // ── 2026-05-01: Auto-dismiss pending bookings converted to live agreements ──
+    // If a customer already has a real loan agreement (form_type='agreement',
+    // status IN pending/active/completed), any leftover application/re-application
+    // rows for the same customer should be dismissed from the Bookings pipeline.
+    // e.g. Justin Paratema submitted two re-apps then was immediately converted.
+    await client.query(`
+      UPDATE agreements a
+      SET dismissed = true
+      WHERE a.status IN ('application', 'reapplication')
+        AND (a.dismissed IS NULL OR a.dismissed = false)
+        AND EXISTS (
+          SELECT 1 FROM agreements newer
+          WHERE LOWER(newer.customer_name) = LOWER(a.customer_name)
+            AND newer.form_type = 'agreement'
+            AND newer.status IN ('pending', 'active', 'completed')
+            AND newer.id != a.id
+        );
+    `);
+
     // ── 2026-05-01: Restore re-application agreements to Bookings pipeline ─────
     // Re-applications that were previously dismissed from the Bookings page via
     // the X button had dismissed=true, but staff later used "Push to Bookings"
@@ -1195,13 +1214,21 @@ export async function runMigrations() {
     // them to remain invisible in the Bookings pipeline despite having a date set.
     // Un-dismiss any re-application with a future (>= today) disbursement_date.
     await client.query(`
-      UPDATE agreements
+      UPDATE agreements a
       SET dismissed = false
-      WHERE form_type = 'reapplication'
-        AND dismissed = true
-        AND disbursement_date IS NOT NULL
-        AND TRIM(disbursement_date) != ''
-        AND disbursement_date::date >= CURRENT_DATE;
+      WHERE a.form_type = 'reapplication'
+        AND a.dismissed = true
+        AND a.disbursement_date IS NOT NULL
+        AND TRIM(a.disbursement_date) != ''
+        AND a.disbursement_date::date >= CURRENT_DATE
+        -- Do NOT restore if the customer has already been converted to a live agreement
+        AND NOT EXISTS (
+          SELECT 1 FROM agreements live
+          WHERE LOWER(live.customer_name) = LOWER(a.customer_name)
+            AND live.form_type = 'agreement'
+            AND live.status IN ('pending', 'active', 'completed')
+            AND live.id != a.id
+        );
     `);
 
     console.log("[migrate] All migrations complete.");
