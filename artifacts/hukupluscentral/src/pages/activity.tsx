@@ -143,6 +143,36 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState("");
 
+  // ── Push to Bookings state ────────────────────────────────────────
+  const [showBookingPicker, setShowBookingPicker] = useState(false);
+  const [bookingDate, setBookingDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [bookingSaving, setBookingSaving] = useState(false);
+  const [bookingMsg, setBookingMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const saveBookingDate = async () => {
+    setBookingSaving(true);
+    setBookingMsg(null);
+    try {
+      const res = await fetch(`${BASE}/api/formitize/notifications/${n.id}/push-to-bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ collectionDate: bookingDate }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setBookingMsg({ ok: true, text: "Added to Bookings pipeline." });
+        setTimeout(() => { setShowBookingPicker(false); setBookingMsg(null); }, 2000);
+      } else {
+        setBookingMsg({ ok: false, text: json.error ?? "Failed to save." });
+      }
+    } catch {
+      setBookingMsg({ ok: false, text: "Request failed." });
+    } finally {
+      setBookingSaving(false);
+    }
+  };
+
   // ── Branch reassign state ─────────────────────────────────────────
   const [showReassign, setShowReassign] = useState(false);
   const [rRetailers, setRRetailers] = useState<Array<{ id: number; name: string }>>([]);
@@ -345,6 +375,21 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
             View Profile
           </button>
         )}
+        {/* ── Push to Bookings button (application / reapplication) ── */}
+        {(n.task_type === "application" || n.task_type === "reapplication") && (
+          <button
+            onClick={() => { setShowBookingPicker(p => !p); setBookingMsg(null); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+              showBookingPicker
+                ? "bg-teal-500/25 border-teal-500/50 text-teal-200"
+                : "bg-teal-500/15 border-teal-500/30 text-teal-300 hover:bg-teal-500/25"
+            }`}
+            title="Set the expected stock collection date and add to Bookings pipeline"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            {showBookingPicker ? "Cancel" : "Push to Bookings"}
+          </button>
+        )}
         {/* ── Raise Xero Invoice button (agreement-type, not yet invoiced) ── */}
         {n.task_type === "agreement" && n.agreement_id && !n.xero_invoice_id && onRaiseInvoice && (
           <button
@@ -450,6 +495,40 @@ function NotificationCard({ n, onAction, loading, onProcessPayment, onProcessDis
             </div>
           </div>
           {rError && <p className="text-xs text-red-400 mt-1.5">{rError}</p>}
+        </div>
+      )}
+
+      {/* Inline Push-to-Bookings date picker */}
+      {showBookingPicker && (
+        <div className="w-full mt-3 pt-3 border-t border-teal-500/20">
+          <p className="text-xs font-semibold text-teal-300/80 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+            <CalendarDays className="w-3.5 h-3.5" />
+            Expected Stock Collection Date
+          </p>
+          {bookingMsg ? (
+            <p className={`text-xs font-medium ${bookingMsg.ok ? "text-teal-300" : "text-red-400"}`}>
+              {bookingMsg.text}
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                type="date"
+                value={bookingDate}
+                onChange={e => setBookingDate(e.target.value)}
+                className="bg-white/5 border border-white/15 rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-teal-500/50"
+                style={{ colorScheme: "dark" }}
+              />
+              <button
+                onClick={saveBookingDate}
+                disabled={bookingSaving || !bookingDate}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-500/20 border border-teal-500/40 text-teal-200 hover:bg-teal-500/30 disabled:opacity-40 transition-all"
+              >
+                {bookingSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                Confirm Date
+              </button>
+              <span className="text-[10px] text-white/30">This sets the collection date on the Bookings pipeline.</span>
+            </div>
+          )}
         </div>
       )}
 

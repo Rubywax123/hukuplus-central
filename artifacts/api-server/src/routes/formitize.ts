@@ -2280,6 +2280,106 @@ router.patch("/formitize/notifications/:id/reassign", requireStaffAuth, requireS
   }
 });
 
+// ─── POST /api/formitize/notifications/:id/push-to-bookings ──────────────────
+// Sets (or creates) an agreement's disbursement_date (collection date) from
+// the Activity page, so staff can manually place any application/re-application
+// into the correct Bookings pipeline bucket without waiting for the form data
+// to be re-parsed automatically.
+router.post("/formitize/notifications/:id/push-to-bookings", requireStaffAuth, requireSuperAdmin, async (req, res): Promise<void> => {
+  const notifId = parseInt(req.params.id, 10);
+  if (isNaN(notifId)) { res.status(400).json({ error: "Invalid notification id" }); return; }
+
+  const { collectionDate } = req.body as { collectionDate?: string };
+  if (!collectionDate || !/^\d{4}-\d{2}-\d{2}$/.test(collectionDate)) {
+    res.status(400).json({ error: "collectionDate must be YYYY-MM-DD" }); return;
+  }
+
+  const client = await pool.connect();
+  try {
+    // Load the notification to get its linked job id and key fields
+    const notifRes = await client.query<{
+      formitize_job_id: string | null;
+      task_type: string;
+      product: string;
+      customer_name: string | null;
+      retailer_name: string | null;
+      branch_name: string | null;
+    }>(`SELECT formitize_job_id, task_type, product, customer_name, retailer_name, branch_name
+        FROM formitize_notifications WHERE id = $1`, [notifId]);
+
+    if (notifRes.rowCount === 0) { res.status(404).json({ error: "Notification not found" }); return; }
+    const notif = notifRes.rows[0];
+
+    if (!["application","reapplication"].includes(notif.task_type)) {
+      res.status(400).json({ error: "Only application/reapplication notifications can be pushed to Bookings" }); return;
+    }
+
+    const jobId = notif.formitize_job_id;
+
+    if (jobId) {
+      // Try to update an existing agreement first
+      const upd = await client.query(
+        `UPDATE agreements SET disbursement_date = $1 WHERE formitize_job_id = $2 AND status IN ('application','reapplication')`,
+        [collectionDate, jobId]
+      );
+
+      if ((upd.rowCount ?? 0) > 0) {
+        console.log(`[push-to-bookings] Updated agreement for jobId=${jobId} → ${collectionDate}`);
+        res.json({ ok: true, action: "updated" });
+        return;
+      }
+    }
+
+    // No agreement yet — create a minimal one so it appears in Bookings
+    const formType = notif.task_type; // 'application' or 'reapplication'
+
+    // Resolve retailer / branch IDs by name (best-effort)
+    let retailerId: number | null = null;
+    let branchId: number | null = null;
+    if (notif.retailer_name) {
+      const rRow = await client.query<{ id: number }>(
+        `SELECT id FROM retailers WHERE LOWER(name) = LOWER($1) LIMIT 1`, [notif.retailer_name]
+      );
+      retailerId = rRow.rows[0]?.id ?? null;
+    }
+    if (retailerId && notif.branch_name) {
+      const bRow = await client.query<{ id: number }>(
+        `SELECT id FROM branches WHERE retailer_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+        [retailerId, notif.branch_name]
+      );
+      branchId = bRow.rows[0]?.id ?? null;
+    }
+
+    await client.query(
+      `INSERT INTO agreements
+         (formitize_job_id, status, form_type, customer_name, retailer_id, branch_id,
+          retailer_name, branch_name, disbursement_date, form_data, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NOW())
+       ON CONFLICT (formitize_job_id) DO UPDATE
+         SET disbursement_date = EXCLUDED.disbursement_date`,
+      [
+        jobId ?? `manual-${notifId}-${Date.now()}`,
+        formType,
+        formType,
+        notif.customer_name,
+        retailerId,
+        branchId,
+        notif.retailer_name,
+        notif.branch_name,
+        collectionDate,
+      ]
+    );
+
+    console.log(`[push-to-bookings] Created agreement for notifId=${notifId} → ${collectionDate}`);
+    res.json({ ok: true, action: "created" });
+  } catch (err: any) {
+    console.error(`[push-to-bookings] Error:`, err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── GET /api/formitize/api-sync/status ──────────────────────────────────────
 // Returns when the last pull-sync ran and its result summary.
 router.get("/formitize/api-sync/status", requireStaffAuth, requireSuperAdmin, async (_req, res): Promise<void> => {
