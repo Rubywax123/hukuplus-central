@@ -11,6 +11,7 @@ export const agreementsTable = pgTable("agreements", {
   retailerId: integer("retailer_id").references(() => retailersTable.id),
   branchId: integer("branch_id").references(() => branchesTable.id),
   formType: text("form_type").default("agreement"),
+  formName: text("form_name"),
   customerName: text("customer_name").notNull(),
   customerPhone: text("customer_phone"),
   loanProduct: text("loan_product").notNull(),

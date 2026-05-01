@@ -437,7 +437,28 @@ function parseFormContext(formName: string, trackingCategory?: string): {
   let formType: "agreement" | "application" | "reapplication" | "drawdown" | "payment" | "upload" | "approval" | "undertaking" | "unknown" = "unknown";
   if (n.includes("agreement")) formType = "agreement";
   else if (n.includes("re-application") || n.includes("reapplication") || n.includes("re application")) formType = "reapplication";
-  else if (n.includes("application")) formType = "application";
+  // Explicitly match known non-loan form names BEFORE the generic "application" catch-all,
+  // so expense claims / HR forms / other misc submissions that contain "application"
+  // in their title are not mistaken for loan applications.
+  else if (
+    n.includes("expense") ||
+    n.includes("leave application") ||
+    n.includes("hr application") ||
+    n.includes("staff application") ||
+    n.includes("claim")
+  ) formType = "unknown";
+  else if (n.includes("application") && (
+    n.includes("new customer") ||
+    n.includes("hukuplus") ||
+    n.includes("novafeed") ||
+    n.includes("novafeeds") ||
+    n.includes("chikweret") ||
+    n.includes("revolver") ||
+    n.includes("salary deduction") ||
+    n.includes("payroll deduction") ||
+    n.includes("loan application")
+  )) formType = "application";
+  else if (n.includes("application") && !n.includes("expense") && !n.includes("claim")) formType = "application";
   else if (n.includes("drawdown")) formType = "drawdown";
   else if (n.includes("payment") || n.includes("receipt") || n.includes("payment notice")) formType = "payment";
   else if (n.includes("upload") || n.includes("document") || n.includes("docs") || n.includes("loan doc")) formType = "upload";
@@ -1816,6 +1837,7 @@ router.post("/formitize/webhook", async (req, res) => {
     customerPhone,
     loanProduct: product,
     formType,
+    formName: rawFormName || null,
     loanAmount: isNaN(loanAmount) ? 0 : loanAmount,
     formitizeJobId: jobId,
     formitizeFormUrl: null,

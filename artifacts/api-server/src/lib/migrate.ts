@@ -1164,6 +1164,30 @@ export async function runMigrations() {
       );
     `);
 
+    // ── Dismissed flag on agreements (bookings pipeline dismiss) ──────────────
+    await client.query(`
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS dismissed BOOLEAN DEFAULT FALSE;
+    `);
+
+    // ── Store raw Formitize form name on agreements (for precise pipeline filtering) ─
+    // Allows the pipeline to filter by exact form name rather than the coarse form_type
+    // classification — prevents expense claim forms from appearing as applications.
+    await client.query(`
+      ALTER TABLE agreements ADD COLUMN IF NOT EXISTS form_name TEXT;
+    `);
+
+    // ── Dismiss known expense-claim records that were mis-classified as applications ─
+    // Kudakwashe Muchuchu submitted an expense claim form whose name contained
+    // "application", causing it to be stored as status='application'. These are not
+    // loan applications and must not appear in the bookings pipeline.
+    await client.query(`
+      UPDATE agreements
+      SET dismissed = true
+      WHERE LOWER(customer_name) LIKE '%muchuchu%'
+        AND status = 'application'
+        AND (form_type = 'application' OR form_type = 'unknown');
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();
