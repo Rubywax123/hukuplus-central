@@ -1,7 +1,7 @@
-import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2, Zap } from "lucide-react";
+import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2, Zap, X, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -80,47 +80,59 @@ function groupByDay(items: PipelineItem[]): Map<string, PipelineItem[]> {
 
 // ─── Item Row ─────────────────────────────────────────────────────────────────
 
-function ItemRow({ item }: { item: PipelineItem }) {
+function ItemRow({ item, onDismiss }: { item: PipelineItem; onDismiss: (id: number) => void }) {
   const isReApp = item.status === "reapplication";
+  const [dismissing, setDismissing] = useState(false);
+
+  function handleDismiss(e: React.MouseEvent) {
+    e.stopPropagation();
+    setDismissing(true);
+    onDismiss(item.id);
+  }
+
   return (
-    <div className="flex items-center gap-3 py-2.5 last:pb-0">
+    <div className="group flex items-center gap-3 py-2.5 last:pb-0">
       {/* Customer Name */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-white truncate leading-tight">{item.customerName || "—"}</p>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-          {/* Retailer */}
           {item.retailerName && (
-            <span className="text-[10px] text-sky-400/80 font-medium truncate">
-              {item.retailerName}
-            </span>
+            <span className="text-[10px] text-sky-400/80 font-medium truncate">{item.retailerName}</span>
           )}
-          {/* Branch */}
           {item.branchName && (
             <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60">
-              <Store className="w-2.5 h-2.5 flex-shrink-0" />
-              {item.branchName}
+              <Store className="w-2.5 h-2.5 flex-shrink-0" />{item.branchName}
             </span>
           )}
         </div>
       </div>
       {/* Type badge */}
-      <div className="flex-shrink-0">
-        <span className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
-          isReApp
-            ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-            : "bg-sky-500/10 border-sky-500/20 text-sky-400"
-        }`}>
-          {isReApp ? <RefreshCw className="inline w-2.5 h-2.5 mr-0.5" /> : <UserPlus className="inline w-2.5 h-2.5 mr-0.5" />}
-          {isReApp ? "Re-App" : "New"}
-        </span>
-      </div>
+      <span className={`flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
+        isReApp
+          ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+          : "bg-sky-500/10 border-sky-500/20 text-sky-400"
+      }`}>
+        {isReApp ? <RefreshCw className="inline w-2.5 h-2.5 mr-0.5" /> : <UserPlus className="inline w-2.5 h-2.5 mr-0.5" />}
+        {isReApp ? "Re-App" : "New"}
+      </span>
+      {/* Dismiss × */}
+      <button
+        onClick={handleDismiss}
+        disabled={dismissing}
+        title="Dismiss booking"
+        className="flex-shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-500/20 text-muted-foreground/40 hover:text-red-400 disabled:opacity-30"
+      >
+        {dismissing
+          ? <Loader2 className="w-3 h-3 animate-spin" />
+          : <X className="w-3 h-3" />}
+      </button>
     </div>
   );
 }
 
 // ─── Day Group within a month ─────────────────────────────────────────────────
 
-function DayGroup({ dateIso, items }: { dateIso: string; items: PipelineItem[] }) {
+function DayGroup({ dateIso, items, onDismiss }: { dateIso: string; items: PipelineItem[]; onDismiss: (id: number) => void }) {
   const parts = parseDateParts(dateIso);
   const today = new Date().toISOString().slice(0, 10);
   const isToday = dateIso === today;
@@ -147,7 +159,7 @@ function DayGroup({ dateIso, items }: { dateIso: string; items: PipelineItem[] }
 
       {/* Items */}
       <div className="flex-1 min-w-0 divide-y divide-white/5">
-        {items.map(item => <ItemRow key={item.id} item={item} />)}
+        {items.map(item => <ItemRow key={item.id} item={item} onDismiss={onDismiss} />)}
       </div>
     </div>
   );
@@ -156,13 +168,14 @@ function DayGroup({ dateIso, items }: { dateIso: string; items: PipelineItem[] }
 // ─── Month accordion ──────────────────────────────────────────────────────────
 
 function MonthSection({
-  monthKey, label, items, defaultOpen, accent,
+  monthKey, label, items, defaultOpen, accent, onDismiss,
 }: {
   monthKey: string;
   label: string;
   items: PipelineItem[];
   defaultOpen: boolean;
   accent: string;
+  onDismiss: (id: number) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const dayGroups = groupByDay(items);
@@ -216,7 +229,7 @@ function MonthSection({
           >
             <div className="px-5 pb-4 divide-y divide-white/5">
               {sortedDays.map(day => (
-                <DayGroup key={day} dateIso={day} items={dayGroups.get(day)!} />
+                <DayGroup key={day} dateIso={day} items={dayGroups.get(day)!} onDismiss={onDismiss} />
               ))}
             </div>
           </motion.div>
@@ -228,7 +241,7 @@ function MonthSection({
 
 // ─── Walk-ins section ─────────────────────────────────────────────────────────
 
-function WalkInsSection({ items }: { items: PipelineItem[] }) {
+function WalkInsSection({ items, onDismiss }: { items: PipelineItem[]; onDismiss: (id: number) => void }) {
   const [open, setOpen] = useState(true);
   if (items.length === 0) return null;
 
@@ -278,37 +291,7 @@ function WalkInsSection({ items }: { items: PipelineItem[] }) {
           >
             <div className="px-5 pb-4 divide-y divide-white/5">
               {items.map(item => (
-                <div key={item.id} className="py-2.5 last:pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate leading-tight">{item.customerName || "—"}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        {item.retailerName && (
-                          <span className="text-[10px] text-orange-400/80 font-medium truncate">{item.retailerName}</span>
-                        )}
-                        {item.branchName && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60">
-                            <Store className="w-2.5 h-2.5 flex-shrink-0" />{item.branchName}
-                          </span>
-                        )}
-                        {item.disbursementDate && (
-                          <span className="text-[10px] text-orange-300/60 tabular-nums">
-                            {new Date(item.disbursementDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <span className={`flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
-                      item.status === "reapplication"
-                        ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                        : "bg-sky-500/10 border-sky-500/20 text-sky-400"
-                    }`}>
-                      {item.status === "reapplication"
-                        ? <><RefreshCw className="inline w-2.5 h-2.5 mr-0.5" />Re-App</>
-                        : <><UserPlus className="inline w-2.5 h-2.5 mr-0.5" />New</>}
-                    </span>
-                  </div>
-                </div>
+                <ItemRow key={item.id} item={item} onDismiss={onDismiss} />
               ))}
             </div>
           </motion.div>
@@ -320,9 +303,20 @@ function WalkInsSection({ items }: { items: PipelineItem[] }) {
 
 // ─── No-date section ──────────────────────────────────────────────────────────
 
-function NoDatSection({ items }: { items: PipelineItem[] }) {
+function NoDatSection({ items, onDismiss, onDismissAll }: {
+  items: PipelineItem[];
+  onDismiss: (id: number) => void;
+  onDismissAll: (ids: number[]) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
   if (items.length === 0) return null;
+
+  function handleClearAll(e: React.MouseEvent) {
+    e.stopPropagation();
+    setClearingAll(true);
+    onDismissAll(items.map(i => i.id));
+  }
 
   return (
     <GlassCard className="p-0 overflow-hidden border-white/5">
@@ -337,8 +331,21 @@ function NoDatSection({ items }: { items: PipelineItem[] }) {
             {items.length}
           </span>
         </div>
-        <span className="text-[10px] text-muted-foreground/40 mr-2">Applications from last 30 days with no disbursement date</span>
-        {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/30" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/30" />}
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-muted-foreground/40 hidden sm:block">Last 30 days, no date</span>
+          <button
+            onClick={handleClearAll}
+            disabled={clearingAll}
+            title="Dismiss all no-date entries"
+            className="flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
+          >
+            {clearingAll
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <Trash2 className="w-3 h-3" />}
+            Clear all
+          </button>
+          {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/30" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/30" />}
+        </div>
       </button>
       <AnimatePresence>
         {open && (
@@ -349,8 +356,8 @@ function NoDatSection({ items }: { items: PipelineItem[] }) {
             <div className="px-5 pb-4 divide-y divide-white/5">
               {items.map(item => (
                 <div key={item.id} className="py-2.5 last:pb-0">
-                  <ItemRow item={item} />
-                  <p className="text-[10px] text-muted-foreground/40 mt-0.5 ml-0">
+                  <ItemRow item={item} onDismiss={onDismiss} />
+                  <p className="text-[10px] text-muted-foreground/40 -mt-1 pl-0">
                     Submitted {new Date(item.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                   </p>
                 </div>
@@ -366,10 +373,55 @@ function NoDatSection({ items }: { items: PipelineItem[] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function BookingsPage() {
+  const queryClient = useQueryClient();
   const { data, isLoading, refetch, isFetching } = usePipeline();
 
   const now = new Date();
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  // Optimistically remove an item from the cache, then call the API
+  const handleDismiss = useCallback((id: number) => {
+    queryClient.setQueryData<PipelineData>(["disbursement-pipeline"], old => {
+      if (!old) return old;
+      const removeId = (items: PipelineItem[]) => items.filter(i => i.id !== id);
+      return {
+        ...old,
+        totalOpen: old.totalOpen - 1,
+        months: old.months.map(m => ({ ...m, items: removeId(m.items) })),
+        noDate:  { ...old.noDate,  items: removeId(old.noDate.items)  },
+        walkIns: { ...old.walkIns, items: removeId(old.walkIns.items) },
+      };
+    });
+    fetch(`${BASE}/api/agreements/${id}/dismiss`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dismissed: true }),
+    }).catch(() => refetch()); // rollback on error
+  }, [queryClient, refetch]);
+
+  const handleDismissAll = useCallback((ids: number[]) => {
+    queryClient.setQueryData<PipelineData>(["disbursement-pipeline"], old => {
+      if (!old) return old;
+      const idSet = new Set(ids);
+      const removeIds = (items: PipelineItem[]) => items.filter(i => !idSet.has(i.id));
+      return {
+        ...old,
+        totalOpen: old.totalOpen - ids.length,
+        months: old.months.map(m => ({ ...m, items: removeIds(m.items) })),
+        noDate:  { ...old.noDate,  items: removeIds(old.noDate.items)  },
+        walkIns: { ...old.walkIns, items: removeIds(old.walkIns.items) },
+      };
+    });
+    Promise.all(ids.map(id =>
+      fetch(`${BASE}/api/agreements/${id}/dismiss`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dismissed: true }),
+      })
+    )).catch(() => refetch());
+  }, [queryClient, refetch]);
 
   return (
     <div className="pb-10">
@@ -502,7 +554,7 @@ export default function BookingsPage() {
       )}
 
       {/* Walk-ins — shown first, always expanded */}
-      {!isLoading && data && <WalkInsSection items={data.walkIns.items} />}
+      {!isLoading && data && <WalkInsSection items={data.walkIns.items} onDismiss={handleDismiss} />}
 
       {/* Month sections */}
       {!isLoading && data && (
@@ -515,9 +567,10 @@ export default function BookingsPage() {
               items={month.items}
               defaultOpen={idx === 0}
               accent={month.key === thisMonthKey ? "text-teal-400" : "text-sky-400"}
+              onDismiss={handleDismiss}
             />
           ))}
-          <NoDatSection items={data.noDate.items} />
+          <NoDatSection items={data.noDate.items} onDismiss={handleDismiss} onDismissAll={handleDismissAll} />
         </div>
       )}
     </div>
