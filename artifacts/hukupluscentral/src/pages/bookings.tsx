@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
 import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2, Zap, X, Trash2, CalendarClock } from "lucide-react";
@@ -546,6 +546,11 @@ export default function BookingsPage() {
   const queryClient = useQueryClient();
   const { data, isLoading, refetch, isFetching } = usePipeline();
   const [setDateTarget, setSetDateTarget] = useState<PipelineItem | null>(null);
+  const pipelineListRef = useRef<HTMLDivElement>(null);
+
+  const scrollToPipeline = () => {
+    pipelineListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const now = new Date();
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -629,15 +634,20 @@ export default function BookingsPage() {
       {/* ── Stat boxes ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">
 
-        {/* Total open */}
-        <div className="relative overflow-hidden rounded-xl border border-white/8 bg-white/[0.04] px-4 py-3.5 flex flex-col gap-1">
+        {/* Total open — click to scroll to the pipeline list */}
+        <button
+          onClick={scrollToPipeline}
+          className="relative overflow-hidden rounded-xl border border-white/8 bg-white/[0.04] px-4 py-3.5 flex flex-col gap-1 text-left hover:bg-white/[0.07] hover:border-white/15 transition-colors group"
+        >
           <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">Open</span>
           <span className="text-3xl font-black tabular-nums text-white leading-none">
             {data ? data.totalOpen : <span className="inline-block w-10 h-7 rounded bg-white/5 animate-pulse" />}
           </span>
-          <span className="text-[11px] text-muted-foreground/40 mt-0.5">dated, not yet converted</span>
+          <span className="text-[11px] text-muted-foreground/40 mt-0.5 group-hover:text-muted-foreground/60 transition-colors">
+            dated, not yet converted ↓
+          </span>
           <div className="absolute right-3 top-3 w-1.5 h-1.5 rounded-full bg-emerald-400" />
-        </div>
+        </button>
 
         {/* Walk-ins with monthly comparison */}
         <div className="relative overflow-hidden rounded-xl border border-orange-500/25 bg-orange-500/[0.06] px-4 py-3.5 flex flex-col gap-1 col-span-1">
@@ -757,7 +767,7 @@ export default function BookingsPage() {
         const futureMonths = data.months.filter(m => m.key >= thisMonthKey);
         const pastMonths   = data.months.filter(m => m.key <  thisMonthKey).slice().reverse();
         return (
-          <div className="space-y-4 mt-4">
+          <div ref={pipelineListRef} className="space-y-4 mt-4">
             {futureMonths.map((month, idx) => (
               <MonthSection
                 key={month.key}
