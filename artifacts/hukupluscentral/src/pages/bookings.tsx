@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, GlassCard } from "@/components/ui-extras";
-import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { CalendarDays, Store, RefreshCw, UserPlus, ChevronDown, ChevronUp, Loader2, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -19,6 +19,7 @@ interface PipelineItem {
   branchName: string | null;
   disbursementDate: string | null;
   createdAt: string;
+  walkIn: boolean;
 }
 
 interface PipelineMonth {
@@ -30,6 +31,7 @@ interface PipelineMonth {
 interface PipelineData {
   months: PipelineMonth[];
   noDate: { label: string; items: PipelineItem[] };
+  walkIns: { label: string; items: PipelineItem[] };
   totalOpen: number;
 }
 
@@ -215,6 +217,98 @@ function MonthSection({
   );
 }
 
+// ─── Walk-ins section ─────────────────────────────────────────────────────────
+
+function WalkInsSection({ items }: { items: PipelineItem[] }) {
+  const [open, setOpen] = useState(true);
+  if (items.length === 0) return null;
+
+  const newCount = items.filter(i => i.status === "application").length;
+  const reCount  = items.filter(i => i.status === "reapplication").length;
+
+  return (
+    <GlassCard className="p-0 overflow-hidden border-orange-500/20">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/5 transition-colors text-left"
+      >
+        <div className="flex items-center gap-3">
+          <Zap className="w-4 h-4 text-orange-400" />
+          <span className="text-base font-bold text-white">Walk-ins</span>
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400">
+            {items.length} immediate
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-3">
+            {newCount > 0 && (
+              <span className="text-xs text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">
+                {newCount} new
+              </span>
+            )}
+            {reCount > 0 && (
+              <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                {reCount} re-app
+              </span>
+            )}
+          </div>
+          {open
+            ? <ChevronUp className="w-4 h-4 text-orange-400" />
+            : <ChevronDown className="w-4 h-4 text-muted-foreground/40" />
+          }
+        </div>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-5 pb-4 divide-y divide-white/5">
+              {items.map(item => (
+                <div key={item.id} className="py-2.5 last:pb-0">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate leading-tight">{item.customerName || "—"}</p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        {item.retailerName && (
+                          <span className="text-[10px] text-orange-400/80 font-medium truncate">{item.retailerName}</span>
+                        )}
+                        {item.branchName && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60">
+                            <Store className="w-2.5 h-2.5 flex-shrink-0" />{item.branchName}
+                          </span>
+                        )}
+                        {item.disbursementDate && (
+                          <span className="text-[10px] text-orange-300/60 tabular-nums">
+                            {new Date(item.disbursementDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${
+                      item.status === "reapplication"
+                        ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                        : "bg-sky-500/10 border-sky-500/20 text-sky-400"
+                    }`}>
+                      {item.status === "reapplication"
+                        ? <><RefreshCw className="inline w-2.5 h-2.5 mr-0.5" />Re-App</>
+                        : <><UserPlus className="inline w-2.5 h-2.5 mr-0.5" />New</>}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </GlassCard>
+  );
+}
+
 // ─── No-date section ──────────────────────────────────────────────────────────
 
 function NoDatSection({ items }: { items: PipelineItem[] }) {
@@ -281,8 +375,18 @@ export default function BookingsPage() {
           <>
             <div className="flex items-center gap-2">
               <span className="text-2xl font-bold text-white tabular-nums">{data.totalOpen}</span>
-              <span className="text-sm text-muted-foreground/60">open bookings</span>
+              <span className="text-sm text-muted-foreground/60">open</span>
             </div>
+            {data.walkIns.items.length > 0 && (
+              <>
+                <div className="h-4 w-px bg-white/10" />
+                <div className="flex items-center gap-1.5">
+                  <Zap className="w-3 h-3 text-orange-400" />
+                  <span className="text-sm font-bold tabular-nums text-orange-300">{data.walkIns.items.length}</span>
+                  <span className="text-xs text-muted-foreground/50">walk-in{data.walkIns.items.length !== 1 ? "s" : ""}</span>
+                </div>
+              </>
+            )}
             <div className="h-4 w-px bg-white/10" />
             {data.months.map(m => (
               <div key={m.key} className="flex items-center gap-1.5">
@@ -325,9 +429,12 @@ export default function BookingsPage() {
         </GlassCard>
       )}
 
+      {/* Walk-ins — shown first, always expanded */}
+      {!isLoading && data && <WalkInsSection items={data.walkIns.items} />}
+
       {/* Month sections */}
       {!isLoading && data && (
-        <div className="space-y-4">
+        <div className="space-y-4 mt-4">
           {data.months.map((month, idx) => (
             <MonthSection
               key={month.key}

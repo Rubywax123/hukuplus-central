@@ -707,6 +707,16 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     branchName: string | null;
     disbursementDate: string | null;
     createdAt: string;
+    walkIn: boolean;
+  }
+
+  // Walk-in: collection date is same day or next day as form submission
+  function isWalkIn(disbDate: Date, createdAt: Date): boolean {
+    const submittedDay = new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate());
+    const collDay     = new Date(disbDate.getFullYear(), disbDate.getMonth(), disbDate.getDate());
+    const diffMs = collDay.getTime() - submittedDay.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 1;
   }
 
   const now = new Date();
@@ -715,12 +725,16 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   // "No date" cutoff: only show applications created in the last 30 days
   const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
 
-  // Buckets: map of "YYYY-MM" → items[], plus a noDate bucket
+  // Buckets: map of "YYYY-MM" → items[], plus noDate and walkIns
   const monthBuckets = new Map<string, PipelineItem[]>();
   const noDateItems: PipelineItem[] = [];
+  const walkInItems: PipelineItem[] = [];
 
   for (const row of rows.rows) {
-    const disbDate = getDisbDate(row);
+    const disbDate  = getDisbDate(row);
+    const createdAt = new Date(row.created_at);
+    const walkIn    = disbDate ? isWalkIn(disbDate, createdAt) : false;
+
     const item: PipelineItem = {
       id: row.id,
       customerName: row.customer_name,
@@ -732,11 +746,17 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       branchName: row.branch_name,
       disbursementDate: disbDate ? disbDate.toISOString().slice(0, 10) : null,
       createdAt: row.created_at,
+      walkIn,
     };
+
+    // Walk-ins get their own section regardless of date
+    if (walkIn) {
+      walkInItems.push(item);
+      continue;
+    }
 
     if (!disbDate) {
       // Only include recent no-date applications
-      const createdAt = new Date(row.created_at);
       if (createdAt >= thirtyDaysAgo) noDateItems.push(item);
     } else if (disbDate >= todayStart) {
       // Forward-only: exclude past dates
@@ -763,9 +783,17 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     items: (monthBuckets.get(key) ?? []).sort(byDate),
   }));
 
-  const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + noDateItems.length;
+  // Walk-ins sorted most-recent first (newest submission at top)
+  walkInItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  res.json({ months, noDate: { label: "Date Not Yet Set", items: noDateItems }, totalOpen });
+  const totalOpen = months.reduce((s, m) => s + m.items.length, 0) + noDateItems.length + walkInItems.length;
+
+  res.json({
+    months,
+    noDate:  { label: "Date Not Yet Set", items: noDateItems },
+    walkIns: { label: "Walk-ins", items: walkInItems },
+    totalOpen,
+  });
 });
 
 export default router;
