@@ -854,6 +854,31 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     // Past-dated non-walk-in (missed appointment, no walk-in) → silently excluded
   }
 
+  // ── Deduplicate walk-ins by customer name (case-insensitive) ─────────────
+  // A customer can submit duplicate re-applications within minutes; both get
+  // dismissed when the agreement arrives and both pass the converted_quickly
+  // check. Keep only the most recent submission per customer per list.
+  const dedupeByCustomer = (items: PipelineItem[]): PipelineItem[] => {
+    const seen = new Set<string>();
+    return items.filter(i => {
+      const key = i.customerName.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  // walkInItems is ordered DESC by createdAt from the SQL query, so the first
+  // occurrence per customer is always the most recent submission.
+  const deduplicatedWalkIns = dedupeByCustomer(walkInItems);
+
+  // Also deduplicate within historical month buckets (walk-ins only).
+  for (const [key, items] of monthBuckets) {
+    const walkIns    = dedupeByCustomer(items.filter(i => i.walkIn));
+    const nonWalkIns = items.filter(i => !i.walkIn);
+    monthBuckets.set(key, [...nonWalkIns, ...walkIns]);
+  }
+
   // Sort buckets chronologically and sort items within each bucket by date
   const sortedKeys = [...monthBuckets.keys()].sort();
   const byDate = (a: PipelineItem, b: PipelineItem) =>
@@ -870,15 +895,15 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     items: (monthBuckets.get(key) ?? []).sort(byDate),
   }));
 
-  // Walk-ins sorted most-recent first (newest submission at top)
-  walkInItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // deduplicatedWalkIns already ordered DESC by createdAt (SQL ORDER BY created_at DESC)
+  // — no additional sort needed.
 
   // totalOpen = future-dated month buckets (>= current month) + current-month walk-ins.
   // Past-month walk-ins appear in the UI for analysis but are not counted in OPEN.
   // "No date" entries are unscheduled and tracked separately, not in this count.
   const totalOpen =
     months.filter(m => m.key >= thisMonthKey).reduce((s, m) => s + m.items.length, 0) +
-    walkInItems.length;
+    deduplicatedWalkIns.length;
 
   // ── Historical walk-in monthly counts (last 3 calendar months + current) ────
   // Pull all application/re-application forms from the last 4 months and
@@ -966,7 +991,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
   res.json({
     months,
     noDate:  { label: "No Collection Date", items: noDateItems },
-    walkIns: { label: "Walk-ins", items: walkInItems },
+    walkIns: { label: "Walk-ins", items: deduplicatedWalkIns },
     walkInMonthly,
     totalOpen,
   });
