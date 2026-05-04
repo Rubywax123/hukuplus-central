@@ -670,10 +670,11 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
       )                                                                            AS collection_date,
       a.created_at,
       -- Walk-in signal: a real loan agreement was created within 24 hours of this
-      -- application/re-application. This is the authoritative walk-in definition.
+      -- application/re-application. Uses trigram similarity (threshold 0.6) so that
+      -- minor name variants (reversed words, added middle name) still match.
       EXISTS (
         SELECT 1 FROM agreements conv
-        WHERE LOWER(TRIM(conv.customer_name)) = LOWER(TRIM(a.customer_name))
+        WHERE similarity(LOWER(TRIM(conv.customer_name)), LOWER(TRIM(a.customer_name))) > 0.6
           AND conv.form_type = 'agreement'
           AND conv.created_at > a.created_at
           AND conv.created_at <= a.created_at + INTERVAL '24 hours'
@@ -696,7 +697,7 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
          AND a.created_at >= NOW() - INTERVAL '3 months'
          AND EXISTS (
            SELECT 1 FROM agreements conv
-           WHERE LOWER(TRIM(conv.customer_name)) = LOWER(TRIM(a.customer_name))
+           WHERE similarity(LOWER(TRIM(conv.customer_name)), LOWER(TRIM(a.customer_name))) > 0.6
              AND conv.form_type = 'agreement'
              AND conv.created_at > a.created_at
              AND conv.created_at <= a.created_at + INTERVAL '24 hours'
@@ -906,50 +907,11 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
     deduplicatedWalkIns.length;
 
   // ── Historical walk-in monthly counts (last 3 calendar months + current) ────
-  // Pull all application/re-application forms from the last 4 months and
-  // classify walk-ins in JS (same 0-1 day window as the live list above).
-  const historicalRows = await pool.query<{
-    id: number;
-    created_at: string;
-    collection_date: string | null;
-    status: string;
-    form_type: string | null;
-  }>(`
-    SELECT id, created_at,
-           -- Type-specific COALESCE (mirrors the main pipeline query exactly).
-           COALESCE(
-             NULLIF(TRIM(disbursement_date), ''),
-             CASE COALESCE(NULLIF(form_type, 'unknown'), status)
-               WHEN 'application' THEN COALESCE(
-                 form_data->>'formdate_2',
-                 form_data->>'collection date',
-                 form_data->>'collectiondate',
-                 form_data->>'expected date of stock collection',
-                 form_data->>'stockcollectiondate',
-                 form_data->>'expectedcollectiondate'
-               )
-               WHEN 'reapplication' THEN COALESCE(
-                 form_data->>'formdate_3',
-                 form_data->>'collection date',
-                 form_data->>'collectiondate',
-                 form_data->>'expected date of stock collection',
-                 form_data->>'stockcollectiondate',
-                 form_data->>'expectedcollectiondate'
-               )
-             END
-           ) AS collection_date,
-           status, form_type
-    FROM agreements
-    WHERE status IN ('application','reapplication')
-      AND (
-        status = 'reapplication'
-        OR form_type IN ('application', 'reapplication')
-      )
-      AND (dismissed IS NULL OR dismissed = false)
-      AND created_at >= NOW() - INTERVAL '4 months'
-  `);
+  // Derived directly from data already computed in the main pipeline loop above —
+  // no second DB query needed.  Walk-ins are items with walkIn=true; they are
+  // grouped by the month of the application (= month of conversion since the
+  // agreement arrives within 24 h).
 
-  // Month key helper
   function toMonthKey(d: Date) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
@@ -967,18 +929,16 @@ router.get("/dashboard/disbursement-pipeline", async (req, res): Promise<void> =
 
   const wiByMonth = new Map<string, number>(windowKeys.map(k => [k, 0]));
 
-  for (const r of historicalRows.rows) {
-    const ca = new Date(r.created_at);
-    const mk = toMonthKey(ca);
-    if (!wiByMonth.has(mk)) continue; // outside window
-
-    // collection_date already resolved by the SQL COALESCE above
-    const dd = parseAnyDate(r.collection_date);
-    if (!dd) continue;
-
-    if (isWalkIn(dd, ca)) {
-      wiByMonth.set(mk, (wiByMonth.get(mk) ?? 0) + 1);
-    }
+  // Current-month walk-ins (already deduplicated)
+  for (const item of deduplicatedWalkIns) {
+    const key = toMonthKey(new Date(item.createdAt));
+    if (wiByMonth.has(key)) wiByMonth.set(key, (wiByMonth.get(key) ?? 0) + 1);
+  }
+  // Past-month walk-ins from historical month buckets (already deduplicated per bucket)
+  for (const [key, items] of monthBuckets) {
+    if (!wiByMonth.has(key)) continue;
+    const wCount = items.filter(i => i.walkIn).length;
+    if (wCount > 0) wiByMonth.set(key, (wiByMonth.get(key) ?? 0) + wCount);
   }
 
   const walkInMonthly = windowKeys.map(key => ({

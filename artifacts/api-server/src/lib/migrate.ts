@@ -1297,6 +1297,30 @@ export async function runMigrations() {
         );
     `);
 
+    // ── 2026-05-04: Dismiss applications where a fuzzy-matched agreement exists ───
+    // The old auto-dismiss used exact name matching, so name variants (reversed
+    // word order like "Memory Tapera" vs "Tapera Memory", or added middle names
+    // like "Mackenzie Mugove Chipangura" vs "Mackenzie Chipangura") caused
+    // applications to remain open even after the loan was created. Dismiss any
+    // open application/re-application where a pending/active/completed agreement
+    // with a trigram similarity > 0.6 was created within 30 days after it.
+    await client.query(`
+      UPDATE agreements a
+      SET dismissed = true
+      WHERE a.status IN ('application', 'reapplication')
+        AND (a.dismissed IS NULL OR a.dismissed = false)
+        AND a.created_at > NOW() - INTERVAL '60 days'
+        AND EXISTS (
+          SELECT 1 FROM agreements live
+          WHERE similarity(LOWER(TRIM(live.customer_name)), LOWER(TRIM(a.customer_name))) > 0.6
+            AND live.form_type = 'agreement'
+            AND live.status IN ('pending', 'active', 'completed')
+            AND live.id != a.id
+            AND live.created_at > a.created_at
+            AND live.created_at < a.created_at + INTERVAL '30 days'
+        );
+    `);
+
     console.log("[migrate] All migrations complete.");
   } finally {
     client.release();

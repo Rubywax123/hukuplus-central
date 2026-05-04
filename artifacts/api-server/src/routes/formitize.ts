@@ -1976,7 +1976,7 @@ router.post("/formitize/webhook", async (req, res) => {
       const autoDismissRes = await pool.query(
         `UPDATE agreements
          SET dismissed = true
-         WHERE LOWER(customer_name) = LOWER($1)
+         WHERE similarity(LOWER(customer_name), LOWER($1)) > 0.6
            AND status IN ('application', 'reapplication')
            AND (dismissed IS NULL OR dismissed = false)
            AND id != $2
