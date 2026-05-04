@@ -43,7 +43,8 @@ overrides:
   brace-expansion: 2.0.3
   lodash: 4.18.1
   micromatch>picomatch: 2.3.2
-  fdir>picomatch: 4.0.4
+  # fdir/tinyglobby peer wants 4.0.4+; vite 7.3.x was still pinning 4.0.3
+  "picomatch@4.0.3": 4.0.4
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
