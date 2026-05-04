@@ -59,9 +59,11 @@ After that, `pnpm --filter @workspace/api-server dev` will run all remaining mig
 
 `pnpm --filter db push` runs `drizzle-kit push` to sync the Drizzle-managed tables. Note: not all tables are in the Drizzle schema — many are created by raw SQL in the migration file above.
 
-### Seeded admin account
+### Seeded staff account (bootstrap)
 
-The migration seeds a super_admin staff user: `simon.reid@marishoma.com` / `206362`. Login via `POST /api/staff/login`.
+On a **fresh** database, `artifacts/api-server/src/lib/migrate.ts` may insert one **`super_admin`** row into `staff_users` if absent. Credential values live **only** in that migration script for local bootstrap—**do not copy them into documentation, tickets, or chat.** Prefer changing the password after first login (`POST /api/staff/login` + staff change-password flow) or provisioning users through your controlled process.
+
+For production deployments, assume repository readers exist: **rotate seeded credentials immediately** rather than relying on defaults.
 
 ### Typecheck
 

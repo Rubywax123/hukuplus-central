@@ -478,9 +478,10 @@ router.post("/customers/backfill-from-form-data", async (req, res): Promise<void
 
     const entries = Object.entries(updates);
     const setClauses = entries.map(([k], i) => `${k} = COALESCE(${k}, $${i + 2})`).join(", ");
+    const rawParamIdx = entries.length + 2;
     const values = [customerId, ...entries.map(([, v]) => v), JSON.stringify(fm)];
     await pool.query(
-      `UPDATE customers SET ${setClauses}, raw_application_data = COALESCE(raw_application_data, $${entries.length + 2}::jsonb), updated_at = NOW() WHERE id = $1`,
+      `UPDATE customers SET ${setClauses}, raw_application_data = COALESCE(raw_application_data, '{}'::jsonb) || $${rawParamIdx}::jsonb, updated_at = NOW() WHERE id = $1`,
       values
     );
 
