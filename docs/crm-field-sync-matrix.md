@@ -2,6 +2,8 @@
 
 Central + Loan Register + Revolver. **PayrollDeduction / ChikweretiOne excluded.**
 
+For **customer** profile enrichment (Formitize → `customers` / `raw_application_data`), see **`crm-enhancement-plan.md`**.
+
 Use this when implementing Hub CRM: **mapping keys**, **truth sources**, and **what code paths touch today**.
 
 ## Legend

@@ -1684,11 +1684,19 @@ router.post("/formitize/webhook", async (req, res) => {
       nok_address: nokAddress || "", loan_product: product || "",
     };
     const entries = Object.entries(colMap).filter(([, v]) => v !== "");
+    const rawJsonPayload = JSON.stringify(fieldMap);
     if (entries.length > 0) {
       const setClauses = entries.map(([k], i) => `${k} = COALESCE(${k}, $${i + 2})`).join(", ");
+      const rawParamIdx = entries.length + 2;
       await pool.query(
-        `UPDATE customers SET ${setClauses}, raw_application_data = COALESCE(raw_application_data, $${entries.length + 2}::jsonb), updated_at = NOW() WHERE id = $1`,
-        [customerId, ...entries.map(([, v]) => v), JSON.stringify(fieldMap)]
+        `UPDATE customers SET ${setClauses}, raw_application_data = COALESCE(raw_application_data, '{}'::jsonb) || $${rawParamIdx}::jsonb, updated_at = NOW() WHERE id = $1`,
+        [customerId, ...entries.map(([, v]) => v), rawJsonPayload]
+      );
+    } else if (Object.keys(fieldMap).length > 0) {
+      // Typed columns unchanged but still deepen raw_application_data for CRM / PDF parity
+      await pool.query(
+        `UPDATE customers SET raw_application_data = COALESCE(raw_application_data, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $1`,
+        [customerId, rawJsonPayload]
       );
     }
     // Backfill home store (retailer_id / branch_id) onto the customer record using COALESCE
